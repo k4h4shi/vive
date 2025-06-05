@@ -172,17 +172,17 @@ proc send_notification {type session_name {extra_info ""}} {
         "error" {
             # エラー通知
             catch {exec afplay /System/Library/Sounds/Basso.aiff &}
-            catch {exec say "$agent_name で未知の枠パターンを検出しました。確認が必要です。" &}
+            catch {exec say "$agent_name detected unknown box pattern. Check required." &}
         }
         "completion" {
             # 完了通知
             catch {exec afplay /System/Library/Sounds/Glass.aiff &}
-            catch {exec say "$agent_name が作業を完了しました" &}
+            catch {exec say "$agent_name has completed work" &}
         }
         "resume" {
             # 再開通知
             catch {exec afplay /System/Library/Sounds/Ping.aiff &}
-            catch {exec say "$agent_name が作業を再開しました" &}
+            catch {exec say "$agent_name has resumed work" &}
         }
     }
 }

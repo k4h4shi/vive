@@ -1,100 +1,107 @@
 #!/usr/bin/env bash
-# vive共通ユーティリティ
+# vive common utilities
 
-# カラー出力
+# Color output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# REPO_ROOT計算：現在のディレクトリからGitリポジトリルートを検出
+# Get repository root directory
 get_repo_root() {
     if ! command -v git &> /dev/null; then
-        echo -e "${RED}エラー: gitがインストールされていません${NC}"
+        echo -e "${RED}Error: git is not installed${NC}"
         exit 1
     fi
     
-    if ! git rev-parse --is-inside-work-tree &> /dev/null; then
-        echo -e "${RED}エラー: 現在のディレクトリはGitリポジトリではありません${NC}"
-        echo "Gitリポジトリ内で vive を実行してください"
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo -e "${RED}Error: Current directory is not a Git repository${NC}"
         exit 1
     fi
     
-    REPO_ROOT=$(git rev-parse --show-toplevel)
-    if [ -z "$REPO_ROOT" ]; then
-        echo -e "${RED}エラー: Gitリポジトリルートが特定できません${NC}"
+    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [ -z "$repo_root" ]; then
+        echo -e "${RED}Error: Could not determine Git repository root${NC}"
         exit 1
     fi
+    
+    echo "$repo_root"
 }
 
-# 初期化時にREPO_ROOTを設定
-get_repo_root
-
-# プロジェクト名を取得（Gitリポジトリ名から）
+# Get project name from git remote URL
 get_project_name() {
-    # リモートURLからリポジトリ名を取得
-    local remote_url=$(git config --get remote.origin.url 2>/dev/null)
+    local repo_root=$(get_repo_root)
+    
+    # Try to get from git remote
+    local remote_url=$(git -C "$repo_root" remote get-url origin 2>/dev/null)
+    
     if [ -n "$remote_url" ]; then
-        # GitHubのURLからリポジトリ名を抽出
-        # 例: git@github.com:user/repo.git -> repo
-        # 例: https://github.com/user/repo.git -> repo
-        PROJECT_NAME=$(echo "$remote_url" | sed -E 's/.*[\/:]([^\/]+)\.git$/\1/' | tr '[:upper:]' '[:lower:]')
-    else
-        # フォールバック: ディレクトリ名を使用
-        PROJECT_NAME=$(basename "$REPO_ROOT" | tr '[:upper:]' '[:lower:]')
+        # Extract project name from URL
+        # Support both SSH and HTTPS formats
+        # git@github.com:user/project.git -> project
+        # https://github.com/user/project.git -> project
+        local project_name=$(echo "$remote_url" | sed -E 's|.*[:/]([^/]+)/([^/]+)(\.git)?$|\2|' | sed 's/\.git$//')
+        
+        if [ -n "$project_name" ] && [ "$project_name" != "$remote_url" ]; then
+            echo "$project_name"
+            return
+        fi
     fi
     
-    if [ -z "$PROJECT_NAME" ]; then
-        echo -e "${RED}エラー: プロジェクト名が特定できません${NC}"
-        exit 1
-    fi
+    # Fallback to directory name
+    echo -e "${RED}Error: Could not determine project name${NC}"
+    exit 1
 }
 
-# 初期化時にプロジェクト名を設定
-get_project_name
+# Initialize REPO_ROOT
+REPO_ROOT=$(get_repo_root)
 
-# コマンド名（エイリアス対応）
+# Initialize PROJECT_NAME
+PROJECT_NAME=$(get_project_name)
+
+# Command name (for alias support)
 cmd="vive"
 
-# ヘルプ表示
-show_help() {
-    echo "vive - parallel AI fixer, alive in the shell"
-    echo ""
-    echo "コマンド:"
-    echo "  $cmd fix <issue-number> [-s|--sync] [-k|--keep-worktree]  - Issue解決"
-    echo "  $cmd batch <issue1,issue2,issue3>    - 複数Issue並行実行"
-    echo "  $cmd issue [options]                 - Issue作成"
-    echo "  $cmd sessions                        - セッション一覧"
-    echo "  $cmd attach <issue-number>           - セッションにアタッチ"
-    echo "  $cmd logs <issue-number> [-f|--follow]   - ログ表示（--followでリアルタイム監視）"
-    echo "  $cmd watchdog <issue-number>         - watchdog復旧"
-    echo "  $cmd cleanup [issue-number]          - Worktreeクリーンアップ"
-    echo ""
-    echo "例:"
-    echo "  $cmd fix 42                          - Issue #42を非同期で解決"
-    echo "  $cmd fix 42 -s                       - Issue #42を解決してアタッチ"
-    echo "  $cmd fix 42 -k                       - 既存Worktreeを引き継いで実行"
-    echo "  $cmd fix 42 -s -k                    - アタッチ + Worktree引き継ぎ"
-    echo "  $cmd attach 42                       - Issue #42のセッションに接続"
-    echo ""
-    echo "Issue作成:"
-    echo "  $cmd issue                           - 対話モード（非同期）"
-    echo "  $cmd issue --title \"機能\" --auto-solve  - 作成後自動解決（非同期）"
-    echo ""
-    echo "オプション:"
-    echo "  -s, --sync         tmux起動後にアタッチ（デフォルトは非同期で終了）"
-    echo "  -k, --keep-worktree 既存Worktreeを削除せずに引き継ぐ"
-    echo "  --auto-solve       Issue作成後に自動解決"
-    echo ""
-    echo "ヒント: デフォルトは非同期実行、Ctrl+B,Dでデタッチ、attachコマンドで再接続"
+usage() {
+    cat << EOF
+Usage: $0 [command] [options]
+
+Commands:
+  fix <issue>          Fix a single issue with AI assistance
+  batch <issues...>    Process multiple issues in parallel  
+  sessions             List all active vive sessions
+  attach <issue>       Attach to a running session
+  logs <issue>         Show logs for a specific issue
+  cleanup              Clean up completed sessions and worktrees
+  cleanup all          Force cleanup all sessions and worktrees
+
+Options:
+  -h, --help           Show this help message
+  -s, --sync           Attach to tmux after startup (default: async exit)
+
+Examples:
+  $0 fix 42                      Fix issue #42
+  $0 batch 41 42 43              Process issues #41, #42, #43 in parallel
+  $0 attach 42                   Attach to session for issue #42
+  $0 sessions                    List all active sessions
+  $0 cleanup                     Clean up completed work
+
+EOF
 }
 
-# tmuxチェック
+check_requirements() {
+    if ! command -v tmux &> /dev/null; then
+        echo -e "${RED}Error: tmux is not installed${NC}"
+        exit 1
+    fi
+}
+
+# tmux check
 check_tmux() {
     if ! command -v tmux &> /dev/null; then
-        echo -e "${RED}エラー: tmuxがインストールされていません${NC}"
-        echo "インストール方法:"
+        echo -e "${RED}Error: tmux is not installed${NC}"
+        echo "Installation:"
         echo "  macOS: brew install tmux"
         echo "  Ubuntu/Debian: sudo apt-get install tmux"
         exit 1

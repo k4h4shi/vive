@@ -1,26 +1,55 @@
 #!/usr/bin/env bash
-# vive Git操作関連
+# vive git operations
 
-# Git状態チェック
+# Check git status
 check_git_status() {
-    cd "$REPO_ROOT"
-    
-    # 未コミットの変更があるかチェック
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-        echo -e "${YELLOW}警告: 未コミットの変更があります${NC}"
-        echo "現在の変更をコミットまたはstashしてから実行してください"
-        echo ""
+    if [ -n "$(git status --porcelain)" ]; then
+        echo
+        echo -e "${YELLOW}Warning: You have uncommitted changes${NC}"
+        echo
         git status --short
+        echo
+        
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+}
+
+# Create and setup worktree
+setup_worktree() {
+    local issue_num=$1
+    local branch_name="issue-${issue_num}"
+    local worktree_name="${PROJECT_NAME}-issue-${issue_num}"
+    local worktree_dir="$REPO_ROOT/../$worktree_name"
+    
+    # Delete existing worktree
+    if [ -d "$worktree_dir" ]; then
+        git worktree remove "$worktree_dir" --force 2>/dev/null || true
+    fi
+    
+    # Create new worktree
+    git worktree add "$worktree_dir" -b "$branch_name" || \
+        git worktree add "$worktree_dir" "$branch_name"
+    
+    # Sync Claude config
+    if [ -f "$REPO_ROOT/.cursor/mcp.json" ]; then
+        mkdir -p "$worktree_dir/.cursor"
+        rsync -av "$REPO_ROOT/.cursor/mcp.json" "$worktree_dir/.cursor/" >/dev/null 2>&1
+        echo -e "${GREEN}Claude configuration sync completed${NC}"
+    fi
+    
+    # Check Claude Code configuration
+    if [ -f "$worktree_dir/.cursor/mcp.json" ]; then
+        echo -e "${GREEN}Claude Code configuration check completed${NC}"
+    else
+        echo -e "${RED}Error: Claude Code configuration file not found${NC}"
         exit 1
     fi
     
-    # mainブランチに移動
-    current_branch=$(git branch --show-current)
-    if [ "$current_branch" != "main" ]; then
-        echo -e "${BLUE}mainブランチに切り替えます...${NC}"
-        git checkout main
-        git pull origin main
-    fi
+    echo "$worktree_dir"
 }
 
 # Claude Code初期化チェック

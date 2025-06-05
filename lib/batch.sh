@@ -1,83 +1,89 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # vive バッチ処理関連
 
-# バッチモード実行（複数Issue並行処理）
-run_batch_mode() {
-    local issue_list="$1"
+# Execute batch processing: parallel execution of multiple Issues
+
+source "${LIB_DIR}/utils.sh"
+
+process_batch() {
+    echo -e "${GREEN}Batch mode: Starting parallel processing for multiple issues${NC}"
     
-    echo -e "${GREEN}バッチモード: 複数Issueの並行処理を開始します${NC}"
-    echo ""
+    # Accept multiple Issue numbers
+    if [ $# -eq 0 ]; then
+        echo "Usage: $0 batch <issue1> <issue2> <issue3> ..."
+        echo "Example: $0 batch 41 42 43"
+        return 1
+    fi
     
-    # tmuxチェック
-    check_tmux
-    
-    # Git状態チェック
-    check_git_status
-    
-    # Issue番号をカンマで分割
-    IFS=',' read -ra ISSUES <<< "$issue_list"
-    local issue_count=${#ISSUES[@]}
-    
-    echo -e "${BLUE}処理対象Issue数: $issue_count${NC}"
-    echo -e "${BLUE}Issues: ${ISSUES[*]}${NC}"
-    echo ""
-    
-    # 各Issueの存在チェック
-    echo -e "${YELLOW}Issue存在確認中...${NC}"
+    # Save Issue list
+    local issues=("$@")
     local valid_issues=()
-    for issue in "${ISSUES[@]}"; do
-        issue=$(echo "$issue" | xargs)  # trim whitespace
-        if [[ ! "$issue" =~ ^[0-9]+$ ]]; then
-            echo -e "${RED}警告: '$issue' は有効なIssue番号ではありません（スキップ）${NC}"
+    local invalid_issues=()
+    
+    # Verify Issue existence
+    echo
+    echo "Checking issues..."
+    echo -e "${YELLOW}Verifying issue existence...${NC}"
+    for issue in "${issues[@]}"; do
+        # Check if it's a number
+        if ! [[ "$issue" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}Warning: '$issue' is not a valid issue number (skipping)${NC}"
+            invalid_issues+=("$issue")
             continue
         fi
         
-        if gh issue view "$issue" &> /dev/null; then
+        # Use check_issue from issue.sh
+        if check_issue_exists "$issue"; then
             valid_issues+=("$issue")
-            echo -e "${GREEN}✓ Issue #$issue${NC}"
         else
-            echo -e "${RED}✗ Issue #$issue が見つかりません（スキップ）${NC}"
+            invalid_issues+=("$issue")
         fi
     done
     
+    # Error if no valid Issues
     if [ ${#valid_issues[@]} -eq 0 ]; then
-        echo -e "${RED}エラー: 有効なIssueがありません${NC}"
-        exit 1
+        echo
+        echo -e "${RED}Error: No valid issues found${NC}"
+        return 1
     fi
     
-    echo ""
-    echo -e "${YELLOW}${#valid_issues[@]}個のIssueを並行処理します。続行しますか？ (y/N):${NC}"
-    read -r confirm
-    
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo -e "${YELLOW}バッチ処理をキャンセルしました${NC}"
-        exit 0
+    # Summary display
+    echo
+    echo "===== Processing Summary ====="
+    echo -e "${GREEN}Valid issues (${#valid_issues[@]}):${NC} ${valid_issues[*]}"
+    if [ ${#invalid_issues[@]} -gt 0 ]; then
+        echo -e "${RED}Invalid issues (${#invalid_issues[@]}):${NC} ${invalid_issues[*]}"
     fi
+    echo "=============================="
+    echo
     
-    # 各Issueを非同期モードで実行
-    echo ""
-    echo -e "${BLUE}並行処理を開始します...${NC}"
+    # Parallel execution
+    echo -e "${BLUE}Starting parallel processing...${NC}"
+    echo
+    
     local started_count=0
-    
     for issue in "${valid_issues[@]}"; do
-        echo ""
-        echo -e "${GREEN}[$((started_count + 1))/${#valid_issues[@]}] Issue #$issue の処理を開始...${NC}"
+        echo -e "${GREEN}[$((started_count + 1))/${#valid_issues[@]}] Starting issue #$issue...${NC}"
         
-        # 非同期モードで実行（サブシェルで独立実行）
-        (
-            run_issue_mode "$issue" "true"
-        ) &
+        # Start asynchronously
+        "$SCRIPT_DIR/vive.sh" fix "$issue" &
         
-        # プロセス起動待機（連続起動による負荷を軽減）
-        sleep 3
+        # Brief wait between processes (to avoid resource contention)
+        sleep 2
         
-        started_count=$((started_count + 1))
+        ((started_count++))
     done
     
-    echo ""
-    echo -e "${GREEN}✅ ${started_count}個のIssue処理を開始しました${NC}"
-    echo ""
-    echo -e "${YELLOW}進捗確認コマンド:${NC}"
-    echo "  セッション一覧: $cmd sessions"
-    echo "  特定のセッションにアタッチ: $cmd attach <issue-number>"
+    echo
+    echo "=============================="
+    echo -e "${GREEN}✅ Started processing for ${started_count} issues${NC}"
+    echo
+    echo -e "${YELLOW}Progress check commands:${NC}"
+    echo "  List sessions:        vive sessions"
+    echo "  Attach to session:    vive attach <issue-number>"
+    echo "  View logs:            vive logs <issue-number>"
+    echo "  Follow logs:          vive logs <issue-number> -f"
+    echo
+    echo "All processes are running in the background."
+    echo "=============================="
 } 
