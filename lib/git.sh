@@ -34,19 +34,33 @@ setup_worktree() {
     git worktree add "$worktree_dir" -b "$branch_name" || \
         git worktree add "$worktree_dir" "$branch_name"
     
-    # Sync Claude config
-    if [ -f "$REPO_ROOT/.cursor/mcp.json" ]; then
-        mkdir -p "$worktree_dir/.cursor"
-        rsync -av "$REPO_ROOT/.cursor/mcp.json" "$worktree_dir/.cursor/" >/dev/null 2>&1
-        echo -e "${GREEN}Claude configuration sync completed${NC}"
-    fi
-    
-    # Check Claude Code configuration
-    if [ -f "$worktree_dir/.cursor/mcp.json" ]; then
-        echo -e "${GREEN}Claude Code configuration check completed${NC}"
+    # Sync MCP config from main repo to worktree
+    local repo_mcp_config_file
+    repo_mcp_config_file=$(get_mcp_config_path) # Get full path from config
+
+    local mcp_relative_path
+    mcp_relative_path=$(get_config ".mcp.configPath" ".vive/mcp.json") # Get relative path for worktree structure
+
+    if [ -f "$repo_mcp_config_file" ]; then
+        local worktree_mcp_target_path="$worktree_dir/$mcp_relative_path"
+        local worktree_mcp_target_dir
+        worktree_mcp_target_dir=$(dirname "$worktree_mcp_target_path")
+
+        mkdir -p "$worktree_mcp_target_dir"
+        rsync -av "$repo_mcp_config_file" "$worktree_mcp_target_path" >/dev/null 2>&1
+        echo -e "${GREEN}MCP configuration sync completed to $worktree_mcp_target_path${NC}"
     else
-        echo -e "${RED}Error: Claude Code configuration file not found${NC}"
-        exit 1
+        echo -e "${YELLOW}MCP configuration file not found in main repository: $repo_mcp_config_file. Skipping sync.${NC}"
+    fi
+
+    # Check MCP configuration in worktree
+    local worktree_mcp_check_path="$worktree_dir/$mcp_relative_path"
+    if [ -f "$worktree_mcp_check_path" ]; then
+        echo -e "${GREEN}MCP configuration check completed in worktree: $worktree_mcp_check_path${NC}"
+    else
+        echo -e "${RED}Error: MCP configuration file not found in worktree: $worktree_mcp_check_path${NC}"
+        # Optionally, exit 1 if MCP config is critical for worktree operation
+        # exit 1
     fi
     
     echo "$worktree_dir"

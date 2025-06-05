@@ -323,8 +323,10 @@ run_claude_tmux() {
     fi
     
     # Check MCP config existence
-    if [ ! -f "$REPO_ROOT/.cursor/mcp.json" ]; then
-        echo -e "${RED}Error: MCP config file not found: $REPO_ROOT/.cursor/mcp.json${NC}"
+    local mcp_config_file
+    mcp_config_file=$(get_mcp_config_path)
+    if [ ! -f "$mcp_config_file" ]; then
+        echo -e "${RED}Error: MCP config file not found: $mcp_config_file${NC}"
         exit 1
     fi
     
@@ -361,7 +363,7 @@ run_claude_tmux() {
     
     # Run expect script in background (start mode)
     echo -e "${YELLOW}Starting Claude Code (background)...${NC}"
-    nohup expect "$expect_script" start "$prompt_file" "$REPO_ROOT/.cursor/mcp.json" "$session_name" "$log_file" > /dev/null 2>&1 &
+    nohup expect "$expect_script" start "$prompt_file" "$mcp_config_file" "$session_name" "$log_file" > /dev/null 2>&1 &
     local expect_pid=$!
     
     echo -e "${GREEN}✅ Started Claude Code startup process (PID: $expect_pid)${NC}"

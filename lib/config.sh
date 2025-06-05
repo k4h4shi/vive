@@ -52,7 +52,7 @@ is_mcp_enabled() {
 
 # Get MCP config path
 get_mcp_config_path() {
-    local mcp_path=$(get_config ".mcp.configPath" ".cursor/mcp.json")
+    local mcp_path=$(get_config ".mcp.configPath" ".vive/mcp.json")
     echo "$REPO_ROOT/$mcp_path"
 }
 
