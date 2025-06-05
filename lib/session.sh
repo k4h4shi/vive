@@ -13,7 +13,7 @@ start_watchdog_process() {
     fi
     
     # Define expect script path
-    local expect_script="$REPO_ROOT/vive/watchdog.exp"
+    local expect_script="$REPO_ROOT/watchdog.exp"
     local log_file="/tmp/claude_session_watchdog_${session_name}_$(date +%s).log"
     
     # Check if expect script exists
@@ -353,7 +353,7 @@ run_claude_tmux() {
     echo -e "${GREEN}✅ tmux session '$session_name' created${NC}"
     
     # Define expect script path
-    local expect_script="$REPO_ROOT/vive/watchdog.exp"
+    local expect_script="$REPO_ROOT/watchdog.exp"
     
     # Check expect script existence
     if [ ! -f "$expect_script" ]; then
@@ -436,7 +436,7 @@ reattach_expect_process() {
     fi
     
     # Define reattach expect script path
-    local expect_script="$REPO_ROOT/vive/watchdog.exp"
+    local expect_script="$REPO_ROOT/watchdog.exp"
     local log_file="/tmp/claude_session_reattach_${session_name}_$(date +%s).log"
     
     # Check expect script existence
@@ -503,7 +503,7 @@ watch_session() {
     fi
     
     # Define expect script path
-    local expect_script="$REPO_ROOT/vive/watchdog.exp"
+    local expect_script="$REPO_ROOT/watchdog.exp"
     local log_file="/tmp/claude_session_watchdog_${session_name}_$(date +%s).log"
     
     # Check expect script existence
