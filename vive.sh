@@ -32,6 +32,7 @@ source "$SCRIPT_DIR/lib/dashboard.sh"  # Dashboard functionality
 source "$SCRIPT_DIR/lib/send.sh"       # Send command functionality
 source "$SCRIPT_DIR/lib/cleanup.sh"    # Cleanup operations
 source "$SCRIPT_DIR/lib/batch.sh"      # Batch processing
+source "$SCRIPT_DIR/lib/exec.sh"       # Execute commands in worktree
 
 # Initialize and load project configuration
 create_default_config
@@ -180,6 +181,14 @@ main() {
     elif [ "$1" = "send" ]; then
         shift # Remove "send"
         send_message_to_vive_session "$@"
+    elif [ "$1" = "exec" ]; then
+        # Execute command in worktree
+        shift # Remove "exec"
+        exec_in_worktree "$@"
+    elif [ "$1" = "shell" ]; then
+        # Interactive shell in worktree
+        shift # Remove "shell"
+        shell_in_worktree "$@"
     else
         # Unknown command
         echo -e "${RED}Error: Unknown command '$1'${NC}"
