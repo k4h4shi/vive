@@ -60,6 +60,13 @@ REPO_ROOT=$(get_repo_root)
 # Initialize PROJECT_NAME
 PROJECT_NAME=$(get_project_name)
 
+# Initialize SCRIPT_DIR (vive script directory)
+# This will be set by the main vive.sh script
+if [ -z "$SCRIPT_DIR" ]; then
+    # Fallback: determine from this file's location
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
+fi
+
 # Command name (for alias support)
 cmd="vive"
 

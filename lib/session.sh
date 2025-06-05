@@ -13,7 +13,7 @@ start_watchdog_process() {
     fi
     
     # Define expect script path
-    local expect_script="$REPO_ROOT/watchdog.exp"
+    local expect_script="$SCRIPT_DIR/watchdog.exp"
     local log_file="/tmp/claude_session_watchdog_${session_name}_$(date +%s).log"
     
     # Check if expect script exists
@@ -141,7 +141,7 @@ show_tmux_sessions() {
             echo "  Issue: #$issue_num - $issue_title"
             
             # Worktree information
-            local worktree_dir="$REPO_ROOT/../${PROJECT_NAME}-issue-${issue_num}"
+            local worktree_dir="$REPO_ROOT/.vive/issues/${issue_num}"
             if [ -d "$worktree_dir" ]; then
                 echo "  Worktree: $worktree_dir"
             fi
@@ -353,7 +353,7 @@ run_claude_tmux() {
     echo -e "${GREEN}✅ tmux session '$session_name' created${NC}"
     
     # Define expect script path
-    local expect_script="$REPO_ROOT/watchdog.exp"
+    local expect_script="$SCRIPT_DIR/watchdog.exp"
     
     # Check expect script existence
     if [ ! -f "$expect_script" ]; then
@@ -399,14 +399,7 @@ run_claude_tmux() {
 # Reattach expect process
 reattach_expect_process() {
     local session_identifier="$1"
-    local session_name=""
-    
-    # Determine session name (if number, add issue-, otherwise use as is)
-    if [[ "$session_identifier" =~ ^[0-9]+$ ]]; then
-        session_name="${PROJECT_NAME}-issue-${session_identifier}"
-    else
-        session_name="$session_identifier"
-    fi
+    local session_name="${PROJECT_NAME}-issue-${session_identifier}"
     
     # Check session existence
     if ! tmux has-session -t "$session_name" 2>/dev/null; then
@@ -436,7 +429,7 @@ reattach_expect_process() {
     fi
     
     # Define reattach expect script path
-    local expect_script="$REPO_ROOT/watchdog.exp"
+    local expect_script="$SCRIPT_DIR/watchdog.exp"
     local log_file="/tmp/claude_session_reattach_${session_name}_$(date +%s).log"
     
     # Check expect script existence
@@ -467,74 +460,30 @@ reattach_expect_process() {
 # Put session in watchdog state (simple wrapper)
 watch_session() {
     local issue_number="$1"
-    
-    if [ -z "$issue_number" ]; then
-        echo -e "${RED}Error: Specify Issue number${NC}"
-        echo "Example: $cmd watchdog 42"
-        return 1
-    fi
-    
-    # Determine session name
+    local follow="$2"
     local session_name="${PROJECT_NAME}-issue-${issue_number}"
+    local log_pattern="/tmp/claude_session_${session_name}_*.log"
     
-    echo -e "${GREEN}Starting watchdog recovery for session '$session_name'...${NC}"
+    local latest_log
+    latest_log=$(ls -t $log_pattern 2>/dev/null | head -n 1)
     
-    # tmux check
-    check_tmux
-    
-    # Check session existence
-    if ! tmux has-session -t "$session_name" 2>/dev/null; then
-        echo -e "${RED}Error: Session '$session_name' not found${NC}"
-        echo ""
-        echo -e "${YELLOW}Hint: First start Issue with the following command:${NC}"
-        echo "  $cmd fix $issue_number"
+    if [ -z "$latest_log" ]; then
+        echo -e "${RED}Error: No log file found for session $session_name${NC}"
         return 1
     fi
     
-    # Check existing expect process and stop
-    local existing_pid=$(ps aux | grep "expect.*$session_name" | grep -v grep | awk '{print $2}' | head -1)
-    
-    if [ -n "$existing_pid" ]; then
-        echo -e "${YELLOW}Stopping existing watchdog process (PID: $existing_pid)...${NC}"
-        kill "$existing_pid" 2>/dev/null || true
-        sleep 1
-        kill -9 "$existing_pid" 2>/dev/null || true
-        echo -e "${GREEN}✅ Stopped existing watchdog process${NC}"
-    fi
-    
-    # Define expect script path
-    local expect_script="$REPO_ROOT/watchdog.exp"
-    local log_file="/tmp/claude_session_watchdog_${session_name}_$(date +%s).log"
-    
-    # Check expect script existence
-    if [ ! -f "$expect_script" ]; then
-        echo -e "${RED}Error: expect script not found: $expect_script${NC}"
-        return 1
-    fi
-    
-    # Run expect script in background (attach mode)
-    echo -e "${BLUE}Starting new watchdog process...${NC}"
-    
-    nohup expect "$expect_script" attach "$session_name" "$log_file" > /dev/null 2>&1 &
-    local expect_pid=$!
-    
-    # Wait for startup confirmation
-    sleep 1
-    
-    # Check if process started correctly
-    if ps -p $expect_pid > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Started new watchdog process (PID: $expect_pid)${NC}"
+    if [ "$follow" = "true" ]; then
+        echo -e "${GREEN}Watching session '$session_name' in real-time${NC}"
+        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
         echo ""
-        echo -e "${YELLOW}Session operations:${NC}"
-        echo "  Attach: $cmd attach $issue_number"
-        echo "  Log display: $cmd logs $issue_number"
-        echo ""
-        echo -e "${BLUE}Monitoring status:${NC}"
-        echo "  Automatic approval enabled"
-        echo "  User attach temporarily disables automatically"
+        
+        # watch command for real-time display
+        watch -n 1 "tmux capture-pane -t '$session_name:0.0' -p 2>/dev/null || echo 'Session $session_name not found'"
     else
-        echo -e "${RED}❌ Failed to start watchdog process${NC}"
-        echo -e "${YELLOW}Check log: $log_file${NC}"
-        return 1
+        echo -e "${GREEN}Session '$session_name' log (latest 50 lines):${NC}"
+        echo ""
+        
+        # Capture tmux pane content
+        tmux capture-pane -t "$session_name:0.0" -S -50 -E -1 -p
     fi
 } 
