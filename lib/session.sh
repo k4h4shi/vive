@@ -307,6 +307,8 @@ run_claude_tmux() {
     if tmux has-session -t "$session_name" 2>/dev/null; then
         echo -e "${YELLOW}Removing existing session '$session_name'...${NC}"
         tmux kill-session -t "$session_name"
+        # Wait for session to fully terminate
+        sleep 1
     fi
     
     # Define log file path
@@ -381,8 +383,13 @@ run_claude_tmux() {
         echo ""
         echo -e "${YELLOW}Operation methods:${NC}"
         echo "  Session check: $cmd sessions"
-        echo "  Attach: $cmd attach $session_identifier"
-        echo "  Log display: $cmd logs $session_identifier"
+        if [ -n "$issue_number" ] && [ "$issue_number" != "" ]; then
+            echo "  Attach: $cmd attach $issue_number"
+            echo "  Log display: $cmd logs $issue_number"
+        else
+            echo "  Attach: $cmd attach $session_name"
+            echo "  Log display: $cmd logs $session_name"
+        fi
         echo ""
         echo -e "${BLUE}Hint: Progress will be announced via terminal notification or say command${NC}"
     fi
