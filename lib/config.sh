@@ -171,7 +171,7 @@ EOF
     # Create .gitignore entry for .vive if needed
     local gitignore_file="$REPO_ROOT/.gitignore"
     if [ -f "$gitignore_file" ]; then
-        if ! grep -q "^\.vive/" "$gitignore_file" 2>/dev/null; then
+        if ! grep -q "^\s*#*\s*\.vive/" "$gitignore_file" 2>/dev/null; then
             echo -e "${BLUE}Adding .vive/ to .gitignore...${NC}"
             echo "" >> "$gitignore_file"
             echo "# vive configuration (optional: commit if you want to share team settings)" >> "$gitignore_file"
