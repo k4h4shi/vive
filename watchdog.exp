@@ -1,0 +1,781 @@
+#!/usr/bin/expect -f
+# Claude Code Expect モジュール - 並列実行ワークフロー対応版
+# 
+# 使用方法:
+#   初回起動: expect watchdog.exp start <prompt_file> <mcp_config> <session_name> <log_file>
+#   再アタッチ: expect watchdog.exp attach <session_name> <log_file>
+
+# ================================
+# 設定パラメータ
+# ================================
+set MONITOR_INTERVAL 1          ;# 監視間隔（秒）
+set COMPLETION_THRESHOLD 30     ;# 完了判定時間（秒）
+set TIMEOUT_START 900          ;# startモードのタイムアウト（15分）
+set TIMEOUT_ATTACH 1800        ;# attachモードのタイムアウト（30分）
+set COMPLETION_GRACE_PERIOD 60  ;# 完了後の猶予期間（秒）
+
+# ================================
+# 状態検出モジュール
+# ================================
+
+# 枠（ボックス）を検出する関数
+proc detect_box {output} {
+    # 枠を構成する文字パターン
+    set box_chars {│ ─ ┌ ┐ └ ┘ ├ ┤ ┬ ┴}
+    foreach char $box_chars {
+        if {[string match "*${char}*" $output]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 枠内のテキストを抽出する関数
+proc extract_box_content {output} {
+    set box_content ""
+    set lines [split $output "\n"]
+    
+    foreach line $lines {
+        if {[string match "*│*" $line]} {
+            if {[regexp {│(.*)│} $line match content]} {
+                set trimmed_content [string trim $content]
+                if {$trimmed_content != ""} {
+                    append box_content "$trimmed_content\n"
+                }
+            }
+        }
+    }
+    
+    return [string trim $box_content]
+}
+
+# 枠内の状態パターンを判定する関数
+proc detect_box_pattern {output} {
+    if {![detect_box $output]} {
+        return "no_box"
+    }
+    
+    # 初回のフォルダ信頼承認パターン
+    if {[string match "*Do you trust the files in this folder?*" $output] ||
+        [string match "*Yes, proceed*" $output] ||
+        [string match "*No, exit*" $output]} {
+        return "trust_folder_approval"
+    }
+    
+    # 承認が必要なパターン（すべてcommand_approvalとして統一）
+    if {[string match "*Do you want to proceed?*" $output] ||
+        [string match "*Do you want to allow Claude to fetch this content?*" $output] ||
+        [string match "*Bash command*" $output] ||
+        [string match "*Message Claude requested permissions*" $output] ||
+        [string match "*Behavior ask*" $output]} {
+        return "command_approval"
+    }
+    
+    # ファイル編集の承認
+    if {[string match "*Do you want to make this edit*" $output]} {
+        return "file_edit_approval"
+    }
+    
+    # ファイル作成の承認
+    if {[string match "*Do you want to create*" $output]} {
+        return "file_creation_approval"
+    }
+    
+    # 入力待機パターン
+    if {[string match "*? for shortcuts*" $output]} {
+        return "input_waiting"
+    }
+    
+    # プロンプト入力確認パターンを検出
+    # Issue処理用のプロンプトが枠内に表示されている場合
+    if {[string match "*あなたはこのWorktree専属のAIペアプロ開発者です*" $output] ||
+        [string match "*作業ディレクトリ:*withinner-issue-*" $output] ||
+        [string match "*手順:*Issue内容を分析*" $output]} {
+        return "prompt_confirmation"
+    }
+    
+    # 枠があるが既知のパターンではない
+    set box_content [extract_box_content $output]
+    if {$box_content != ""} {
+        return "unknown_pattern"
+    }
+    
+    return "empty_box"
+}
+
+# 完了状態を検出する関数
+proc detect_completion {output seconds_since_change} {
+    global COMPLETION_THRESHOLD
+    
+    # 条件1: Claude Codeの完了メッセージパターン
+    # 単純な「完了」だけでなく、Claude特有のメッセージを確認
+    set completion_patterns {
+        "*Task completed successfully*"
+        "*All done!*"
+        "*✓ Complete*"
+        "*✅ 完了*"
+        "*Session ended*"
+    }
+    
+    foreach pattern $completion_patterns {
+        if {[string match $pattern $output]} {
+            return 1
+        }
+    }
+    
+    # 条件2: 指定秒数以上変化なし AND 入力待機状態
+    # ただし、承認待ちやエラー状態では完了としない
+    if {$seconds_since_change >= $COMPLETION_THRESHOLD} {
+        # 承認待ちやエラー状態でないことを確認
+        set current_pattern [detect_box_pattern $output]
+        if {$current_pattern in {no_box input_waiting}} {
+            # プロンプト（"?"）が表示されていて、かつ変化がない場合のみ完了とする
+            if {[string match "*? for shortcuts*" $output]} {
+                return 1
+            }
+        }
+    }
+    
+    return 0
+}
+
+# ================================
+# 通知モジュール
+# ================================
+
+# エージェント名を取得する関数
+proc get_agent_name {session_name} {
+    if {[regexp {issue-([0-9]+)} $session_name match issue_num]} {
+        return "エージェント $issue_num"
+    }
+    return "エージェント"
+}
+
+# 音声通知を送信する関数
+proc send_notification {type session_name {extra_info ""}} {
+    set agent_name [get_agent_name $session_name]
+    
+    # ユーザーがアタッチしているかチェック
+    set user_attached [is_user_attached $session_name]
+    
+    # ユーザーアタッチ中は作業開始に関する通知をスキップ
+    if {$user_attached && $type in {progress resume}} {
+        log_message "\n=== User attached - skipping $type notification ==="
+        return
+    }
+    
+    switch $type {
+        "progress" {
+            # 進行中通知（Ping音のみ）
+            catch {exec afplay /System/Library/Sounds/Ping.aiff &}
+        }
+        "error" {
+            # エラー通知
+            catch {exec afplay /System/Library/Sounds/Basso.aiff &}
+            catch {exec say "$agent_name で未知の枠パターンを検出しました。確認が必要です。" &}
+        }
+        "completion" {
+            # 完了通知
+            catch {exec afplay /System/Library/Sounds/Glass.aiff &}
+            catch {exec say "$agent_name が作業を完了しました" &}
+        }
+        "resume" {
+            # 再開通知
+            catch {exec afplay /System/Library/Sounds/Ping.aiff &}
+            catch {exec say "$agent_name が作業を再開しました" &}
+        }
+    }
+}
+
+# フラグファイルを管理する関数
+proc manage_flag_file {action session_name {file_type "completed"}} {
+    set base_path "/tmp/claude_${file_type}_${session_name}"
+    
+    switch $action {
+        "create" {
+            catch {exec touch $base_path}
+            return $base_path
+        }
+        "remove" {
+            catch {exec rm -f $base_path}
+        }
+        "exists" {
+            return [file exists $base_path]
+        }
+    }
+}
+
+# エラーログを保存する関数
+proc save_error_log {session_name box_content full_output} {
+    set timestamp [clock seconds]
+    set log_file "/tmp/claude_unknown_pattern_${session_name}_${timestamp}.log"
+    
+    set fp [open $log_file w]
+    puts $fp "Unknown pattern detected at [clock format $timestamp]"
+    puts $fp "Session: $session_name"
+    puts $fp "\nBox content:\n$box_content"
+    puts $fp "\nFull output:\n$full_output"
+    close $fp
+    
+    return $log_file
+}
+
+# ================================
+# 自動応答モジュール
+# ================================
+
+# 承認を自動応答する関数
+proc auto_approve {session_name pattern} {
+    # log_messageはグローバル関数として利用可能
+    log_message "\n=== Auto-approving: $pattern ==="
+    
+    # 進行中通知
+    send_notification "progress" $session_name
+    
+    # Enterキーを送信
+    exec tmux send-keys -t $session_name "" C-m
+    sleep 0.5
+    
+    # パターンによっては2回目のEnterが必要
+    if {$pattern in {command_approval file_edit_approval file_creation_approval}} {
+        exec tmux send-keys -t $session_name "" C-m
+    }
+    
+    sleep 2
+}
+
+# ユーザーがアタッチしているか確認する関数
+proc is_user_attached {session_name} {
+    catch {exec tmux list-clients -t $session_name 2>/dev/null | wc -l} count
+    return [expr {$count > 0}]
+}
+
+# ================================
+# セッション管理モジュール
+# ================================
+
+# 初回起動処理
+proc start_claude_code {prompt_file mcp_config session_name} {
+    # プロンプトファイルを読み込む
+    set fp [open $prompt_file r]
+    set prompt_content [read $fp]
+    close $fp
+    
+    log_message "\n=== Starting Claude Code in session $session_name ==="
+    
+    # Claude Codeを起動
+    spawn tmux send-keys -t $session_name "claude --mcp-config '$mcp_config'" C-m
+    sleep 2
+    
+    return $prompt_content
+}
+
+# 初期承認を処理する関数
+proc handle_initial_approval {session_name output} {
+    set approval_patterns {
+        "*Do you trust the files in this folder?*"
+        "*trust this folder*"
+        "*Enter to confirm*"
+        "*Continue?*"
+        "*Press Enter*"
+        "*Yes, proceed*"
+    }
+    
+    foreach pattern $approval_patterns {
+        if {[string match $pattern $output]} {
+            log_message "\n=== Initial approval detected, sending Enter ==="
+            exec tmux send-keys -t $session_name "" C-m
+            return 1
+        }
+    }
+    
+    return 0
+}
+
+# 初回プロンプトを直接送信する関数
+proc send_initial_prompt {session_name prompt_content} {
+    log_message "\n=== Attempting to send initial prompt directly ==="
+    sleep 3  ;# UIが完全に表示されるまで待機
+    
+    # プロンプトを送信
+    exec tmux send-keys -t $session_name -l "$prompt_content"
+    exec tmux send-keys -t $session_name C-m
+    
+    log_message "\n=== Initial prompt sent successfully ==="
+    return 1
+}
+
+# Welcomeメッセージを検出してプロンプトを送信する関数
+proc handle_welcome_message {session_name output prompt_content} {
+    set welcome_patterns {
+        "*Welcome to Claude Code!*"
+        "*✻ Welcome to Claude Code!*"
+    }
+    
+    foreach pattern $welcome_patterns {
+        if {[string match $pattern $output]} {
+            log_message "\n=== Welcome message detected, sending prompt ==="
+            sleep 3  ;# UIが完全に表示されるまで待機
+            
+            # プロンプトを送信
+            exec tmux send-keys -t $session_name -l "$prompt_content"
+            exec tmux send-keys -t $session_name C-m
+            
+            log_message "\n=== Prompt sent successfully ==="
+            return 1
+        }
+    }
+    
+    return 0
+}
+
+# ================================
+# ユーティリティ関数
+# ================================
+
+# 出力内容を正規化する関数（些細な違いを無視）
+proc normalize_output {output} {
+    # カーソル制御文字を除去
+    regsub -all {\x1b\[[0-9;]*[a-zA-Z]} $output "" output
+    # 先頭と末尾の空白を除去（連続する空白はそのまま保持）
+    set output [string trim $output]
+    return $output
+}
+
+# 実質的な出力変化を検出する関数
+proc detect_significant_change {old_output new_output} {
+    # ボックス描画文字を含む場合は単純な比較
+    if {[detect_box $new_output]} {
+        return [expr {$old_output != $new_output}]
+    }
+    
+    set old_normalized [normalize_output $old_output]
+    set new_normalized [normalize_output $new_output]
+    
+    # 正規化後の内容が異なる場合のみ変化ありとする
+    if {$old_normalized != $new_normalized} {
+        # 変化の大きさを計算（文字数の差）
+        set size_diff [expr {abs([string length $new_normalized] - [string length $old_normalized])}]
+        
+        # 10文字以上の差がある場合、または内容が20%以上変化した場合を実質的な変化とする
+        set old_len [string length $old_normalized]
+        if {$old_len > 0} {
+            set change_ratio [expr {double($size_diff) / $old_len}]
+            if {$size_diff > 10 || $change_ratio > 0.2} {
+                return 1
+            }
+        } elseif {$size_diff > 10} {
+            return 1
+        }
+    }
+    
+    return 0
+}
+
+# ================================
+# メイン処理
+# ================================
+
+# 引数の解析
+set mode [lindex $argv 0]
+
+if {$mode == "start"} {
+    set prompt_file [lindex $argv 1]
+    set mcp_config [lindex $argv 2]
+    set session_name [lindex $argv 3]
+    set log_file [lindex $argv 4]
+    set timeout_value $TIMEOUT_START
+} elseif {$mode == "attach"} {
+    set session_name [lindex $argv 1]
+    set log_file [lindex $argv 2]
+    set timeout_value $TIMEOUT_ATTACH
+} else {
+    puts stderr "Error: Unknown mode '$mode'. Use 'start' or 'attach'"
+    exit 1
+}
+
+# ログファイルを開く
+# expectのlog_fileコマンドが正しく動作しない場合があるため、
+# 手動でファイルを開いてログを書き込む
+set log_fp [open $log_file "a"]
+fconfigure $log_fp -buffering line
+
+# ログ出力用の関数を定義
+proc log_message {message} {
+    global log_fp
+    set timestamp [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S"]
+    puts $log_fp "$timestamp: $message"
+    puts "$message"  ;# 標準出力にも出力
+}
+
+# log_userは標準出力への出力を制御（1=有効、0=無効）
+log_user 1
+
+log_message "\n=== Claude Code Expect Module ==="
+log_message "Mode: $mode"
+log_message "Session: $session_name"
+log_message "Log: $log_file"
+
+# ログファイルが正しく開かれたか確認
+log_message "=== Testing log output ==="
+log_message "This message should appear in the log file: $log_file"
+
+# 初期画面をキャプチャ
+catch {exec tmux capture-pane -t $session_name -p} initial_output
+log_message "\n=== Initial capture complete ==="
+log_message "Initial output length: [string length $initial_output] characters"
+
+# モード別の初期化
+if {$mode == "start"} {
+    set prompt_content [start_claude_code $prompt_file $mcp_config $session_name]
+    set prompt_sent 0
+    set welcome_detected 0
+} else {
+    # attachモード: 初回プロンプトが送信済みかどうかを後で判定
+    set prompt_sent 0
+    set welcome_detected 0
+    set prompt_content ""  ;# 後で生成
+}
+
+# 監視ループ用の変数
+set last_output "$initial_output"
+set start_time [clock seconds]
+set loop_count 0
+set last_change_time [clock seconds]
+set completion_notified 0
+set completion_time 0
+set user_was_attached 0
+array set unknown_pattern_notified {}
+
+# 既存の完了フラグを確認し、必要に応じて削除
+if {[manage_flag_file "exists" $session_name]} {
+    log_message "\n=== Found existing completion flag - removing ==="
+    manage_flag_file "remove" $session_name
+}
+
+# セッションが初回プロンプトを必要としているかを判定する関数
+proc needs_initial_prompt {output session_name} {
+    # 入力待機状態で、かつタスク固有のプロンプトが送信されていない場合
+    if {[string match "*? for shortcuts*" $output]} {
+        # セッション名からIssue番号を抽出してプロンプト判定
+        if {[regexp {issue-([0-9]+)} $session_name match issue_num]} {
+            # Issue固有のプロンプトがまだ送信されていない可能性が高い判定条件
+            # Claude Codeの履歴に特定のキーワードが含まれていない場合
+            if {![string match "*あなたはこのWorktree専属のAIペアプロ開発者です*" $output] &&
+                ![string match "*withinner-issue-$issue_num*" $output] &&
+                ![string match "*手順:*Issue内容を分析*" $output]} {
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+# セッションが既に作業中かどうかを判定する関数
+proc is_session_active {output session_name} {
+    # 承認パターンや作業中の兆候がある場合は作業中と判断
+    set pattern [detect_box_pattern $output]
+    
+    # 承認待ちパターンがある場合は明らかに作業中
+    if {$pattern in {command_approval file_edit_approval file_creation_approval trust_folder_approval}} {
+        return 1
+    }
+    
+    # Claude Codeが何かしらの処理を実行中の兆候
+    if {[string match "*tokens*" $output] ||
+        [string match "*Running*" $output] ||
+        [string match "*⎿*" $output] ||
+        [string match "*⏺*" $output]} {
+        return 1
+    }
+    
+    # ファイルパスや作業ディレクトリが表示されている場合
+    if {[string match "*withinner-issue-*" $output] ||
+        [string match "*native-app*" $output]} {
+        return 1
+    }
+    
+    return 0
+}
+
+# Issue番号からプロンプトファイルを自動生成する関数
+proc generate_issue_prompt {issue_num} {
+    set prompt_content "あなたはこのWorktree専属のAIペアプロ開発者です。
+
+作業ディレクトリ: \$(pwd) (withinner-issue-${issue_num})
+
+手順:
+1. Issue内容を分析してください
+2. 問題の解決方法を検討してください  
+3. 必要な変更を実装してください
+4. テストを実行して動作確認してください
+
+Issue #${issue_num} に集中して、ultrathinkして作業し、効率的に問題を解決してください。"
+
+    return $prompt_content
+}
+
+# メイン監視ループ
+while {1} {
+    incr loop_count
+    
+    # tmuxセッションの内容をキャプチャ
+    if {[catch {exec tmux capture-pane -t $session_name -p} output]} {
+        log_message "\n=== ERROR: Failed to capture tmux pane: $output ==="
+        log_message "Session $session_name may have been terminated"
+        break
+    }
+    
+    # tmuxセッションが存在するか確認
+    if {[catch {exec tmux has-session -t $session_name 2>&1} result]} {
+        log_message "\n=== ERROR: tmux session $session_name no longer exists ==="
+        break
+    }
+    
+    # ユーザーアタッチ状態をチェック
+    set user_attached [is_user_attached $session_name]
+    
+    # ユーザーアタッチ状態の変化を検出
+    if {$user_attached && !$user_was_attached} {
+        log_message "\n=== User attached to session - auto-approval DISABLED ==="
+        set user_was_attached 1
+        # ユーザーアタッチ時は最後の変化時刻をリセット（完了判定を延期）
+        set last_change_time [clock seconds]
+    } elseif {!$user_attached && $user_was_attached} {
+        log_message "\n=== User detached from session - auto-approval ENABLED ==="
+        set user_was_attached 0
+        # ユーザーデタッチ時も最後の変化時刻をリセット（完了判定を延期）
+        set last_change_time [clock seconds]
+    }
+    
+    # デバッグ出力（10回ごと）
+    if {[expr $loop_count % 10] == 0} {
+        set elapsed [expr {[clock seconds] - $start_time}]
+        log_message "\n=== Status: Loop=$loop_count, Elapsed=${elapsed}s, UserAttached=$user_attached ==="
+        log_message "=== Mode=$mode, PromptSent=$prompt_sent, WelcomeDetected=$welcome_detected ==="
+        
+        # デバッグ: 出力内容の最後の部分を表示
+        set output_tail [string range $output end-200 end]
+        log_message "=== Output tail (last 200 chars): ==="
+        log_message "$output_tail"
+        
+        # デバッグ: 枠の検出結果
+        set current_pattern [detect_box_pattern $output]
+        log_message "=== Detected pattern: $current_pattern ==="
+        
+        # attachモードでの初回プロンプト判定状況
+        if {$mode == "attach" && !$prompt_sent} {
+            set needs_prompt [needs_initial_prompt $output $session_name]
+            set session_active [is_session_active $output $session_name]
+            log_message "=== Needs initial prompt: $needs_prompt ==="
+            log_message "=== Session already active: $session_active ==="
+        }
+    }
+    
+    # 出力変化の検出（実質的な変化のみ）
+    set output_changed 0
+    set significant_change [detect_significant_change $last_output $output]
+    
+    if {$significant_change} {
+        set output_changed 1
+        set last_output $output
+        set last_change_time [clock seconds]
+        
+        log_message "\n=== Significant output change detected at loop $loop_count ==="
+        
+        # 完了フラグが存在する場合の処理
+        if {[manage_flag_file "exists" $session_name]} {
+            # 完了時刻が記録されていない場合は現在時刻を使用
+            if {$completion_time == 0} {
+                log_message "\n=== Completion time not recorded - using current time ==="
+                set completion_time [clock seconds]
+            }
+            
+            # 完了してからの経過時間を確認
+            set time_since_completion [expr {[clock seconds] - $completion_time}]
+            
+            # 完了から十分な時間が経過している場合のみ再開と判断
+            if {$time_since_completion > $COMPLETION_GRACE_PERIOD} {
+                log_message "\n=== Work resumed after $time_since_completion seconds - removing completion flag ==="
+                manage_flag_file "remove" $session_name
+                send_notification "resume" $session_name
+                set completion_notified 0
+                set completion_time 0
+            } else {
+                log_message "\n=== Output changed within grace period ($time_since_completion seconds) - ignoring ==="
+                set output_changed 0  ;# 猶予期間内の変化は無視
+            }
+        }
+    } elseif {$mode == "attach" && $loop_count == 1} {
+        # attachモードの初回は必ず処理を実行
+        set output_changed 1
+        log_message "\n=== Initial check in attach mode at loop $loop_count ==="
+    }
+    
+    # startモード: 初期処理
+    if {$mode == "start" && !$prompt_sent} {
+        # 初期承認の処理
+        if {!$welcome_detected && [handle_initial_approval $session_name $output]} {
+            sleep 2
+            continue
+        }
+        
+        # Welcomeメッセージとプロンプト送信
+        if {!$welcome_detected && [handle_welcome_message $session_name $output $prompt_content]} {
+            set welcome_detected 1
+            set prompt_sent 1
+            sleep 2
+            continue
+        }
+        
+        # 初回承認後、直接プロンプト送信を試行
+        # "? for shortcuts" が表示されている場合、Welcomeメッセージを待たずに直接プロンプト送信
+        if {!$welcome_detected && [string match "*? for shortcuts*" $output]} {
+            log_message "\n=== Input waiting detected after approval - sending prompt directly ==="
+            send_initial_prompt $session_name $prompt_content
+            set welcome_detected 1
+            set prompt_sent 1
+            sleep 2
+            continue
+        }
+    }
+    
+    # attachモード: 初回プロンプト送信の判定と処理
+    if {$mode == "attach" && !$prompt_sent} {
+        # 初期承認の処理（再アタッチ時にも必要な場合がある）
+        if {!$welcome_detected && [handle_initial_approval $session_name $output]} {
+            sleep 2
+            continue
+        }
+        
+        # セッションが既に作業中かどうかをチェック
+        if {[is_session_active $output $session_name]} {
+            log_message "\n=== Attach mode: Session already active - setting prompt_sent=1 ==="
+            set welcome_detected 1
+            set prompt_sent 1
+        } elseif {[needs_initial_prompt $output $session_name]} {
+            # Issue番号を抽出してプロンプトを生成
+            if {[regexp {issue-([0-9]+)} $session_name match issue_num]} {
+                log_message "\n=== Attach mode: Initial prompt needed for Issue #$issue_num ==="
+                set prompt_content [generate_issue_prompt $issue_num]
+                
+                # プロンプトを送信
+                send_initial_prompt $session_name $prompt_content
+                set welcome_detected 1
+                set prompt_sent 1
+                sleep 2
+                continue
+            }
+        } else {
+            # 既に初回プロンプトが送信済みの場合
+            if {[string match "*? for shortcuts*" $output] && 
+                ([string match "*あなたはこのWorktree専属のAIペアプロ開発者です*" $output] ||
+                 [string match "*withinner-issue-*" $output] ||
+                 [string match "*手順:*Issue内容を分析*" $output])} {
+                log_message "\n=== Attach mode: Initial prompt already sent ==="
+                set welcome_detected 1
+                set prompt_sent 1
+            }
+        }
+    }
+    
+    # 自動応答処理（両モード共通）
+    if {$prompt_sent && $output_changed && !$user_attached} {
+        set pattern [detect_box_pattern $output]
+        
+        switch $pattern {
+            "trust_folder_approval" {
+                # フォルダ信頼承認 - 「Yes, proceed」を選択
+                log_message "\n=== Trust folder approval detected - selecting 'Yes, proceed' ==="
+                send_notification "progress" $session_name
+                exec tmux send-keys -t $session_name "" C-m
+                sleep 2
+                continue
+            }
+            "command_approval" -
+            "file_edit_approval" -
+            "file_creation_approval" {
+                auto_approve $session_name $pattern
+                continue
+            }
+            "prompt_confirmation" {
+                # プロンプト入力確認の場合
+                log_message "\n=== Prompt confirmation detected - sending Enter ==="
+                send_notification "progress" $session_name
+                exec tmux send-keys -t $session_name "" C-m
+                sleep 2
+                continue
+            }
+            "unknown_pattern" {
+                set box_content [extract_box_content $output]
+                set pattern_hash [string range [string tolower $box_content] 0 50]
+                
+                # 初回のみ通知
+                if {![info exists unknown_pattern_notified($pattern_hash)]} {
+                    set unknown_pattern_notified($pattern_hash) 1
+                    
+                    # エラー通知とログ保存
+                    send_notification "error" $session_name
+                    set error_log [save_error_log $session_name $box_content $output]
+                    manage_flag_file "create" $session_name "error"
+                    
+                    log_message "Error details saved to: $error_log"
+                }
+                
+                sleep 10
+                continue
+            }
+            "input_waiting" {
+                # 正常な入力待機状態
+                sleep 5
+            }
+        }
+    } elseif {$prompt_sent && $output_changed && $user_attached} {
+        # ユーザーアタッチ中は承認パターンを検出してログに記録のみ
+        set pattern [detect_box_pattern $output]
+        
+        if {$pattern in {trust_folder_approval command_approval file_edit_approval file_creation_approval}} {
+            log_message "\n=== Approval required ($pattern) - skipped due to user attachment ==="
+        }
+    }
+    
+    # 完了状態の検出と通知
+    if {$prompt_sent && !$completion_notified && !$user_attached} {
+        set seconds_since_change [expr {[clock seconds] - $last_change_time}]
+        
+        if {[detect_completion $output $seconds_since_change]} {
+            log_message "\n=== Task completion detected! ==="
+            
+            # 完了通知
+            send_notification "completion" $session_name
+            manage_flag_file "create" $session_name
+            
+            set completion_notified 1
+            set completion_time [clock seconds]  ;# 完了時刻を記録
+            log_message "\n=== Completion notification sent ==="
+        }
+    } elseif {$prompt_sent && $user_attached && !$completion_notified} {
+        # ユーザーアタッチ中は完了検出をスキップ
+        log_message "\n=== Completion check skipped - user attached ==="
+    }
+    
+    # タイムアウトチェック
+    set elapsed [expr {[clock seconds] - $start_time}]
+    if {$elapsed > $timeout_value} {
+        log_message "\n=== Timeout reached ([expr {$timeout_value / 60}] minutes) ==="
+        break
+    }
+    
+    # 監視間隔で待機
+    sleep $MONITOR_INTERVAL
+}
+
+log_message "\n=== Session monitoring complete ==="
+log_message "Session: $session_name"
+log_message "Duration: [expr {([clock seconds] - $start_time) / 60}] minutes"
+
+# ログファイルを閉じる
+close $log_fp
+
+# 正常終了
+exit 0 
