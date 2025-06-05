@@ -19,6 +19,9 @@ else
 fi
 LIB_DIR="$SCRIPT_DIR/lib"
 
+# Export SCRIPT_DIR so it's available to sourced library files
+export SCRIPT_DIR
+
 # Load dependencies in order (important: load dependent ones later)
 source "$SCRIPT_DIR/lib/utils.sh"      # Common utilities (colors, REPO_ROOT, basic functions)
 source "$SCRIPT_DIR/lib/config.sh"     # Configuration management
@@ -26,6 +29,7 @@ source "$SCRIPT_DIR/lib/git.sh"        # Git operations
 source "$SCRIPT_DIR/lib/session.sh"    # tmux session management
 source "$SCRIPT_DIR/lib/issue.sh"      # Issue processing
 source "$SCRIPT_DIR/lib/dashboard.sh"  # Dashboard functionality
+source "$SCRIPT_DIR/lib/send.sh"       # Send command functionality
 source "$SCRIPT_DIR/lib/cleanup.sh"    # Cleanup operations
 source "$SCRIPT_DIR/lib/batch.sh"      # Batch processing
 
@@ -173,6 +177,9 @@ main() {
     elif [ "$1" = "dashboard" ]; then
         check_requirements # tmuxの存在確認
         create_vive_dashboard
+    elif [ "$1" = "send" ]; then
+        shift # Remove "send"
+        send_message_to_vive_session "$@"
     else
         # Unknown command
         echo -e "${RED}Error: Unknown command '$1'${NC}"
