@@ -162,7 +162,7 @@ run_issue_mode() {
                  echo -e "${RED}⚠️   Merge conflict occurred${NC}"
                  echo -e "${YELLOW}Please resolve conflicts before running Claude Code${NC}"
                  echo -e "${BLUE}After resolving conflicts, you can continue with the following command:${NC}"
-                 echo "  cd $worktree_dir/native-app"
+                 echo "  cd $worktree_dir"
                  echo "  $cmd fix $issue_number -k"
                  exit 1
              fi
@@ -186,7 +186,7 @@ run_issue_mode() {
     fi
 
     # Dependency installation (optimize based on keep_worktree option)
-    cd "$worktree_dir/native-app"
+    cd "$worktree_dir"
     
     if [ "$keep_worktree" = "true" ] && [ -d "node_modules" ] && [ -f "package-lock.json" ]; then
         echo -e "${BLUE}Checking existing node_modules...${NC}"
@@ -239,7 +239,7 @@ $(echo "$ISSUE_BODY" | head -c 1000)$([ ${#ISSUE_BODY} -gt 1000 ] && echo "...")
 
 ---
 You are the AI pair developer for this Worktree.
-Work directory: ${worktree_dir}/native-app
+Work directory: ${worktree_dir}
 
 Steps:
 1. Analyze Issue content and create implementation plan
@@ -297,7 +297,7 @@ run_prompt_mode() {
 
     # Dependency installation
     echo -e "${BLUE}Installing dependencies...${NC}"
-    cd "$worktree_dir/native-app"
+    cd "$worktree_dir"
     
     # Use npm cache for faster processing
     export NPM_CONFIG_CACHE="$HOME/.npm"

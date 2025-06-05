@@ -301,7 +301,7 @@ run_claude_tmux() {
     else
         echo -e "${GREEN}Starting asynchronous execution in tmux session '$session_name'...${NC}"
     fi
-    echo -e "${BLUE}Working directory: $worktree_dir/native-app${NC}"
+    echo -e "${BLUE}Working directory: $worktree_dir${NC}"
     
     # Remove existing session if exists
     if tmux has-session -t "$session_name" 2>/dev/null; then
@@ -317,8 +317,8 @@ run_claude_tmux() {
     local log_file="/tmp/claude_session_${session_name}_$(date +%s).log"
     
     # Check working directory existence
-    if [ ! -d "$worktree_dir/native-app" ]; then
-        echo -e "${RED}Error: Working directory does not exist: $worktree_dir/native-app${NC}"
+    if [ ! -d "$worktree_dir" ]; then
+        echo -e "${RED}Error: Working directory does not exist: $worktree_dir${NC}"
         exit 1
     fi
     
@@ -331,7 +331,7 @@ run_claude_tmux() {
     # Create tmux session (Claude Code not yet started)
     echo -e "${YELLOW}Creating tmux session...${NC}"
     
-    tmux new-session -d -s "$session_name" -c "$worktree_dir/native-app" \
+    tmux new-session -d -s "$session_name" -c "$worktree_dir" \
         "echo -e '${GREEN}Claude Code session preparation...${NC}'; \
          echo -e '${BLUE}Session: $session_name${NC}'; \
          echo -e '${BLUE}Working directory: \$(pwd)${NC}'; \

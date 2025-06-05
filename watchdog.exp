@@ -89,7 +89,7 @@ proc detect_box_pattern {output} {
     # プロンプト入力確認パターンを検出
     # Issue処理用のプロンプトが枠内に表示されている場合
     if {[string match "*あなたはこのWorktree専属のAIペアプロ開発者です*" $output] ||
-        [string match "*作業ディレクトリ:*withinner-issue-*" $output] ||
+        [string match "*作業ディレクトリ:*-issue-*" $output] ||
         [string match "*手順:*Issue内容を分析*" $output]} {
         return "prompt_confirmation"
     }
@@ -462,7 +462,7 @@ proc needs_initial_prompt {output session_name} {
             # Issue固有のプロンプトがまだ送信されていない可能性が高い判定条件
             # Claude Codeの履歴に特定のキーワードが含まれていない場合
             if {![string match "*あなたはこのWorktree専属のAIペアプロ開発者です*" $output] &&
-                ![string match "*withinner-issue-$issue_num*" $output] &&
+                ![string match "*-issue-$issue_num*" $output] &&
                 ![string match "*手順:*Issue内容を分析*" $output]} {
                 return 1
             }
@@ -490,8 +490,7 @@ proc is_session_active {output session_name} {
     }
     
     # ファイルパスや作業ディレクトリが表示されている場合
-    if {[string match "*withinner-issue-*" $output] ||
-        [string match "*native-app*" $output]} {
+    if {[string match "*-issue-*" $output]} {
         return 1
     }
     
@@ -502,7 +501,7 @@ proc is_session_active {output session_name} {
 proc generate_issue_prompt {issue_num} {
     set prompt_content "あなたはこのWorktree専属のAIペアプロ開発者です。
 
-作業ディレクトリ: \$(pwd) (withinner-issue-${issue_num})
+作業ディレクトリ: \$(pwd)
 
 手順:
 1. Issue内容を分析してください
@@ -670,7 +669,7 @@ while {1} {
             # 既に初回プロンプトが送信済みの場合
             if {[string match "*? for shortcuts*" $output] && 
                 ([string match "*あなたはこのWorktree専属のAIペアプロ開発者です*" $output] ||
-                 [string match "*withinner-issue-*" $output] ||
+                 [string match "*-issue-*" $output] ||
                  [string match "*手順:*Issue内容を分析*" $output])} {
                 log_message "\n=== Attach mode: Initial prompt already sent ==="
                 set welcome_detected 1
