@@ -75,6 +75,7 @@ Commands:
   logs <issue>         Show logs for a specific issue
   cleanup              Clean up completed sessions and worktrees
   cleanup all          Force cleanup all sessions and worktrees
+  dashboard            Show a dashboard with logs from all active vive-issue sessions
 
 Options:
   -h, --help           Show this help message

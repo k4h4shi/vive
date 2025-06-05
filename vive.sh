@@ -25,6 +25,7 @@ source "$SCRIPT_DIR/lib/config.sh"     # Configuration management
 source "$SCRIPT_DIR/lib/git.sh"        # Git operations
 source "$SCRIPT_DIR/lib/session.sh"    # tmux session management
 source "$SCRIPT_DIR/lib/issue.sh"      # Issue processing
+source "$SCRIPT_DIR/lib/dashboard.sh"  # Dashboard functionality
 source "$SCRIPT_DIR/lib/cleanup.sh"    # Cleanup operations
 source "$SCRIPT_DIR/lib/batch.sh"      # Batch processing
 
@@ -169,6 +170,9 @@ main() {
         
         local issue_number="$2"
         watch_session "$issue_number"
+    elif [ "$1" = "dashboard" ]; then
+        check_requirements # tmuxの存在確認
+        create_vive_dashboard
     else
         # Unknown command
         echo -e "${RED}Error: Unknown command '$1'${NC}"
