@@ -457,33 +457,30 @@ reattach_expect_process() {
     echo -e "${GREEN}expect process resumed automatic response${NC}"
 }
 
-# Put session in watchdog state (simple wrapper)
+# Put session in watchdog state (reattach expect process)
 watch_session() {
     local issue_number="$1"
-    local follow="$2"
     local session_name="${PROJECT_NAME}-issue-${issue_number}"
-    local log_pattern="/tmp/claude_session_${session_name}_*.log"
     
-    local latest_log
-    latest_log=$(ls -t $log_pattern 2>/dev/null | head -n 1)
-    
-    if [ -z "$latest_log" ]; then
-        echo -e "${RED}Error: No log file found for session $session_name${NC}"
+    # Check session existence
+    if ! tmux has-session -t "$session_name" 2>/dev/null; then
+        echo -e "${RED}Error: Session '$session_name' not found${NC}"
+        echo ""
+        echo -e "${YELLOW}Available sessions:${NC}"
+        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-issue-" || echo "No active sessions"
         return 1
     fi
     
-    if [ "$follow" = "true" ]; then
-        echo -e "${GREEN}Watching session '$session_name' in real-time${NC}"
-        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
-        echo ""
-        
-        # watch command for real-time display
-        watch -n 1 "tmux capture-pane -t '$session_name:0.0' -p 2>/dev/null || echo 'Session $session_name not found'"
-    else
-        echo -e "${GREEN}Session '$session_name' log (latest 50 lines):${NC}"
-        echo ""
-        
-        # Capture tmux pane content
-        tmux capture-pane -t "$session_name:0.0" -S -50 -E -1 -p
-    fi
+    echo -e "${BLUE}Reattaching watchdog expect process to session '$session_name'...${NC}"
+    
+    # Use the common watchdog startup function to reattach expect process
+    start_watchdog_process "$session_name" 0 true
+    
+    echo -e "${GREEN}✅ Watchdog expect process reattached to session '$session_name'${NC}"
+    echo ""
+    echo -e "${YELLOW}Session management commands:${NC}"
+    echo "  Status: $cmd sessions"
+    echo "  Attach: $cmd attach $issue_number"
+    echo "  Logs: $cmd logs $issue_number"
+    echo "  Send message: $cmd send $issue_number <message>"
 } 

@@ -83,6 +83,9 @@ Commands:
   cleanup              Clean up completed sessions and worktrees
   cleanup all          Force cleanup all sessions and worktrees
   dashboard            Show a dashboard with logs from all active vive-issue sessions
+  exec <issue> <cmd>   Execute command in issue worktree directory
+  shell <issue>        Start interactive shell in issue worktree directory
+  send <issue> <msg>   Send message to running issue session
 
 Options:
   -h, --help           Show this help message
