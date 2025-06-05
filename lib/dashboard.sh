@@ -55,13 +55,18 @@ create_vive_dashboard() {
     echo -e "${BLUE}Adding a free command input pane titled '$user_input_pane_title'...${NC}"
     # Split the first pane specifically (0.0) to avoid creating extra panes
     tmux split-window -t "$dashboard_session_name:0.0" -h -p 25
-    tmux select-pane -t "$dashboard_session_name:0.+" -T "$user_input_pane_title"
-    tmux send-keys -t "$dashboard_session_name:0.+" "cd \"$REPO_ROOT\"" Enter C-l
-    tmux send-keys -t "$dashboard_session_name:0.+" "echo 'This is the command input pane. Use '\''vive send <IssueNum> <message>'\'' here.'" Enter
+    
+    # Calculate the UserInput pane number (last pane = issue count)
+    local user_input_pane_num=${#vive_sessions_info[@]}
+    echo -e "${YELLOW}UserInput pane will be: $dashboard_session_name:0.$user_input_pane_num${NC}"
+    
+    tmux select-pane -t "$dashboard_session_name:0.$user_input_pane_num" -T "$user_input_pane_title"
+    tmux send-keys -t "$dashboard_session_name:0.$user_input_pane_num" "cd \"$REPO_ROOT\"" Enter C-l
+    tmux send-keys -t "$dashboard_session_name:0.$user_input_pane_num" "echo 'This is the command input pane. Use '\''vive send <IssueNum> <message>'\'' here.'" Enter
 
     echo -e "${GREEN}Focused on '$user_input_pane_title' pane.${NC}"
-    # Select the UserInput pane for user interaction
-    tmux select-pane -t "$dashboard_session_name:0.+"
+    # Select the UserInput pane for user interaction - use explicit pane number
+    tmux select-pane -t "$dashboard_session_name:0.$user_input_pane_num"
     tmux select-layout -t "$dashboard_session_name:0" tiled
 
     echo -e "${GREEN}Dashboard session '$dashboard_session_name' created successfully.${NC}"
