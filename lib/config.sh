@@ -181,5 +181,78 @@ EOF
     fi
 }
 
+# Get prompt template name from configuration
+get_prompt_template_name() {
+    local template=$(get_config ".prompts.template" "default")
+    echo "$template"
+}
+
+# Load prompt template file
+load_prompt_template() {
+    local template_name="$1"
+    local template_path="$REPO_ROOT/.vive/prompts/${template_name}.txt"
+    
+    if [ ! -f "$template_path" ]; then
+        echo -e "${YELLOW}Warning: Template file not found: $template_path${NC}"
+        echo -e "${BLUE}Using default template...${NC}"
+        template_path="$REPO_ROOT/.vive/prompts/default.txt"
+        
+        if [ ! -f "$template_path" ]; then
+            echo -e "${RED}Error: Default template not found: $template_path${NC}"
+            return 1
+        fi
+    fi
+    
+    cat "$template_path"
+}
+
+# Substitute template variables with actual values
+substitute_template_variables() {
+    local template_content="$1"
+    local issue_number="$2"
+    local issue_title="$3"
+    local issue_body="$4"
+    local worktree_dir="$5"
+    local context_note="$6"
+    
+    # Truncate issue body if too long
+    local issue_body_truncated
+    if [ ${#issue_body} -gt 1000 ]; then
+        issue_body_truncated="$(echo "$issue_body" | head -c 1000)..."
+    else
+        issue_body_truncated="$issue_body"
+    fi
+    
+    # Replace template variables
+    local result="$template_content"
+    result="${result//\{\{ISSUE_NUMBER\}\}/$issue_number}"
+    result="${result//\{\{ISSUE_TITLE\}\}/$issue_title}"
+    result="${result//\{\{ISSUE_BODY\}\}/$issue_body}"
+    result="${result//\{\{ISSUE_BODY_TRUNCATED\}\}/$issue_body_truncated}"
+    result="${result//\{\{WORKTREE_DIR\}\}/$worktree_dir}"
+    result="${result//\{\{CONTEXT_NOTE\}\}/$context_note}"
+    
+    echo "$result"
+}
+
+# Load and process prompt template (main function)
+load_and_process_prompt() {
+    local issue_number="$1"
+    local issue_title="$2"
+    local issue_body="$3"
+    local worktree_dir="$4"
+    local context_note="$5"
+    
+    local template_name=$(get_prompt_template_name)
+    local template_content=$(load_prompt_template "$template_name")
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to load prompt template${NC}"
+        return 1
+    fi
+    
+    substitute_template_variables "$template_content" "$issue_number" "$issue_title" "$issue_body" "$worktree_dir" "$context_note"
+}
+
 # Initialize PROJECT_CONFIG
 PROJECT_CONFIG="" 
