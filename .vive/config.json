@@ -1,0 +1,16 @@
+{
+  "mcp": {
+    "enabled": false,
+    "configPath": ".vive/mcp.json"
+  },
+  "initialization": {
+    "commands": [],
+    "workingDirectory": ".",
+    "skipOnKeepWorktree": true,
+    "timeoutSeconds": 300
+  },
+  "prompts": {
+    "template": "default",
+    "customFields": {}
+  }
+} 

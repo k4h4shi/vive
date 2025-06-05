@@ -185,40 +185,11 @@ run_issue_mode() {
         git worktree add "$worktree_dir" -b "$branch_name"
     fi
 
-    # Dependency installation (optimize based on keep_worktree option)
-    cd "$worktree_dir"
-    
-    if [ "$keep_worktree" = "true" ] && [ -d "node_modules" ] && [ -f "package-lock.json" ]; then
-        echo -e "${BLUE}Checking existing node_modules...${NC}"
-        
-        # Compare package-lock.json update time with node_modules update time
-        if [ "package-lock.json" -nt "node_modules" ]; then
-            echo -e "${YELLOW}package-lock.json updated, reinstalling dependencies...${NC}"
-            npm ci --silent --no-audit --no-fund --prefer-offline
-        else
-            echo -e "${GREEN}Dependencies are up-to-date (skip installation)${NC}"
-        fi
-    else
-        # Previous processing (new dependency installation)
-        echo -e "${BLUE}Installing dependencies...${NC}"
-        
-        # Use npm cache for faster processing
-        export NPM_CONFIG_CACHE="$HOME/.npm"
-        
-        # Use npm ci if package-lock.json exists (fast and reliable)
-        if [ -f "package-lock.json" ]; then
-            echo -e "${YELLOW}Installing dependencies using npm ci (cache usage)...${NC}"
-            npm ci --silent --no-audit --no-fund --prefer-offline
-        else
-            echo -e "${YELLOW}Installing dependencies using npm install (cache usage)...${NC}"
-            npm install --silent --no-audit --no-fund --prefer-offline
-        fi
-        
-        echo -e "${GREEN}Dependency installation completed${NC}"
-    fi
+    # Project initialization based on configuration
+    run_initialization "$worktree_dir" "$keep_worktree"
 
     # Claude Code initialization check (always run)
-    check_claude_init "$worktree_dir"
+    # check_claude_init "$worktree_dir"  # TODO: 汎用化対応で一時的にコメントアウト
     
     # Prompt creation (if keep_worktree mode, note it's a continuation job)
     local context_note=""
@@ -295,25 +266,11 @@ run_prompt_mode() {
     echo -e "${BLUE}Creating new Worktree ${worktree_dir}...${NC}"
     git worktree add "$worktree_dir" -b "$branch_name"
 
-    # Dependency installation
-    echo -e "${BLUE}Installing dependencies...${NC}"
-    cd "$worktree_dir"
-    
-    # Use npm cache for faster processing
-    export NPM_CONFIG_CACHE="$HOME/.npm"
-    
-    if [ -f "package-lock.json" ]; then
-        echo -e "${YELLOW}Installing dependencies using npm ci (cache usage)...${NC}"
-        npm ci --silent --no-audit --no-fund --prefer-offline
-    else
-        echo -e "${YELLOW}Installing dependencies using npm install (cache usage)...${NC}"
-        npm install --silent --no-audit --no-fund --prefer-offline
-    fi
-    
-    echo -e "${GREEN}Dependency installation completed${NC}"
+    # Project initialization based on configuration
+    run_initialization "$worktree_dir" "false"
 
     # Claude Code initialization check
-    check_claude_init "$worktree_dir"
+    # check_claude_init "$worktree_dir"  # TODO: 汎用化対応で一時的にコメントアウト
     
     # Claude Code execution
     if [ "$use_async" = "true" ]; then

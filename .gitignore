@@ -53,3 +53,11 @@ build/Release
 
 # Personal configuration
 .env.local 
+# vive configuration (optional: commit if you want to share team settings)
+# .vive/
+
+# vive configuration (optional: commit if you want to share team settings)
+# .vive/
+
+# vive configuration (optional: commit if you want to share team settings)
+# .vive/

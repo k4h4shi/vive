@@ -21,11 +21,16 @@ LIB_DIR="$SCRIPT_DIR/lib"
 
 # Load dependencies in order (important: load dependent ones later)
 source "$SCRIPT_DIR/lib/utils.sh"      # Common utilities (colors, REPO_ROOT, basic functions)
+source "$SCRIPT_DIR/lib/config.sh"     # Configuration management
 source "$SCRIPT_DIR/lib/git.sh"        # Git operations
 source "$SCRIPT_DIR/lib/session.sh"    # tmux session management
 source "$SCRIPT_DIR/lib/issue.sh"      # Issue processing
 source "$SCRIPT_DIR/lib/cleanup.sh"    # Cleanup operations
 source "$SCRIPT_DIR/lib/batch.sh"      # Batch processing
+
+# Initialize and load project configuration
+create_default_config
+load_project_config
 
 # Main process
 main() {
