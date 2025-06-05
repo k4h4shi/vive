@@ -4,7 +4,19 @@
 set -e
 
 # Load library files
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Handle symlinks by resolving to the actual script location
+if [ -L "${BASH_SOURCE[0]}" ]; then
+    # If this script is a symlink, follow it to get the real location
+    REAL_SCRIPT="$(readlink "${BASH_SOURCE[0]}")"
+    if [[ "$REAL_SCRIPT" != /* ]]; then
+        # If the readlink result is relative, make it absolute
+        REAL_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd "$(dirname "$REAL_SCRIPT")" && pwd)/$(basename "$REAL_SCRIPT")"
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+else
+    # If not a symlink, use the original method
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 LIB_DIR="$SCRIPT_DIR/lib"
 
 # Load dependencies in order (important: load dependent ones later)
