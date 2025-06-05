@@ -10,7 +10,7 @@
     "timeoutSeconds": 300
   },
   "prompts": {
-    "template": "default",
+    "template": "issue",
     "customFields": {}
   }
 } 
