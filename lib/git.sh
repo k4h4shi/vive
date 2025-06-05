@@ -20,50 +20,99 @@ check_git_status() {
 
 # Create and setup worktree
 setup_worktree() {
-    local issue_num=$1
-    local branch_name="issue-${issue_num}"
+    local issue_num="$1"
+    local base_branch="$2"
+    local worktree_base_dir="$REPO_ROOT/.vive/issues"
     local worktree_name="${PROJECT_NAME}-issue-${issue_num}"
-    local worktree_dir="$REPO_ROOT/../$worktree_name"
-    
-    # Delete existing worktree
+    local worktree_dir="$worktree_base_dir/$issue_num"
+    local branch_name="${PROJECT_NAME}-issue-${issue_num}"
+
+    echo -e "${BLUE}Setting up worktree for issue #$issue_num...${NC}"
+    echo -e "${BLUE}Base branch: $base_branch${NC}"
+    echo -e "${BLUE}Worktree directory: $worktree_dir${NC}"
+    echo -e "${BLUE}Branch name: $branch_name${NC}"
+
+    # Ensure the base directory for worktrees exists
+    mkdir -p "$worktree_base_dir"
+
+    # Check if branch already exists
+    if git show-ref --quiet "refs/heads/$branch_name"; then
+        echo -e "${YELLOW}Branch '$branch_name' already exists.${NC}"
+    else
+        echo -e "${BLUE}Creating branch '$branch_name' from '$base_branch'...${NC}"
+        git branch "$branch_name" "$base_branch"
+        if [ $? -ne 0 ]; then 
+            echo -e "${RED}Error creating branch '$branch_name' from '$base_branch'.${NC}"
+            echo -e "${RED}Please ensure '$base_branch' exists and is up to date.${NC}"
+            return 1
+        fi
+    fi
+
+    # Check if worktree directory already exists
     if [ -d "$worktree_dir" ]; then
-        git worktree remove "$worktree_dir" --force 2>/dev/null || true
+        echo -e "${YELLOW}Worktree directory '$worktree_dir' already exists.${NC}"
+        # Optional: could add logic to check if it's a valid worktree and linked to the correct branch
+        # For now, assume it's okay if it exists.
+        echo -e "${GREEN}Worktree for issue #$issue_num already set up at $worktree_dir.${NC}"
+        return 0
     fi
-    
-    # Create new worktree
-    git worktree add "$worktree_dir" -b "$branch_name" || \
-        git worktree add "$worktree_dir" "$branch_name"
-    
-    # Sync MCP config from main repo to worktree
-    local repo_mcp_config_file
-    repo_mcp_config_file=$(get_mcp_config_path) # Get full path from config
 
-    local mcp_relative_path
-    mcp_relative_path=$(get_config ".mcp.configPath" ".vive/mcp.json") # Get relative path for worktree structure
-
-    if [ -f "$repo_mcp_config_file" ]; then
-        local worktree_mcp_target_path="$worktree_dir/$mcp_relative_path"
-        local worktree_mcp_target_dir
-        worktree_mcp_target_dir=$(dirname "$worktree_mcp_target_path")
-
-        mkdir -p "$worktree_mcp_target_dir"
-        rsync -av "$repo_mcp_config_file" "$worktree_mcp_target_path" >/dev/null 2>&1
-        echo -e "${GREEN}MCP configuration sync completed to $worktree_mcp_target_path${NC}"
+    echo -e "${BLUE}Creating worktree at '$worktree_dir' for branch '$branch_name'...${NC}"
+    # Cleanup potential leftover from a failed previous attempt
+    git worktree prune
+    # Add the worktree
+    if git worktree add -f "$worktree_dir" "$branch_name"; then
+        echo -e "${GREEN}Worktree for issue #$issue_num created successfully at $worktree_dir${NC}"
+        echo -e "${GREEN}Branch '$branch_name' is checked out in this worktree.${NC}"
+        return 0
     else
-        echo -e "${YELLOW}MCP configuration file not found in main repository: $repo_mcp_config_file. Skipping sync.${NC}"
+        echo -e "${RED}Error creating worktree at '$worktree_dir' for branch '$branch_name'.${NC}"
+        # Attempt to clean up a failed worktree add
+        rm -rf "$worktree_dir"
+        # It's also possible the branch was created but worktree add failed. 
+        # Depending on policy, could remove branch here, or leave for manual cleanup.
+        return 1
     fi
+}
 
-    # Check MCP configuration in worktree
-    local worktree_mcp_check_path="$worktree_dir/$mcp_relative_path"
-    if [ -f "$worktree_mcp_check_path" ]; then
-        echo -e "${GREEN}MCP configuration check completed in worktree: $worktree_mcp_check_path${NC}"
-    else
-        echo -e "${RED}Error: MCP configuration file not found in worktree: $worktree_mcp_check_path${NC}"
-        # Optionally, exit 1 if MCP config is critical for worktree operation
-        # exit 1
+# Get the current worktree directory if inside a vive worktree
+get_current_vive_worktree_dir() {
+    local current_git_dir
+    current_git_dir=$(git rev-parse --git-dir 2>/dev/null)
+    if [[ "$current_git_dir" == *.git/worktrees/* ]]; then
+        # Inside a worktree, .git is a file pointing to the main .git dir
+        # readlink -f on .git file, then dirname to get the worktree root
+        local git_file_path
+        git_file_path=$(git rev-parse --git-path .git)
+        if [ -f "$git_file_path" ]; then # It is indeed a file for worktrees
+            # We want the directory containing this .git file
+            dirname "$git_file_path"
+            return 0
+        fi
+    elif [[ "$PWD" == "$REPO_ROOT/.vive/issues/"* ]]; then
+         # Fallback: if PWD is inside the .vive/issues structure
+         # This is less robust but can be a fallback.
+         # Extract the <num> part and reconstruct
+         local potential_issue_num=$(echo "$PWD" | sed -n "s|^$REPO_ROOT/.vive/issues/\([0-9]*\).*|\1|p")
+         if [ -n "$potential_issue_num" ]; then
+            echo "$REPO_ROOT/.vive/issues/$potential_issue_num"
+            return 0
+         fi 
     fi
-    
-    echo "$worktree_dir"
+    # Not in a vive worktree or failed to determine
+    echo "$REPO_ROOT" # Default to REPO_ROOT if not in a specific worktree
+    return 1
+}
+
+# Get the issue number from the current branch name if it matches the pattern
+get_issue_num_from_branch() {
+    local branch_name
+    branch_name=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [[ "$branch_name" =~ ^${PROJECT_NAME}-issue-([0-9]+)$ ]]; then # Use $PROJECT_NAME
+        echo "${BASH_REMATCH[1]}"
+    else
+        echo ""
+    fi
 }
 
 # Claude Code初期化チェック
