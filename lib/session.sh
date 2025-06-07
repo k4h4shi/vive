@@ -472,6 +472,7 @@ send_prompt_to_claude() {
     # Wait for Claude Code to be ready (look for prompt indicator)
     local elapsed=0
     local claude_ready=false
+    local trust_handled=false
     
     while [ $elapsed -lt $max_wait_time ]; do
         sleep $wait_interval
@@ -480,11 +481,28 @@ send_prompt_to_claude() {
         # Capture tmux output to check if Claude is ready
         local output=$(tmux capture-pane -t "$session_name" -p 2>/dev/null || echo "")
         
-        # Check for various ready indicators
-        if [[ "$output" =~ (\?|\>|\$|Welcome|Ready) ]] && [[ ! "$output" =~ (Loading|Starting|Initializing) ]]; then
+        # First, check for trust prompt and handle it
+        if [ "$trust_handled" = "false" ] && [[ "$output" =~ "Do you trust the files in this folder?" ]]; then
+            echo -e "${YELLOW}Handling trust prompt...${NC}"
+            tmux send-keys -t "$session_name" "" C-m
+            trust_handled=true
+            sleep 2
+            continue
+        fi
+        
+        # Check if we're at the actual Claude prompt (? for shortcuts)
+        # Make sure it's not the trust prompt by checking for specific patterns
+        if [[ "$output" =~ \?[[:space:]]+for[[:space:]]+shortcuts ]] && [[ ! "$output" =~ "Do you trust" ]]; then
             claude_ready=true
-            echo -e "${GREEN}Claude Code is ready (${elapsed}s)${NC}"
+            echo -e "${GREEN}Claude Code is ready for input (${elapsed}s)${NC}"
             break
+        fi
+        
+        # Also check for Welcome message after trust has been handled
+        if [ "$trust_handled" = "true" ] && [[ "$output" =~ "Welcome to Claude Code!" ]]; then
+            # Wait a bit more for the actual prompt
+            sleep 2
+            continue
         fi
         
         echo -e "${YELLOW}Waiting for Claude Code to be ready... (${elapsed}s/${max_wait_time}s)${NC}"
