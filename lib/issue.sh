@@ -191,7 +191,7 @@ run_issue_mode() {
     # Claude Code initialization check (always run)
     # check_claude_init "$worktree_dir"  # TODO: 汎用化対応で一時的にコメントアウト
     
-    # Prompt creation (if keep_worktree mode, note it's a continuation job)
+    # Prompt creation using template system
     local context_note=""
     if [ "$keep_worktree" = "true" ]; then
         context_note="
@@ -203,22 +203,13 @@ This is a continuation job from an existing Worktree.
 - Please check progress before continuing work"
     fi
 
-    local prompt="Issue #${issue_number}: ${ISSUE_TITLE}
-
-## Summary
-$(echo "$ISSUE_BODY" | head -c 1000)$([ ${#ISSUE_BODY} -gt 1000 ] && echo "...")${context_note}
-
----
-You are the AI pair developer for this Worktree.
-Work directory: ${worktree_dir}
-
-Steps:
-1. Analyze Issue content and create implementation plan
-2. Create appropriate tests (unit/E2E)
-3. Implement/Refactor
-4. Commit/Push/PR creation
-
-Please create PR with \"#${issue_number}\" in PR title when finished."
+    echo -e "${BLUE}Loading prompt template...${NC}"
+    local prompt=$(load_and_process_prompt "$issue_number" "$ISSUE_TITLE" "$ISSUE_BODY" "$worktree_dir" "$context_note")
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to generate prompt from template${NC}"
+        exit 1
+    fi
 
     # Claude Code execution
     if [ "$use_async" = "true" ]; then
