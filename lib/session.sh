@@ -466,8 +466,8 @@ send_prompt_to_claude() {
     
     echo -e "${BLUE}Starting Claude Code and sending prompt directly...${NC}"
     
-    # Start Claude Code in the tmux session
-    tmux send-keys -t "$session_name" "claude --mcp-config '$mcp_config_file'" C-m
+    # Start Claude Code in the tmux session with Claude 4 Opus as default model
+    tmux send-keys -t "$session_name" "ANTHROPIC_MODEL=claude-opus-4-20250514 claude --mcp-config '$mcp_config_file'" C-m
     
     # Wait for Claude Code to be ready (look for prompt indicator)
     local elapsed=0
