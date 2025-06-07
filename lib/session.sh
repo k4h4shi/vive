@@ -307,11 +307,9 @@ run_claude_tmux() {
     if tmux has-session -t "$session_name" 2>/dev/null; then
         echo -e "${YELLOW}Removing existing session '$session_name'...${NC}"
         tmux kill-session -t "$session_name"
+        # Wait for session to fully terminate
+        sleep 1
     fi
-    
-    # Save prompt to file
-    local prompt_file="/tmp/claude_prompt_$(date +%s).txt"
-    echo "$prompt" > "$prompt_file"
     
     # Define log file path
     local log_file="/tmp/claude_session_${session_name}_$(date +%s).log"
@@ -338,9 +336,8 @@ run_claude_tmux() {
          echo -e '${BLUE}Session: $session_name${NC}'; \
          echo -e '${BLUE}Working directory: \$(pwd)${NC}'; \
          echo ''; \
-         echo -e '${YELLOW}Claude Code startup preparation...${NC}'; \
+         echo -e '${YELLOW}Preparing to start Claude Code with new shell-based approach...${NC}'; \
          echo ''; \
-         echo 'Claude Code startup waiting...'; \
          exec bash"
     
     # Verify session creation
@@ -352,24 +349,21 @@ run_claude_tmux() {
     
     echo -e "${GREEN}✅ tmux session '$session_name' created${NC}"
     
-    # Define expect script path
-    local expect_script="$SCRIPT_DIR/watchdog.exp"
+    # NEW APPROACH: Use shell-based prompt delivery instead of expect script
+    echo -e "${YELLOW}Using new shell-based approach to start Claude Code...${NC}"
     
-    # Check expect script existence
-    if [ ! -f "$expect_script" ]; then
-        echo -e "${RED}Error: expect script not found: $expect_script${NC}"
+    # Start Claude Code and send prompt directly
+    send_prompt_to_claude "$session_name" "$prompt" "$mcp_config_file"
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Failed to send prompt to Claude Code${NC}"
         exit 1
     fi
     
-    # Run expect script in background (start mode)
-    echo -e "${YELLOW}Starting Claude Code (background)...${NC}"
-    nohup expect "$expect_script" start "$prompt_file" "$mcp_config_file" "$session_name" "$log_file" > /dev/null 2>&1 &
-    local expect_pid=$!
-    
-    echo -e "${GREEN}✅ Started Claude Code startup process (PID: $expect_pid)${NC}"
     echo ""
     
-    # Start watchdog process (common function used)
+    # Optional: Start watchdog process for auto-approval only (not for prompt delivery)
+    echo -e "${BLUE}Starting watchdog for auto-approval (prompt delivery is now handled by shell)...${NC}"
     start_watchdog_process "$session_name" 3 true
     
     # If synchronous mode, attach
@@ -389,8 +383,13 @@ run_claude_tmux() {
         echo ""
         echo -e "${YELLOW}Operation methods:${NC}"
         echo "  Session check: $cmd sessions"
-        echo "  Attach: $cmd attach $session_identifier"
-        echo "  Log display: $cmd logs $session_identifier"
+        if [ -n "$issue_number" ] && [ "$issue_number" != "" ]; then
+            echo "  Attach: $cmd attach $issue_number"
+            echo "  Log display: $cmd logs $issue_number"
+        else
+            echo "  Attach: $cmd attach $session_name"
+            echo "  Log display: $cmd logs $session_name"
+        fi
         echo ""
         echo -e "${BLUE}Hint: Progress will be announced via terminal notification or say command${NC}"
     fi
@@ -457,7 +456,57 @@ reattach_expect_process() {
     echo -e "${GREEN}expect process resumed automatic response${NC}"
 }
 
-# Put session in watchdog state (reattach expect process)
+# Send prompt directly to Claude Code via tmux (new shell-based approach)
+send_prompt_to_claude() {
+    local session_name="$1"
+    local prompt="$2"
+    local mcp_config_file="$3"
+    local max_wait_time=60  # Maximum wait time in seconds
+    local wait_interval=2   # Check interval in seconds
+    
+    echo -e "${BLUE}Starting Claude Code and sending prompt directly...${NC}"
+    
+    # Start Claude Code in the tmux session with Claude 4 Opus as default model
+    tmux send-keys -t "$session_name" "ANTHROPIC_MODEL=claude-opus-4-20250514 claude --mcp-config '$mcp_config_file'" C-m
+    
+    # Wait for Claude Code to be ready (look for prompt indicator)
+    local elapsed=0
+    local claude_ready=false
+    
+    while [ $elapsed -lt $max_wait_time ]; do
+        sleep $wait_interval
+        elapsed=$((elapsed + wait_interval))
+        
+        # Capture tmux output to check if Claude is ready
+        local output=$(tmux capture-pane -t "$session_name" -p 2>/dev/null || echo "")
+        
+        # Check for various ready indicators
+        if [[ "$output" =~ (\?|\>|\$|Welcome|Ready) ]] && [[ ! "$output" =~ (Loading|Starting|Initializing) ]]; then
+            claude_ready=true
+            echo -e "${GREEN}Claude Code is ready (${elapsed}s)${NC}"
+            break
+        fi
+        
+        echo -e "${YELLOW}Waiting for Claude Code to be ready... (${elapsed}s/${max_wait_time}s)${NC}"
+    done
+    
+    if [ "$claude_ready" = "false" ]; then
+        echo -e "${YELLOW}Warning: Claude Code readiness timeout. Proceeding anyway...${NC}"
+    fi
+    
+    # Additional short wait to ensure UI is stable
+    sleep 2
+    
+    # Send the prompt directly
+    echo -e "${BLUE}Sending prompt to Claude Code...${NC}"
+    tmux send-keys -t "$session_name" -l "$prompt"
+    tmux send-keys -t "$session_name" C-m
+    
+    echo -e "${GREEN}✅ Prompt sent successfully${NC}"
+    return 0
+}
+
+# Put session in watchdog state (simple wrapper)
 watch_session() {
     local issue_number="$1"
     local session_name="${PROJECT_NAME}-issue-${issue_number}"
