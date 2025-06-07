@@ -263,8 +263,8 @@ proc start_claude_code {prompt_file mcp_config session_name} {
     
     log_message "\n=== Starting Claude Code in session $session_name ==="
     
-    # Claude Codeを起動
-    spawn tmux send-keys -t $session_name "claude --mcp-config '$mcp_config'" C-m
+    # Claude Codeを起動（デフォルトモデルをclaude-opus-4-20250514に設定）
+    spawn tmux send-keys -t $session_name "ANTHROPIC_MODEL=claude-opus-4-20250514 claude --mcp-config '$mcp_config'" C-m
     sleep 2
     
     return $prompt_content
