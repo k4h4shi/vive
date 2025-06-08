@@ -3,7 +3,13 @@
 
 # Function to clean up worktrees and tmux sessions
 run_cleanup() {
-    echo -e "${BLUE}Starting cleanup process...${NC}"
+    local target_issue="$1"
+    
+    if [ -n "$target_issue" ]; then
+        echo -e "${BLUE}Starting cleanup process for issue #$target_issue...${NC}"
+    else
+        echo -e "${BLUE}Starting cleanup process...${NC}"
+    fi
 
     local worktree_base_dir="$REPO_ROOT/.vive/issues"
     local current_branch
@@ -15,6 +21,12 @@ run_cleanup() {
         find "$worktree_base_dir" -mindepth 1 -maxdepth 1 -type d | while read -r worktree_path; do
             local worktree_name=$(basename "$worktree_path")
             local issue_number=${worktree_name} # Assuming worktree_name is just the issue number
+            
+            # Skip if target_issue is specified and this is not the target
+            if [ -n "$target_issue" ] && [ "$issue_number" != "$target_issue" ]; then
+                continue
+            fi
+            
             # For session name, prepend with project name and 'issue-'
             local session_name="${PROJECT_NAME}-issue-${issue_number}"
 
@@ -46,6 +58,12 @@ run_cleanup() {
     echo -e "${YELLOW}Cleaning up stale tmux sessions...${NC}"
     tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-issue-" | while read -r session_name; do # Use $PROJECT_NAME
         local issue_number=${session_name#${PROJECT_NAME}-issue-} # Use $PROJECT_NAME
+        
+        # Skip if target_issue is specified and this is not the target
+        if [ -n "$target_issue" ] && [ "$issue_number" != "$target_issue" ]; then
+            continue
+        fi
+        
         local worktree_dir_check="$worktree_base_dir/$issue_number"
         if [ ! -d "$worktree_dir_check" ]; then
             echo -e "${BLUE}Killing stale tmux session '$session_name' as its worktree directory '$worktree_dir_check' is missing.${NC}"
@@ -67,9 +85,15 @@ run_cleanup() {
         
         if [ -n "$session_part" ]; then # Ensure session_part is not empty
              # $session_part should be like ${PROJECT_NAME}-issue-NUMBER
+            local issue_number_from_file=${session_part#${PROJECT_NAME}-issue-}
+            
+            # Skip if target_issue is specified and this is not the target
+            if [ -n "$target_issue" ] && [ "$issue_number_from_file" != "$target_issue" ]; then
+                continue
+            fi
+            
             if ! tmux has-session -t "$session_part" 2>/dev/null; then
                 # Further check if the worktree also doesn't exist before removing logs
-                local issue_number_from_file=${session_part#${PROJECT_NAME}-issue-}
                 local worktree_dir_for_log_check="$worktree_base_dir/$issue_number_from_file"
                 if [ ! -d "$worktree_dir_for_log_check" ]; then
                     echo -e "${BLUE}Removing stale file for non-existent session/worktree '$session_part': $file_path${NC}"
@@ -93,6 +117,13 @@ run_cleanup() {
         # Let's try a simpler grep on the command line first, as VIVE_SESSION_NAME is an argument to expect.
         if echo "$process_cmd" | grep -qE "${PROJECT_NAME}-issue-[0-9]+"; then # Use $PROJECT_NAME
             local session_name_in_cmd=$(echo "$process_cmd" | grep -oE "${PROJECT_NAME}-issue-[0-9]+") # Use $PROJECT_NAME
+            local issue_number_from_cmd=${session_name_in_cmd#${PROJECT_NAME}-issue-}
+            
+            # Skip if target_issue is specified and this is not the target
+            if [ -n "$target_issue" ] && [ "$issue_number_from_cmd" != "$target_issue" ]; then
+                continue
+            fi
+            
             if [ -n "$session_name_in_cmd" ] && ! tmux has-session -t "$session_name_in_cmd" 2>/dev/null; then
                 echo -e "${BLUE}Killing stray expect process (PID: $pid) for dead tmux session '$session_name_in_cmd'${NC}"
                 kill "$pid" 2>/dev/null || true 
