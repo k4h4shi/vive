@@ -76,6 +76,7 @@ Usage: $0 [command] [options]
 
 Commands:
   fix <issue>          Fix a single issue with AI assistance
+  main [prompt]        Start Claude Code on main branch without issues/worktrees
   batch <issues...>    Process multiple issues in parallel  
   sessions             List all active vive sessions
   attach <issue>       Attach to a running session
@@ -93,6 +94,8 @@ Options:
 
 Examples:
   $0 fix 42                      Fix issue #42
+  $0 main "Add logging"          Run Claude Code on main branch with prompt
+  $0 main -s                     Run Claude Code on main branch (sync mode)
   $0 batch 41 42 43              Process issues #41, #42, #43 in parallel
   $0 attach 42                   Attach to session for issue #42
   $0 sessions                    List all active sessions
