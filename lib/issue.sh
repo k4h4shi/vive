@@ -275,6 +275,73 @@ run_prompt_mode() {
     fi
 }
 
+# Main branch mode - work directly on main without issues/worktrees
+run_main_mode() {
+    local prompt="$1"
+    local use_async="$2"
+    
+    echo -e "${GREEN}Claude Code Main Branch Mode${NC}"
+    echo -e "${BLUE}Working directly on main branch without creating issues or worktrees${NC}"
+    
+    if [ -n "$prompt" ]; then
+        echo -e "${BLUE}Prompt: $prompt${NC}"
+    fi
+    
+    # If in synchronous mode, confirm
+    if [ "$use_async" != "true" ]; then
+        echo ""
+        echo -e "${YELLOW}Do you want to start Claude Code on the main branch? (y/N):${NC}"
+        read -r confirm
+        
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo -e "${YELLOW}Main branch mode canceled${NC}"
+            exit 0
+        fi
+    fi
+    
+    # Git status check
+    check_git_status
+    
+    # Make sure we're on main branch
+    cd "$REPO_ROOT"
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$current_branch" != "main" ] && [ "$current_branch" != "master" ]; then
+        echo -e "${YELLOW}Switching to main branch...${NC}"
+        git checkout main || git checkout master || {
+            echo -e "${RED}Error: Cannot switch to main branch${NC}"
+            exit 1
+        }
+    fi
+    
+    # Pull latest changes
+    echo -e "${BLUE}Pulling latest changes from origin...${NC}"
+    git pull origin main || git pull origin master || {
+        echo -e "${YELLOW}Warning: Could not pull latest changes${NC}"
+    }
+    
+    # If no prompt provided, ask for it
+    if [ -z "$prompt" ]; then
+        echo -e "${BLUE}Please enter the task or prompt for Claude Code:${NC}"
+        read -r prompt
+        
+        if [ -z "$prompt" ]; then
+            echo -e "${RED}Error: No prompt provided${NC}"
+            exit 1
+        fi
+    fi
+    
+    # Claude Code execution on main branch
+    if [ "$use_async" = "true" ]; then
+        # tmux mode
+        check_tmux
+        run_claude_tmux "$prompt" "$REPO_ROOT" "main" "" "false"
+    else
+        # tmux mode (synchronous/attach)
+        check_tmux
+        run_claude_tmux "$prompt" "$REPO_ROOT" "main" "" "true"
+    fi
+}
+
 # Issue creation mode (simple version)
 create_issue() {
     local title="$1"

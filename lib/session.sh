@@ -108,8 +108,8 @@ show_tmux_sessions() {
     
     local has_sessions=false
     
-    # Get tmux session list (issue-* only)
-    for session in $(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-issue-" || true); do
+    # Get tmux session list (issue-* and main-*)
+    for session in $(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || true); do
         has_sessions=true
         local created=$(tmux list-sessions -F "#{session_name} #{session_created}" 2>/dev/null | grep "^$session " | awk '{print $2}')
         local created_date=$(date -r "$created" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "Unknown")
@@ -145,6 +145,9 @@ show_tmux_sessions() {
             if [ -d "$worktree_dir" ]; then
                 echo "  Worktree: $worktree_dir"
             fi
+        elif [[ "$session" =~ ^${PROJECT_NAME}-main- ]]; then
+            echo "  Mode: Main branch (no issue/worktree)"
+            echo "  Working directory: $REPO_ROOT"
         fi
         
         echo ""
@@ -290,6 +293,10 @@ run_claude_tmux() {
     local session_name=""
     if [ -n "$issue_number" ] && [ "$issue_number" != "" ]; then
         session_name="${PROJECT_NAME}-issue-${issue_number}"
+    elif [ "$mode" = "main" ]; then
+        # Main branch mode - use project name and timestamp
+        local timestamp=$(date +%Y%m%d_%H%M%S)
+        session_name="${PROJECT_NAME}-main-${timestamp}"
     else
         # Timestamp for prompt mode
         local timestamp=$(date +%Y%m%d_%H%M%S)
