@@ -146,9 +146,9 @@ proc detect_completion {output seconds_since_change} {
 # エージェント名を取得する関数
 proc get_agent_name {session_name} {
     if {[regexp {issue-([0-9]+)} $session_name match issue_num]} {
-        return "エージェント $issue_num"
+        return "Agent $issue_num"
     }
-    return "エージェント"
+    return "Agent"
 }
 
 # 音声通知を送信する関数
