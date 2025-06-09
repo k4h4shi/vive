@@ -11,16 +11,16 @@ run_cleanup() {
         echo -e "${BLUE}Starting cleanup process...${NC}"
     fi
 
-    local worktree_base_dir="$REPO_ROOT/.vive/issues"
+    local worktree_base_dir="$(dirname "$REPO_ROOT")"
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD)
 
     # 1. Clean up worktrees
     echo -e "${YELLOW}Cleaning up worktrees...${NC}"
     if [ -d "$worktree_base_dir" ]; then
-        find "$worktree_base_dir" -mindepth 1 -maxdepth 1 -type d | while read -r worktree_path; do
+        find "$worktree_base_dir" -mindepth 1 -maxdepth 1 -type d -name "${PROJECT_NAME}-issue-*" | while read -r worktree_path; do
             local worktree_name=$(basename "$worktree_path")
-            local issue_number=${worktree_name} # Assuming worktree_name is just the issue number
+            local issue_number=${worktree_name#${PROJECT_NAME}-issue-} # Extract issue number from pattern
             
             # Skip if target_issue is specified and this is not the target
             if [ -n "$target_issue" ] && [ "$issue_number" != "$target_issue" ]; then
@@ -50,8 +50,6 @@ run_cleanup() {
                 fi
             fi
         done
-    else
-        echo -e "${GREEN}Worktree base directory $worktree_base_dir not found. No worktrees to clean.${NC}"
     fi
 
     # 2. Clean up tmux sessions that don't have a corresponding worktree directory
@@ -64,7 +62,7 @@ run_cleanup() {
             continue
         fi
         
-        local worktree_dir_check="$worktree_base_dir/$issue_number"
+        local worktree_dir_check="$worktree_base_dir/${PROJECT_NAME}-issue-${issue_number}"
         if [ ! -d "$worktree_dir_check" ]; then
             echo -e "${BLUE}Killing stale tmux session '$session_name' as its worktree directory '$worktree_dir_check' is missing.${NC}"
             tmux kill-session -t "$session_name"
@@ -94,7 +92,7 @@ run_cleanup() {
             
             if ! tmux has-session -t "$session_part" 2>/dev/null; then
                 # Further check if the worktree also doesn't exist before removing logs
-                local worktree_dir_for_log_check="$worktree_base_dir/$issue_number_from_file"
+                local worktree_dir_for_log_check="$worktree_base_dir/${PROJECT_NAME}-issue-${issue_number_from_file}"
                 if [ ! -d "$worktree_dir_for_log_check" ]; then
                     echo -e "${BLUE}Removing stale file for non-existent session/worktree '$session_part': $file_path${NC}"
                     rm -f "$file_path"
