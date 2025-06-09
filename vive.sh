@@ -189,6 +189,28 @@ main() {
         # Interactive shell in worktree
         shift # Remove "shell"
         shell_in_worktree "$@"
+    elif [ "$1" = "main" ]; then
+        # Main branch mode - work without issues/worktrees
+        shift # Remove "main"
+        local prompt=""
+        local use_async="true"
+        
+        # Parse arguments
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                -s|--sync)
+                    use_async="false"
+                    shift
+                    ;;
+                *)
+                    # Everything else is the prompt
+                    prompt="$*"
+                    break
+                    ;;
+            esac
+        done
+        
+        run_main_mode "$prompt" "$use_async"
     else
         # Unknown command
         echo -e "${RED}Error: Unknown command '$1'${NC}"
