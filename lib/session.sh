@@ -271,7 +271,8 @@ show_tmux_logs() {
         echo ""
         
         # watch command for real-time display
-        watch -n 1 "tmux capture-pane -t '$session_name:0.0' -p 2>/dev/null || echo 'Session $session_name not found'"
+        # Use -t option to disable title (prevents creating watch_* files)
+        watch -t -n 1 "tmux capture-pane -t '$session_name:0.0' -p 2>/dev/null || echo 'Session $session_name not found'"
     else
         echo -e "${GREEN}Session '$session_name' log (latest 50 lines):${NC}"
         echo ""
