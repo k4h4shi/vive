@@ -79,8 +79,8 @@ Commands:
   main [prompt]        Start Claude Code on main branch without issues/worktrees
   batch <issues...>    Process multiple issues in parallel  
   sessions             List all active vive sessions
-  attach <issue>       Attach to a running session
-  logs <issue>         Show logs for a specific issue
+      attach <issue|main>  Attach to a running session
+      logs <issue|main>    Show logs for a specific session
   cleanup              Clean up completed sessions and worktrees
   cleanup all          Force cleanup all sessions and worktrees
   dashboard            Show a dashboard with logs from all active vive-issue sessions
@@ -98,7 +98,10 @@ Examples:
   $0 main -s                     Run Claude Code on main branch (sync mode)
   $0 batch 41 42 43              Process issues #41, #42, #43 in parallel
   $0 attach 42                   Attach to session for issue #42
+  $0 attach main                 Attach to main branch session
   $0 sessions                    List all active sessions
+  $0 logs main                   Show logs for main branch session
+  $0 send main "message"         Send message to main branch session
   $0 cleanup                     Clean up completed work
 
 EOF

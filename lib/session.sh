@@ -166,10 +166,21 @@ control_expect_process() {
     local action="$2"  # pause, resume, stop
     local session_name=""
     
-    # Determine session name (if number, add issue-, otherwise use as is)
+    # Determine session name
     if [[ "$session_identifier" =~ ^[0-9]+$ ]]; then
+        # Issue number
         session_name="${PROJECT_NAME}-issue-${session_identifier}"
+    elif [ "$session_identifier" = "main" ]; then
+        # Main branch session
+        session_name=$(get_main_session_name)
+        if [ $? -ne 0 ] || [ -z "$session_name" ]; then
+            echo -e "${RED}Error: No main branch session found${NC}"
+            echo -e "${YELLOW}Available sessions:${NC}"
+            tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
+            return 1
+        fi
     else
+        # Direct session name
         session_name="$session_identifier"
     fi
     
@@ -207,15 +218,39 @@ control_expect_process() {
     esac
 }
 
+# Helper function to find main branch session
+get_main_session_name() {
+    # Find the most recent main session
+    local main_sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-main-" | sort -r | head -1)
+    
+    if [ -n "$main_sessions" ]; then
+        echo "$main_sessions"
+        return 0
+    else
+        return 1
+    fi
+}
+
 # tmux session attach (improved version)
 attach_tmux_session() {
     local session_identifier="$1"
     local session_name=""
     
-    # Determine session name (if number, add issue-, otherwise use as is)
+    # Determine session name
     if [[ "$session_identifier" =~ ^[0-9]+$ ]]; then
+        # Issue number
         session_name="${PROJECT_NAME}-issue-${session_identifier}"
+    elif [ "$session_identifier" = "main" ]; then
+        # Main branch session
+        session_name=$(get_main_session_name)
+        if [ $? -ne 0 ] || [ -z "$session_name" ]; then
+            echo -e "${RED}Error: No main branch session found${NC}"
+            echo -e "${YELLOW}Available sessions:${NC}"
+            tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
+            exit 1
+        fi
     else
+        # Direct session name
         session_name="$session_identifier"
     fi
     
@@ -224,7 +259,7 @@ attach_tmux_session() {
         echo -e "${RED}Error: Session '$session_name' not found${NC}"
         echo ""
         echo -e "${YELLOW}Available sessions:${NC}"
-        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-issue-" || echo "No active sessions"
+        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
         exit 1
     fi
     
@@ -252,10 +287,21 @@ show_tmux_logs() {
     local follow_mode="$2"
     local session_name=""
     
-    # Determine session name (if number, add issue-, otherwise use as is)
+    # Determine session name
     if [[ "$session_identifier" =~ ^[0-9]+$ ]]; then
+        # Issue number
         session_name="${PROJECT_NAME}-issue-${session_identifier}"
+    elif [ "$session_identifier" = "main" ]; then
+        # Main branch session
+        session_name=$(get_main_session_name)
+        if [ $? -ne 0 ] || [ -z "$session_name" ]; then
+            echo -e "${RED}Error: No main branch session found${NC}"
+            echo -e "${YELLOW}Available sessions:${NC}"
+            tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
+            exit 1
+        fi
     else
+        # Direct session name
         session_name="$session_identifier"
     fi
     
@@ -406,14 +452,32 @@ run_claude_tmux() {
 # Reattach expect process
 reattach_expect_process() {
     local session_identifier="$1"
-    local session_name="${PROJECT_NAME}-issue-${session_identifier}"
+    local session_name=""
+    
+    # Determine session name
+    if [[ "$session_identifier" =~ ^[0-9]+$ ]]; then
+        # Issue number
+        session_name="${PROJECT_NAME}-issue-${session_identifier}"
+    elif [ "$session_identifier" = "main" ]; then
+        # Main branch session
+        session_name=$(get_main_session_name)
+        if [ $? -ne 0 ] || [ -z "$session_name" ]; then
+            echo -e "${RED}Error: No main branch session found${NC}"
+            echo -e "${YELLOW}Available sessions:${NC}"
+            tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
+            return 1
+        fi
+    else
+        # Direct session name
+        session_name="$session_identifier"
+    fi
     
     # Check session existence
     if ! tmux has-session -t "$session_name" 2>/dev/null; then
         echo -e "${RED}Error: Session '$session_name' not found${NC}"
         echo ""
         echo -e "${YELLOW}Available sessions:${NC}"
-        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-issue-" || echo "No active sessions"
+        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
         return 1
     fi
     
@@ -564,15 +628,33 @@ send_prompt_to_claude() {
 
 # Put session in watchdog state (simple wrapper)
 watch_session() {
-    local issue_number="$1"
-    local session_name="${PROJECT_NAME}-issue-${issue_number}"
+    local session_identifier="$1"
+    local session_name=""
+    
+    # Determine session name
+    if [[ "$session_identifier" =~ ^[0-9]+$ ]]; then
+        # Issue number
+        session_name="${PROJECT_NAME}-issue-${session_identifier}"
+    elif [ "$session_identifier" = "main" ]; then
+        # Main branch session
+        session_name=$(get_main_session_name)
+        if [ $? -ne 0 ] || [ -z "$session_name" ]; then
+            echo -e "${RED}Error: No main branch session found${NC}"
+            echo -e "${YELLOW}Available sessions:${NC}"
+            tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
+            return 1
+        fi
+    else
+        # Direct session name
+        session_name="$session_identifier"
+    fi
     
     # Check session existence
     if ! tmux has-session -t "$session_name" 2>/dev/null; then
         echo -e "${RED}Error: Session '$session_name' not found${NC}"
         echo ""
         echo -e "${YELLOW}Available sessions:${NC}"
-        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-issue-" || echo "No active sessions"
+        tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(issue|main)-" || echo "No active sessions"
         return 1
     fi
     
@@ -585,7 +667,7 @@ watch_session() {
     echo ""
     echo -e "${YELLOW}Session management commands:${NC}"
     echo "  Status: $cmd sessions"
-    echo "  Attach: $cmd attach $issue_number"
-    echo "  Logs: $cmd logs $issue_number"
-    echo "  Send message: $cmd send $issue_number <message>"
+    echo "  Attach: $cmd attach $session_identifier"
+    echo "  Logs: $cmd logs $session_identifier"
+    echo "  Send message: $cmd send $session_identifier <message>"
 } 
