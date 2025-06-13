@@ -36,9 +36,24 @@ run_cleanup() {
                 continue
             fi
 
-            # Check if a tmux session exists for this worktree
+            # Check if a tmux session exists for this worktree and if it's actively attached
             if tmux has-session -t "$session_name" 2>/dev/null; then
-                echo -e "${YELLOW}Skipping worktree with active tmux session: $worktree_path (session: $session_name)${NC}"
+                local session_attached
+                session_attached=$(tmux list-sessions -F "#{session_name} #{session_attached}" 2>/dev/null | grep "^$session_name " | awk '{print $2}')
+                
+                if [ "$session_attached" = "1" ]; then
+                    echo -e "${YELLOW}Skipping worktree with actively attached tmux session: $worktree_path (session: $session_name)${NC}"
+                else
+                    echo -e "${BLUE}Killing detached tmux session and removing worktree: $worktree_path (session: $session_name)${NC}"
+                    tmux kill-session -t "$session_name" 2>/dev/null || true
+                    git worktree remove --force "$worktree_path" || echo -e "${RED}Failed to remove worktree $worktree_path, it might be locked or already removed.${NC}"
+                    # Also remove the branch if it exists and follows the pattern ${PROJECT_NAME}-issue-*
+                    local branch_name="${PROJECT_NAME}-issue-${issue_number}"
+                    if git show-ref --quiet "refs/heads/$branch_name"; then
+                        echo -e "${BLUE}Removing associated branch: $branch_name${NC}"
+                        git branch -D "$branch_name" || echo -e "${RED}Failed to remove branch $branch_name${NC}"
+                    fi
+                fi
             else
                 echo -e "${BLUE}Removing worktree: $worktree_path${NC}"
                 git worktree remove --force "$worktree_path" || echo -e "${RED}Failed to remove worktree $worktree_path, it might be locked or already removed.${NC}"
@@ -69,9 +84,25 @@ run_cleanup() {
         fi
     done
 
+    # 2b. Clean up detached main and dashboard sessions
+    echo -e "${YELLOW}Cleaning up detached main and dashboard sessions...${NC}"
+    tmux list-sessions -F "#{session_name} #{session_attached}" 2>/dev/null | grep -E "^${PROJECT_NAME}-(main|dashboard)" | while read -r session_name session_attached; do
+        # Skip if target_issue is specified (main sessions are not issue-specific)
+        if [ -n "$target_issue" ]; then
+            continue
+        fi
+        
+        if [ "$session_attached" = "0" ]; then
+            echo -e "${BLUE}Killing detached session: $session_name${NC}"
+            tmux kill-session -t "$session_name" 2>/dev/null || true
+        else
+            echo -e "${YELLOW}Skipping actively attached session: $session_name${NC}"
+        fi
+    done
+
     # 3. Clean up old log files and completion markers for non-existent sessions
     echo -e "${YELLOW}Cleaning up old log files and completion markers...${NC}"
-    find /tmp -maxdepth 1 -type f \( -name "claude_session_${PROJECT_NAME}-issue-*.log" -o -name "claude_completed_${PROJECT_NAME}-issue-*" \) | while read -r file_path; do # Use $PROJECT_NAME
+    find /tmp -maxdepth 1 -type f \( -name "claude_session_${PROJECT_NAME}-*.log" -o -name "claude_completed_${PROJECT_NAME}-*" \) | while read -r file_path; do # Use $PROJECT_NAME
         local base_name=$(basename "$file_path")
         local session_part
         if [[ "$base_name" == claude_session_* ]]; then
@@ -82,22 +113,35 @@ run_cleanup() {
         fi
         
         if [ -n "$session_part" ]; then # Ensure session_part is not empty
-             # $session_part should be like ${PROJECT_NAME}-issue-NUMBER
-            local issue_number_from_file=${session_part#${PROJECT_NAME}-issue-}
-            
-            # Skip if target_issue is specified and this is not the target
-            if [ -n "$target_issue" ] && [ "$issue_number_from_file" != "$target_issue" ]; then
-                continue
-            fi
-            
-            if ! tmux has-session -t "$session_part" 2>/dev/null; then
-                # Further check if the worktree also doesn't exist before removing logs
-                local worktree_dir_for_log_check="$worktree_base_dir/${PROJECT_NAME}-issue-${issue_number_from_file}"
-                if [ ! -d "$worktree_dir_for_log_check" ]; then
-                    echo -e "${BLUE}Removing stale file for non-existent session/worktree '$session_part': $file_path${NC}"
+            if [[ "$session_part" == *"-issue-"* ]]; then
+                # Handle issue sessions
+                local issue_number_from_file=${session_part#${PROJECT_NAME}-issue-}
+                
+                # Skip if target_issue is specified and this is not the target
+                if [ -n "$target_issue" ] && [ "$issue_number_from_file" != "$target_issue" ]; then
+                    continue
+                fi
+                
+                if ! tmux has-session -t "$session_part" 2>/dev/null; then
+                    # Further check if the worktree also doesn't exist before removing logs
+                    local worktree_dir_for_log_check="$worktree_base_dir/${PROJECT_NAME}-issue-${issue_number_from_file}"
+                    if [ ! -d "$worktree_dir_for_log_check" ]; then
+                        echo -e "${BLUE}Removing stale file for non-existent session/worktree '$session_part': $file_path${NC}"
+                        rm -f "$file_path"
+                    else
+                        echo -e "${YELLOW}Keeping file for existing worktree (though session is dead): $file_path (worktree: $worktree_dir_for_log_check)${NC}"
+                    fi
+                fi
+            else
+                # Handle main/dashboard sessions
+                # Skip if target_issue is specified (main/dashboard sessions are not issue-specific)
+                if [ -n "$target_issue" ]; then
+                    continue
+                fi
+                
+                if ! tmux has-session -t "$session_part" 2>/dev/null; then
+                    echo -e "${BLUE}Removing stale file for non-existent session '$session_part': $file_path${NC}"
                     rm -f "$file_path"
-                else
-                    echo -e "${YELLOW}Keeping file for existing worktree (though session is dead): $file_path (worktree: $worktree_dir_for_log_check)${NC}"
                 fi
             fi
         fi
@@ -113,13 +157,21 @@ run_cleanup() {
         # Using `strings` on /proc/[pid]/environ is a common Linux method.
         # For macOS, `ps eww -p [pid]` can show environment, but parsing is harder.
         # Let's try a simpler grep on the command line first, as VIVE_SESSION_NAME is an argument to expect.
-        if echo "$process_cmd" | grep -qE "${PROJECT_NAME}-issue-[0-9]+"; then # Use $PROJECT_NAME
-            local session_name_in_cmd=$(echo "$process_cmd" | grep -oE "${PROJECT_NAME}-issue-[0-9]+") # Use $PROJECT_NAME
-            local issue_number_from_cmd=${session_name_in_cmd#${PROJECT_NAME}-issue-}
+        if echo "$process_cmd" | grep -qE "${PROJECT_NAME}-(issue-[0-9]+|main|dashboard)"; then # Use $PROJECT_NAME
+            local session_name_in_cmd=$(echo "$process_cmd" | grep -oE "${PROJECT_NAME}-(issue-[0-9]+|main-[0-9_]+|dashboard)") # Use $PROJECT_NAME
             
-            # Skip if target_issue is specified and this is not the target
-            if [ -n "$target_issue" ] && [ "$issue_number_from_cmd" != "$target_issue" ]; then
-                continue
+            if [[ "$session_name_in_cmd" == *"-issue-"* ]]; then
+                local issue_number_from_cmd=${session_name_in_cmd#${PROJECT_NAME}-issue-}
+                
+                # Skip if target_issue is specified and this is not the target
+                if [ -n "$target_issue" ] && [ "$issue_number_from_cmd" != "$target_issue" ]; then
+                    continue
+                fi
+            else
+                # For main/dashboard sessions, skip if target_issue is specified
+                if [ -n "$target_issue" ]; then
+                    continue
+                fi
             fi
             
             if [ -n "$session_name_in_cmd" ] && ! tmux has-session -t "$session_name_in_cmd" 2>/dev/null; then
