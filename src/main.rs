@@ -95,25 +95,41 @@ fn handle_action(
         Action::None | Action::Quit => {}
 
         Action::AttachSession => {
-            if let (Some(project), Some(worktree)) =
-                (state.selected_project(), state.selected_worktree())
-                && let Some(session_id) = worktree.session_id(&project.name)
-            {
-                // Ensure session exists before attaching
-                let worktree_path = worktree.path.to_string_lossy();
-                let _ = tmux.ensure_session(&session_id, Some(&worktree_path));
+            if let Some(project) = state.selected_project() {
+                // Try to get session info: first from selected worktree, then from default worktree
+                let session_info = state
+                    .selected_worktree()
+                    .and_then(|wt| wt.session_id(&project.name).map(|id| (id, wt.path.clone())))
+                    .or_else(|| {
+                        // Fall back to default worktree (main/master)
+                        project.default_worktree().and_then(|wt| {
+                            wt.session_id(&project.name).map(|id| (id, wt.path.clone()))
+                        })
+                    })
+                    .or_else(|| {
+                        // Fall back to project root with project name as session
+                        Some((project.name.clone(), project.path.clone()))
+                    });
 
-                // Restore terminal before exec
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-                terminal.show_cursor()?;
+                if let Some((session_id, worktree_path)) = session_info {
+                    let worktree_path_str = worktree_path.to_string_lossy();
+                    // Ensure session exists before attaching
+                    let _ = tmux.ensure_session(&session_id, Some(&worktree_path_str));
 
-                // This will replace the current process
-                let _ = tmux.exec_into_session(&session_id);
+                    // Restore terminal before exec
+                    disable_raw_mode()?;
+                    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                    terminal.show_cursor()?;
 
-                // If we get here, exec failed - restore terminal state
-                enable_raw_mode()?;
-                execute!(io::stdout(), EnterAlternateScreen)?;
+                    // This will replace the current process
+                    let _ = tmux.exec_into_session(&session_id);
+
+                    // If we get here, exec failed - restore terminal state
+                    enable_raw_mode()?;
+                    execute!(io::stdout(), EnterAlternateScreen)?;
+                }
+            } else {
+                state.set_error_message("No project selected");
             }
         }
 
