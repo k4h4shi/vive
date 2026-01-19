@@ -1,42 +1,36 @@
 ---
-description: Implement a feature or fix a bug in Vive. Usage: /fix [ISSUE_NUMBER]
+description: Fix a bug or implement a small feature in Vive (Rust). Usage: /fix <ISSUE_NUMBER> [DESCRIPTION]
 ---
 
-# Implement Issue (Vive Workflow)
+# Fix / Implement Feature (Rust)
 
-Follow this workflow to implement a feature for Vive.
+Implement a fix or feature for the Vive project (Rust/TUI).
 
-## 1. Preparation
+## Instructions
 
-1.  **Create Worktree**:
-    - Run: `vive start <ISSUE_NUMBER> "<DESCRIPTION>"`
-    - This will create a worktree and start a tmux session.
+1.  **Understand the Issue**:
+    - Read the issue description using `gh issue view <ISSUE_NUMBER>`.
+    - Read `docs/architecture.md` and `docs/spec-ja.md` to understand the context.
 
-2.  **Context**:
-    - The new session will have Claude active.
-    - `cd` to the worktree root is automatic.
+2.  **Create/Switch Worktree**:
+    - Use the `worktree-manager` skill to set up an isolated environment.
+    - Branch name: `fix/issue-<ISSUE_NUMBER>` or `feature/issue-<ISSUE_NUMBER>`.
 
-## 2. Planning
+3.  **Implement (TDD)**:
+    - **Write Tests First**: Create a failing test in `tests/` or a unit test in `src/`.
+    - **Implement**: Modify Rust code (`src/*.rs`) to pass the test.
+    - **Verify**: Run `cargo test` and `cargo run` to verify the TUI behavior.
 
-- If the change is complex, invoke the `planner` agent.
-- `agent run planner "How should we implement X?"`
+4.  **Review**:
+    - Run `cargo clippy` and `cargo fmt`.
+    - Check for regressions.
 
-## 3. Implementation
+5.  **Submit**:
+    - Push changes and create a PR.
+    - `gh pr create --fill`
 
-- Edit the `vive` script directly.
-- **Verification**:
-    - Since `vive` is a script, you can test it directly: `./vive <command>`
-    - Check for syntax errors: `bash -n vive`
-    - Check for style/bugs: `shellcheck vive` (if available)
+## Example
 
-## 4. Review & Documentation
-
-1.  **Review**: Run `code-reviewer` to check your Bash script.
-2.  **Docs**: Update `README.md` if command usage changes.
-3.  **Install**: Update `install.sh` if installation logic changes.
-
-## 5. Finish
-
-1.  **Commit**: `git commit -m "feat: ..."`
-2.  **Push**: `git push origin HEAD`
-3.  **PR**: `gh pr create ...`
+```bash
+/fix 25 "Implement Tmux Orchestrator"
+```
