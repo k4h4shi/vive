@@ -149,10 +149,7 @@ mod tests {
     #[test]
     fn test_set_windows() {
         let mut state = AppState::new();
-        let windows = vec![
-            WindowState::new("issue-1"),
-            WindowState::new("issue-2"),
-        ];
+        let windows = vec![WindowState::new("issue-1"), WindowState::new("issue-2")];
         state.set_windows(windows);
         assert_eq!(state.windows().len(), 2);
     }

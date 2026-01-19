@@ -25,6 +25,52 @@ use crate::tmux::{RealTmuxExecutor, TmuxOrchestrator};
 /// Polling interval for updating agent states.
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Application structure that encapsulates dependencies and state.
+struct App {
+    state: AppState,
+    session_name: Option<String>,
+    tmux: TmuxOrchestrator<RealTmuxExecutor>,
+    process_monitor: ProcessMonitor<RealProcessDetector>,
+    last_poll: Instant,
+}
+
+impl App {
+    /// Initialize the application with detected session.
+    fn init() -> Self {
+        let mut state = AppState::new();
+        let session_name = detect_session_name();
+
+        if let Some(name) = &session_name {
+            state.set_session_name(name.clone());
+        }
+
+        Self {
+            state,
+            session_name,
+            tmux: TmuxOrchestrator::new(),
+            process_monitor: ProcessMonitor::new(),
+            last_poll: Instant::now(),
+        }
+    }
+
+    /// Perform initial data refresh.
+    fn initial_refresh(&mut self) {
+        if let Some(name) = &self.session_name {
+            refresh_windows(&mut self.state, name, &self.tmux, &self.process_monitor);
+        }
+    }
+
+    /// Handle periodic state updates.
+    fn handle_periodic_update(&mut self) {
+        if self.last_poll.elapsed() >= POLL_INTERVAL {
+            if let Some(name) = &self.session_name {
+                refresh_agent_states(&mut self.state, name, &self.process_monitor);
+            }
+            self.last_poll = Instant::now();
+        }
+    }
+}
+
 fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -45,39 +91,19 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-    let mut state = AppState::new();
-    let tmux = TmuxOrchestrator::<RealTmuxExecutor>::new();
-    let process_monitor = ProcessMonitor::<RealProcessDetector>::new();
-
-    // Try to detect session name from current directory
-    let session_name = detect_session_name();
-    if let Some(name) = &session_name {
-        state.set_session_name(name.clone());
-    }
-
-    let mut last_poll = Instant::now();
-
-    // Initial refresh
-    if let Some(name) = &session_name {
-        refresh_windows(&mut state, name, &tmux, &process_monitor);
-    }
+    let mut app = App::init();
+    app.initial_refresh();
 
     loop {
-        terminal.draw(|frame| ui::render(frame, &state))?;
+        terminal.draw(|frame| ui::render(frame, &app.state))?;
 
         if let Some(Event::Key(key)) = event::poll_event(Duration::from_millis(100))? {
-            event::handle_key_event(key, &mut state);
+            event::handle_key_event(key, &mut app.state);
         }
 
-        // Periodic refresh of agent states
-        if last_poll.elapsed() >= POLL_INTERVAL {
-            if let Some(name) = &session_name {
-                refresh_agent_states(&mut state, name, &process_monitor);
-            }
-            last_poll = Instant::now();
-        }
+        app.handle_periodic_update();
 
-        if state.should_quit() {
+        if app.state.should_quit() {
             break;
         }
     }
