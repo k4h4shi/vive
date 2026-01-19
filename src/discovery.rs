@@ -65,6 +65,16 @@ impl Worktree {
             branch,
         }
     }
+
+    /// Generates a unique Tmux session ID for this worktree.
+    ///
+    /// The format is `project_name:branch_name` (e.g., `mechanix:fix-bug-123`).
+    /// Returns `None` if the worktree has no branch (detached HEAD).
+    pub fn session_id(&self, project_name: &str) -> Option<String> {
+        self.branch
+            .as_ref()
+            .map(|branch_name| format!("{project_name}:{branch_name}"))
+    }
 }
 
 /// Parses the output of `git worktree list --porcelain`.
@@ -162,10 +172,10 @@ fn scan_directory_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Resu
         let path = entry.path();
 
         // Skip hidden directories (except we check for .git)
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with('.') {
-                continue;
-            }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with('.')
+        {
+            continue;
         }
 
         if path.is_dir() {
@@ -218,6 +228,25 @@ mod tests {
     fn test_worktree_detached_head() {
         let wt = Worktree::new("/path/to/worktree", "abc123", None);
         assert_eq!(wt.branch, None);
+    }
+
+    #[test]
+    fn test_worktree_session_id() {
+        let wt = Worktree::new(
+            "/path/to/worktree",
+            "abc123",
+            Some("fix-bug-123".to_string()),
+        );
+        assert_eq!(
+            wt.session_id("mechanix"),
+            Some("mechanix:fix-bug-123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_worktree_session_id_detached_head() {
+        let wt = Worktree::new("/path/to/worktree", "abc123", None);
+        assert_eq!(wt.session_id("mechanix"), None);
     }
 
     #[test]
