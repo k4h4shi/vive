@@ -204,6 +204,22 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
     }
 
+    /// Build the tmux command arguments for attaching to a session.
+    ///
+    /// # Arguments
+    /// * `session_name` - Name of the session to attach to
+    /// * `inside_tmux` - Whether we're already inside a tmux session
+    ///
+    /// # Returns
+    /// Vector of command arguments for tmux.
+    pub fn build_attach_command(session_name: &str, inside_tmux: bool) -> Vec<&str> {
+        if inside_tmux {
+            vec!["switch-client", "-t", session_name]
+        } else {
+            vec!["attach", "-t", session_name]
+        }
+    }
+
     /// Attach to an existing session.
     ///
     /// If already inside tmux, switches to the session.
@@ -228,6 +244,35 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
 
         Ok(())
+    }
+
+    /// Replace the current process with tmux attached to the session.
+    ///
+    /// This function uses `exec()` to replace the current process, so it never
+    /// returns on success. On Unix systems, this provides a seamless transition
+    /// into the tmux session.
+    ///
+    /// # Arguments
+    /// * `session_name` - Name of the session to attach to
+    ///
+    /// # Returns
+    /// This function only returns if there's an error. On success, the current
+    /// process is replaced.
+    #[cfg(unix)]
+    pub fn exec_into_session(&self, session_name: &str) -> Result<()> {
+        use std::os::unix::process::CommandExt;
+
+        let inside_tmux = std::env::var("TMUX").is_ok();
+        let args = Self::build_attach_command(session_name, inside_tmux);
+
+        let err = Command::new("tmux").args(&args).exec();
+
+        // exec() only returns if there's an error
+        Err(anyhow::anyhow!(
+            "Failed to exec into session '{}': {}",
+            session_name,
+            err
+        ))
     }
 
     // ========================================================================
@@ -417,6 +462,36 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
 
         Ok(())
+    }
+
+    /// Capture the content of a tmux pane.
+    ///
+    /// # Arguments
+    /// * `target` - Target pane (session:window.pane format)
+    /// * `lines` - Number of lines to capture from the end
+    ///
+    /// # Returns
+    /// The captured pane content as a string.
+    pub fn capture_pane(&self, target: &str, lines: usize) -> Result<String> {
+        let start_line = format!("-{lines}");
+        let result = self.executor.execute(args![
+            "capture-pane",
+            "-t",
+            target,
+            "-p",
+            "-S",
+            &start_line,
+        ])?;
+
+        if !result.success {
+            anyhow::bail!(
+                "Failed to capture pane '{}': {}",
+                target,
+                result.stderr.trim()
+            );
+        }
+
+        Ok(result.stdout)
     }
 
     /// Select a layout for the current window.
@@ -934,5 +1009,57 @@ mod tests {
         orchestrator
             .set_option("my-session", "mouse", "on")
             .unwrap();
+    }
+
+    #[test]
+    fn test_capture_pane() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "capture-pane",
+                        "-t",
+                        "my-session:main",
+                        "-p",
+                        "-S",
+                        "-50",
+                    ])
+            })
+            .returning(|_| {
+                Ok(mock_success(
+                    "Claude Code >\nI have analyzed the error.\nShall I fix it? [y/n]",
+                ))
+            });
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let output = orchestrator.capture_pane("my-session:main", 50).unwrap();
+        assert_eq!(
+            output,
+            "Claude Code >\nI have analyzed the error.\nShall I fix it? [y/n]"
+        );
+    }
+
+    #[test]
+    fn test_capture_pane_failure() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_failure("pane not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.capture_pane("invalid-session:main", 50);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_attach_command_outside_tmux() {
+        let args = TmuxOrchestrator::<RealTmuxExecutor>::build_attach_command("my-session", false);
+        assert_eq!(args, vec!["attach", "-t", "my-session"]);
+    }
+
+    #[test]
+    fn test_build_attach_command_inside_tmux() {
+        let args = TmuxOrchestrator::<RealTmuxExecutor>::build_attach_command("my-session", true);
+        assert_eq!(args, vec!["switch-client", "-t", "my-session"]);
     }
 }
