@@ -462,13 +462,13 @@ mod tests {
 
         assert_eq!(
             state.selected_session_id(),
-            Some("project-a:main".to_string())
+            Some("project-a__main".to_string())
         );
 
         state.select_next();
         assert_eq!(
             state.selected_session_id(),
-            Some("project-a:feature-1".to_string())
+            Some("project-a__feature-1".to_string())
         );
     }
 
