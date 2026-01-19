@@ -2,7 +2,7 @@
 //!
 //! This module provides functionality to:
 //! - Detect Claude processes running in tmux panes via TTY
-//! - Determine the state of Claude agents (Working, InputNeeded, Stopped, Idle)
+//! - Determine the state of Claude agents (Working, Waiting, Error, Idle)
 //! - Poll for state updates
 
 // Allow dead code during development - these APIs will be used by main app
@@ -12,41 +12,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-/// Represents the state of a Claude agent in a worktree/window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AgentState {
-    /// Active process with high CPU or running state.
-    Working,
-    /// Process sleeping/waiting for TTY input.
-    InputNeeded,
-    /// Process terminated or error occurred.
-    Stopped,
-    /// Session exists but no Claude command running.
-    #[default]
-    Idle,
-}
-
-impl AgentState {
-    /// Returns the emoji indicator for this state.
-    pub fn indicator(&self) -> &'static str {
-        match self {
-            AgentState::Working => "🟢",
-            AgentState::InputNeeded => "🟡",
-            AgentState::Stopped => "🔴",
-            AgentState::Idle => "⚪",
-        }
-    }
-
-    /// Returns a human-readable description of this state.
-    pub fn description(&self) -> &'static str {
-        match self {
-            AgentState::Working => "Working",
-            AgentState::InputNeeded => "Input Needed",
-            AgentState::Stopped => "Stopped",
-            AgentState::Idle => "Idle",
-        }
-    }
-}
+use crate::state::AgentStatus;
 
 /// Information about a Claude process.
 #[derive(Debug, Clone)]
@@ -132,28 +98,28 @@ fn parse_process_line(line: &str) -> Result<Option<ProcessInfo>> {
 }
 
 /// Determines the agent state based on process information.
-pub fn determine_agent_state(process_info: Option<&ProcessInfo>) -> AgentState {
+pub fn determine_agent_state(process_info: Option<&ProcessInfo>) -> AgentStatus {
     let Some(info) = process_info else {
-        return AgentState::Idle;
+        return AgentStatus::Idle;
     };
 
     // Check if process is stopped or zombie
     if info.stat.contains('T') || info.stat.contains('Z') {
-        return AgentState::Stopped;
+        return AgentStatus::Error;
     }
 
     // Check if process is running with high CPU (actively working)
     if info.stat.contains('R') || info.cpu > 5.0 {
-        return AgentState::Working;
+        return AgentStatus::Working;
     }
 
     // Process is sleeping (S) - likely waiting for input or idle
     // If it's a foreground process (+), it's waiting for input
     if info.stat.contains('+') {
-        return AgentState::InputNeeded;
+        return AgentStatus::Waiting;
     }
 
-    AgentState::Idle
+    AgentStatus::Idle
 }
 
 /// A process monitor that tracks Claude agent states.
@@ -183,9 +149,9 @@ impl<D: ProcessDetector> ProcessMonitor<D> {
     }
 
     /// Get the agent state for a tmux window.
-    pub fn get_agent_state(&self, session_name: &str, window_name: &str) -> Result<AgentState> {
+    pub fn get_agent_state(&self, session_name: &str, window_name: &str) -> Result<AgentStatus> {
         let Some(tty) = self.detector.get_window_tty(session_name, window_name)? else {
-            return Ok(AgentState::Stopped);
+            return Ok(AgentStatus::Error);
         };
 
         let process_info = self.detector.get_claude_process(&tty)?;
@@ -211,24 +177,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_state_indicator() {
-        assert_eq!(AgentState::Working.indicator(), "🟢");
-        assert_eq!(AgentState::InputNeeded.indicator(), "🟡");
-        assert_eq!(AgentState::Stopped.indicator(), "🔴");
-        assert_eq!(AgentState::Idle.indicator(), "⚪");
-    }
-
-    #[test]
-    fn test_agent_state_description() {
-        assert_eq!(AgentState::Working.description(), "Working");
-        assert_eq!(AgentState::InputNeeded.description(), "Input Needed");
-        assert_eq!(AgentState::Stopped.description(), "Stopped");
-        assert_eq!(AgentState::Idle.description(), "Idle");
+    fn test_agent_status_icon() {
+        assert_eq!(AgentStatus::Working.icon(), "🟢");
+        assert_eq!(AgentStatus::Waiting.icon(), "🟡");
+        assert_eq!(AgentStatus::Error.icon(), "🔴");
+        assert_eq!(AgentStatus::Idle.icon(), "⚪");
     }
 
     #[test]
     fn test_determine_agent_state_idle() {
-        assert_eq!(determine_agent_state(None), AgentState::Idle);
+        assert_eq!(determine_agent_state(None), AgentStatus::Idle);
     }
 
     #[test]
@@ -238,7 +196,7 @@ mod tests {
             stat: "R+".to_string(),
             cpu: 1.0,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentState::Working);
+        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Working);
     }
 
     #[test]
@@ -248,7 +206,7 @@ mod tests {
             stat: "S+".to_string(),
             cpu: 25.0,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentState::Working);
+        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Working);
     }
 
     #[test]
@@ -258,7 +216,7 @@ mod tests {
             stat: "S+".to_string(),
             cpu: 0.5,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentState::InputNeeded);
+        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Waiting);
     }
 
     #[test]
@@ -268,7 +226,7 @@ mod tests {
             stat: "T".to_string(),
             cpu: 0.0,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentState::Stopped);
+        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Error);
     }
 
     #[test]
@@ -278,7 +236,7 @@ mod tests {
             stat: "Z".to_string(),
             cpu: 0.0,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentState::Stopped);
+        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Error);
     }
 
     #[test]
@@ -288,7 +246,7 @@ mod tests {
             stat: "S".to_string(),
             cpu: 0.5,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentState::Idle);
+        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Idle);
     }
 
     #[test]

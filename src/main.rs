@@ -5,10 +5,9 @@ mod state;
 mod tmux;
 mod ui;
 
-use std::{
-    io,
-    time::{Duration, Instant},
-};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use std::{env, io};
 
 use anyhow::Result;
 use crossterm::{
@@ -18,58 +17,10 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::process::{ProcessMonitor, RealProcessDetector};
-use crate::state::{AppState, WindowState};
+use crate::discovery::discover_projects;
+use crate::event::Action;
+use crate::state::AppState;
 use crate::tmux::{RealTmuxExecutor, TmuxOrchestrator};
-
-/// Polling interval for updating agent states.
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
-
-/// Application structure that encapsulates dependencies and state.
-struct App {
-    state: AppState,
-    session_name: Option<String>,
-    tmux: TmuxOrchestrator<RealTmuxExecutor>,
-    process_monitor: ProcessMonitor<RealProcessDetector>,
-    last_poll: Instant,
-}
-
-impl App {
-    /// Initialize the application with detected session.
-    fn init() -> Self {
-        let mut state = AppState::new();
-        let session_name = detect_session_name();
-
-        if let Some(name) = &session_name {
-            state.set_session_name(name.clone());
-        }
-
-        Self {
-            state,
-            session_name,
-            tmux: TmuxOrchestrator::new(),
-            process_monitor: ProcessMonitor::new(),
-            last_poll: Instant::now(),
-        }
-    }
-
-    /// Perform initial data refresh.
-    fn initial_refresh(&mut self) {
-        if let Some(name) = &self.session_name {
-            refresh_windows(&mut self.state, name, &self.tmux, &self.process_monitor);
-        }
-    }
-
-    /// Handle periodic state updates.
-    fn handle_periodic_update(&mut self) {
-        if self.last_poll.elapsed() >= POLL_INTERVAL {
-            if let Some(name) = &self.session_name {
-                refresh_agent_states(&mut self.state, name, &self.process_monitor);
-            }
-            self.last_poll = Instant::now();
-        }
-    }
-}
 
 fn main() -> Result<()> {
     // Setup terminal
@@ -91,19 +42,45 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-    let mut app = App::init();
-    app.initial_refresh();
+    // Determine project root (default to home directory)
+    let projects_root = env::var("VIVE_PROJECTS_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs_home()
+                .map(|h| h.join("src"))
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
+
+    let mut state = AppState::with_projects_root(projects_root.clone());
+
+    // Discover projects at startup
+    if let Ok(projects) = discover_projects(&projects_root) {
+        state.set_projects(projects);
+    }
+
+    // Create tmux orchestrator
+    let tmux = TmuxOrchestrator::new();
+
+    // Track time for periodic updates
+    let mut last_preview_update = Instant::now();
+    let preview_update_interval = Duration::from_secs(2);
 
     loop {
-        terminal.draw(|frame| ui::render(frame, &app.state))?;
+        terminal.draw(|frame| ui::render(frame, &state))?;
 
+        // Poll for events
         if let Some(Event::Key(key)) = event::poll_event(Duration::from_millis(100))? {
-            event::handle_key_event(key, &mut app.state);
+            let action = event::handle_key_event(key, &mut state);
+            handle_action(action, &mut state, &tmux, terminal)?;
         }
 
-        app.handle_periodic_update();
+        // Periodic preview update
+        if last_preview_update.elapsed() >= preview_update_interval {
+            update_pane_preview(&mut state, &tmux);
+            last_preview_update = Instant::now();
+        }
 
-        if app.state.should_quit() {
+        if state.should_quit() {
             break;
         }
     }
@@ -111,74 +88,117 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     Ok(())
 }
 
-/// Detect the session name from the current directory (project name).
-fn detect_session_name() -> Option<String> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            std::path::Path::new(&path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-        })
-}
-
-/// Refresh the window list and their states.
-fn refresh_windows(
+fn handle_action(
+    action: Action,
     state: &mut AppState,
-    session_name: &str,
     tmux: &TmuxOrchestrator<RealTmuxExecutor>,
-    process_monitor: &ProcessMonitor<RealProcessDetector>,
-) {
-    let windows = match tmux.list_windows(session_name) {
-        Ok(windows) => windows,
-        Err(_) => return,
-    };
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> Result<()> {
+    match action {
+        Action::None | Action::Quit => {}
 
-    let window_states: Vec<WindowState> = windows
-        .into_iter()
-        .map(|w| {
-            let agent_state = process_monitor
-                .get_agent_state(session_name, &w.name)
-                .unwrap_or_default();
-            let cpu = process_monitor
-                .get_process_info(session_name, &w.name)
-                .ok()
-                .flatten()
-                .map(|info| info.cpu);
+        Action::AttachSession => {
+            if let (Some(project), Some(worktree)) =
+                (state.selected_project(), state.selected_worktree())
+                && let Some(session_id) = worktree.session_id(&project.name)
+            {
+                // Ensure session exists before attaching
+                let worktree_path = worktree.path.to_string_lossy();
+                let _ = tmux.ensure_session(&session_id, Some(&worktree_path));
 
-            WindowState::new(w.name)
-                .with_state(agent_state)
-                .with_cpu(cpu.unwrap_or(0.0))
-        })
-        .collect();
+                // Restore terminal before exec
+                disable_raw_mode()?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                terminal.show_cursor()?;
 
-    state.set_windows(window_states);
+                // This will replace the current process
+                let _ = tmux.exec_into_session(&session_id);
+
+                // If we get here, exec failed - restore terminal state
+                enable_raw_mode()?;
+                execute!(io::stdout(), EnterAlternateScreen)?;
+            }
+        }
+
+        Action::SendInput(input) => {
+            if let (Some(project), Some(worktree)) =
+                (state.selected_project(), state.selected_worktree())
+                && let Some(session_id) = worktree.session_id(&project.name)
+            {
+                // Send keys to the session
+                let _ = tmux.send_keys(&session_id, &input, true);
+            }
+        }
+
+        Action::CreateTask(branch_name) => {
+            if let Some(project) = state.selected_project().cloned() {
+                // Create a new worktree using git
+                let worktree_path = project.path.join(".worktrees").join(&branch_name);
+                let output = std::process::Command::new("git")
+                    .args([
+                        "worktree",
+                        "add",
+                        "-b",
+                        &branch_name,
+                        &worktree_path.to_string_lossy(),
+                    ])
+                    .current_dir(&project.path)
+                    .output();
+
+                match output {
+                    Ok(output) if output.status.success() => {
+                        // Success - refresh project list and show success message
+                        if let Ok(projects) = discover_projects(&state.projects_root) {
+                            state.set_projects(projects);
+                        }
+                        state.set_success_message(format!("Created worktree '{branch_name}'"));
+                    }
+                    Ok(output) => {
+                        // Command ran but failed - show error from stderr
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let error_msg = stderr.trim();
+                        if error_msg.is_empty() {
+                            state.set_error_message(format!(
+                                "Failed to create worktree '{branch_name}': unknown error"
+                            ));
+                        } else {
+                            state.set_error_message(format!(
+                                "Failed to create worktree: {error_msg}"
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        // Failed to run command
+                        state.set_error_message(format!("Failed to run git command: {e}"));
+                    }
+                }
+            } else {
+                state.set_error_message("No project selected");
+            }
+        }
+
+        Action::RefreshPreview => {
+            update_pane_preview(state, tmux);
+        }
+    }
+
+    Ok(())
 }
 
-/// Refresh only the agent states (faster than full refresh).
-fn refresh_agent_states(
-    state: &mut AppState,
-    session_name: &str,
-    process_monitor: &ProcessMonitor<RealProcessDetector>,
-) {
-    // Collect window names first to avoid borrow conflicts
-    let window_names: Vec<String> = state.windows().iter().map(|w| w.name.clone()).collect();
-
-    for name in window_names {
-        let agent_state = process_monitor
-            .get_agent_state(session_name, &name)
-            .unwrap_or_default();
-        let cpu = process_monitor
-            .get_process_info(session_name, &name)
-            .ok()
-            .flatten()
-            .map(|info| info.cpu);
-
-        state.update_window_state(&name, agent_state, cpu);
+fn update_pane_preview(state: &mut AppState, tmux: &TmuxOrchestrator<RealTmuxExecutor>) {
+    if let (Some(project), Some(worktree)) = (state.selected_project(), state.selected_worktree())
+        && let Some(session_id) = worktree.session_id(&project.name)
+        && tmux.has_session(&session_id).unwrap_or(false)
+        && let Ok(content) = tmux.capture_pane(&session_id, 50)
+    {
+        state.set_pane_preview(content);
+        return;
     }
+    // Clear preview if no valid session
+    state.set_pane_preview(String::new());
+}
+
+/// Get the user's home directory.
+fn dirs_home() -> Option<PathBuf> {
+    env::var("HOME").ok().map(PathBuf::from)
 }
