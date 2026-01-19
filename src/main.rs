@@ -1,3 +1,4 @@
+mod discovery;
 mod event;
 mod state;
 mod ui;
