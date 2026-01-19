@@ -37,13 +37,41 @@
 
 ## Data Flow
 
-1.  **Init**: Load config -> Scan projects -> Scan worktrees.
-2.  **Loop**:
-    - Update process status for each active task.
-    - Render TUI.
-    - Handle User Input.
-3.  **Action**:
-    - User selects "Project A".
-    - Orchestrator checks if Tmux session "vive-project-a" exists.
-    - If not, create it with windows for each worktree.
-    - Attach client to session.
+```mermaid
+graph TD
+    subgraph Core
+        D[Discovery Module] -->|Projects & Worktrees| S[AppState]
+        M[Monitor Module] -->|Statuses (Map)| S
+    end
+
+    subgraph TUI
+        S -->|Render| V[View Layer]
+        K[Input Event] -->|Handle| A[Action Handler]
+    end
+
+    subgraph Orchestration
+        A -->|Create/Switch| T[Tmux Orchestrator]
+        A -->|Send Keys| T
+        A -->|Create Worktree| G[Git Wrapper]
+    end
+
+    V -->|Display| User
+    User -->|Keyboard/Mouse| K
+    T -->|Manage| Tmux[Tmux Process]
+    G -->|Update| D
+```
+
+## State Management Strategy
+
+1.  **Static Data (Projects/Worktrees)**:
+    - Loaded once at startup via `Discovery Module`.
+    - Reloaded explicitly when user requests "Refresh" or performs "Create Task".
+
+2.  **Dynamic Data (Agent Statuses)**:
+    - Managed by `Monitor Module` running in a background async task.
+    - Updates are sent to the main UI loop via a `tokio::sync::mpsc` channel.
+    - `AppState` holds a `HashMap<SessionId, AgentStatus>` which is updated on every tick.
+
+3.  **UI Rendering**:
+    - The TUI renders based on a snapshot of `AppState`.
+    - It joins the Static Data (Project Tree) with Dynamic Data (Status Map) using `SessionId` as the key.
