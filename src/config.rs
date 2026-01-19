@@ -40,10 +40,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             projects_root: None,
-            ignored_dirs: DEFAULT_IGNORED_DIRS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            ignored_dirs: DEFAULT_IGNORED_DIRS.iter().map(|s| s.to_string()).collect(),
             tmux_prefix: None,
         }
     }
@@ -93,8 +90,12 @@ impl Config {
 
         // Create config directory if it doesn't exist
         if !config_dir.exists() {
-            fs::create_dir_all(&config_dir)
-                .with_context(|| format!("Failed to create config directory: {}", config_dir.display()))?;
+            fs::create_dir_all(&config_dir).with_context(|| {
+                format!(
+                    "Failed to create config directory: {}",
+                    config_dir.display()
+                )
+            })?;
         }
 
         // Create default config file if it doesn't exist
@@ -111,8 +112,9 @@ ignored_dirs = [".git", "node_modules", ".worktrees", "target", "dist"]
 # Optional tmux prefix key override (e.g., "C-a" for Ctrl+a)
 # tmux_prefix = "C-a"
 "#;
-            fs::write(&config_path, default_content)
-                .with_context(|| format!("Failed to write config file: {}", config_path.display()))?;
+            fs::write(&config_path, default_content).with_context(|| {
+                format!("Failed to write config file: {}", config_path.display())
+            })?;
         }
 
         Ok(config_path)
@@ -206,7 +208,10 @@ projects_root = "/home/user/projects"
             projects_root: Some(PathBuf::from("/custom/path")),
             ..Default::default()
         };
-        assert_eq!(config.effective_projects_root(), PathBuf::from("/custom/path"));
+        assert_eq!(
+            config.effective_projects_root(),
+            PathBuf::from("/custom/path")
+        );
     }
 
     #[test]
