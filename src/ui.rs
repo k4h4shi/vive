@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::state::{AppState, FocusMode, ModalType};
+use crate::state::{AppState, FocusMode, ModalType, StatusMessageType};
 
 /// Render the UI based on the current application state.
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -14,13 +14,13 @@ pub fn render(frame: &mut Frame, state: &AppState) {
 
     // Main layout: Header, Content, Footer
     let main_chunks = Layout::vertical([
-        Constraint::Length(3),  // Header
-        Constraint::Min(0),     // Content
-        Constraint::Length(3),  // Footer/Input
+        Constraint::Length(3), // Header
+        Constraint::Min(0),    // Content
+        Constraint::Length(3), // Footer/Input
     ])
     .split(area);
 
-    render_header(frame, main_chunks[0]);
+    render_header(frame, main_chunks[0], state);
     render_content(frame, main_chunks[1], state);
     render_footer(frame, main_chunks[2], state);
 
@@ -30,10 +30,32 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 }
 
-fn render_header(frame: &mut Frame, area: Rect) {
-    let header = Paragraph::new("Vive - Claude Code Cockpit")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL).title("Vive"));
+fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
+    // Show status message if present, otherwise show default header
+    let content = if let Some(status) = &state.status_message {
+        let (color, prefix) = match status.message_type {
+            StatusMessageType::Info => (Color::Blue, "INFO"),
+            StatusMessageType::Success => (Color::Green, "OK"),
+            StatusMessageType::Error => (Color::Red, "ERROR"),
+        };
+        Line::from(vec![
+            Span::styled(
+                format!("[{prefix}] "),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(&status.message, Style::default().fg(color)),
+        ])
+    } else {
+        Line::from(Span::styled(
+            "Vive - Claude Code Cockpit",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+    };
+
+    let header =
+        Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Vive"));
     frame.render_widget(header, area);
 }
 
@@ -60,20 +82,20 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         };
 
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(format!("{} ", project.name), project_style),
-        ])));
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            format!("{} ", project.name),
+            project_style,
+        )])));
 
         // Worktrees under the project
         for (wt_idx, worktree) in project.worktrees.iter().enumerate() {
             let is_selected = is_selected_project && state.selected_worktree_idx() == Some(wt_idx);
-            let branch_name = worktree
-                .branch
-                .as_deref()
-                .unwrap_or("(detached)");
+            let branch_name = worktree.branch.as_deref().unwrap_or("(detached)");
 
             // Get status for this worktree
             let status = worktree
@@ -105,8 +127,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
         ))));
     }
 
-    let sidebar = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Projects"));
+    let sidebar = List::new(items).block(Block::default().borders(Borders::ALL).title("Projects"));
     frame.render_widget(sidebar, area);
 }
 
@@ -137,36 +158,32 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
     let content = match state.focus_mode {
-        FocusMode::Normal => {
-            Line::from(vec![
-                Span::styled("j/k", Style::default().fg(Color::Yellow)),
-                Span::raw(": Navigate  "),
-                Span::styled("Enter/o", Style::default().fg(Color::Yellow)),
-                Span::raw(": Attach  "),
-                Span::styled("i", Style::default().fg(Color::Yellow)),
-                Span::raw(": Input  "),
-                Span::styled("n", Style::default().fg(Color::Yellow)),
-                Span::raw(": New Task  "),
-                Span::styled("q", Style::default().fg(Color::Yellow)),
-                Span::raw(": Quit"),
-            ])
-        }
-        FocusMode::Input => {
-            Line::from(vec![
-                Span::styled("> ", Style::default().fg(Color::Green)),
-                Span::raw(&state.input_buffer),
-                Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
-                Span::raw("  "),
-                Span::styled("Enter", Style::default().fg(Color::Yellow)),
-                Span::raw(": Send  "),
-                Span::styled("Esc", Style::default().fg(Color::Yellow)),
-                Span::raw(": Cancel"),
-            ])
-        }
+        FocusMode::Normal => Line::from(vec![
+            Span::styled("j/k", Style::default().fg(Color::Yellow)),
+            Span::raw(": Navigate  "),
+            Span::styled("Enter/o", Style::default().fg(Color::Yellow)),
+            Span::raw(": Attach  "),
+            Span::styled("i", Style::default().fg(Color::Yellow)),
+            Span::raw(": Input  "),
+            Span::styled("n", Style::default().fg(Color::Yellow)),
+            Span::raw(": New Task  "),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::raw(": Quit"),
+        ]),
+        FocusMode::Input => Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Green)),
+            Span::raw(&state.input_buffer),
+            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw("  "),
+            Span::styled("Enter", Style::default().fg(Color::Yellow)),
+            Span::raw(": Send  "),
+            Span::styled("Esc", Style::default().fg(Color::Yellow)),
+            Span::raw(": Cancel"),
+        ]),
     };
 
-    let footer = Paragraph::new(content)
-        .block(Block::default().borders(Borders::ALL).title("Commands"));
+    let footer =
+        Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Commands"));
     frame.render_widget(footer, area);
 }
 

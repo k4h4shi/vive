@@ -58,27 +58,34 @@ fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
             Action::Quit
         }
 
-        // Navigation
+        // Navigation - clear status message when navigating
         KeyCode::Char('j') | KeyCode::Down => {
+            state.clear_status_message();
             state.select_next();
             Action::RefreshPreview
         }
         KeyCode::Char('k') | KeyCode::Up => {
+            state.clear_status_message();
             state.select_prev();
             Action::RefreshPreview
         }
 
         // Attach to session
-        KeyCode::Enter | KeyCode::Char('o') => Action::AttachSession,
+        KeyCode::Enter | KeyCode::Char('o') => {
+            state.clear_status_message();
+            Action::AttachSession
+        }
 
         // Input mode
         KeyCode::Char('i') => {
+            state.clear_status_message();
             state.enter_input_mode();
             Action::None
         }
 
-        // New task modal
+        // New task modal - clear status message when opening modal
         KeyCode::Char('n') => {
+            state.clear_status_message();
             state.open_create_task_modal();
             Action::None
         }
