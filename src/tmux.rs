@@ -7,6 +7,9 @@
 //! - Pane management (split, send keys)
 //! - Layout management (Cockpit layout strategy)
 
+// Allow dead code during development - module not yet integrated with main app
+#![allow(dead_code)]
+
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -269,9 +272,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
         // exec() only returns if there's an error
         Err(anyhow::anyhow!(
-            "Failed to exec into session '{}': {}",
-            session_name,
-            err
+            "Failed to exec into session '{session_name}': {err}"
         ))
     }
 
