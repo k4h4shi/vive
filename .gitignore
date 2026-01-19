@@ -9,3 +9,8 @@
 
 # Temp files
 *.tmp
+
+
+# Added by cargo
+
+/target
