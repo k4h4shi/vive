@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 # vive - parallel AI agent manager
-# A simple CLI to manage multiple Claude agents in tmux sessions with git worktrees.
+# A simple CLI to manage multiple Claude agents in tmux windows with git worktrees.
 
 set -euo pipefail
 
-VERSION="2.0.2"
+VERSION="3.0.0"
 
 # Get absolute path to the script directory (resolving symlinks)
 SOURCE=${BASH_SOURCE[0]}
-while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+while [ -L "$SOURCE" ]; do
   DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
   SOURCE=$(readlink "$SOURCE")
-  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE
 done
 SCRIPT_DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
-
 
 # Colors
 RED='\033[0;31m'
@@ -54,10 +53,13 @@ get_project_name() {
   basename "$(get_repo_root)"
 }
 
-get_session_name() {
+get_main_session_name() {
+  get_project_name
+}
+
+get_window_name() {
   local issue_id=$1
-  local project_name=$(get_project_name)
-  echo "${project_name}-${issue_id}"
+  echo "issue-${issue_id}"
 }
 
 get_worktree_path() {
@@ -66,8 +68,33 @@ get_worktree_path() {
   echo "${repo_root}/.worktrees/issue-${issue_id}"
 }
 
+ensure_session() {
+  local session_name=$1
+  
+  if ! tmux has-session -t "$session_name" 2>/dev/null; then
+    log_info "Creating main session: $session_name"
+    # Create detached session, initially in repo root
+    tmux new-session -d -s "$session_name" -c "$(get_repo_root)"
+    
+    # Load vive configuration
+    if [[ -f "${SCRIPT_DIR}/vive.tmux.conf" ]]; then
+      tmux source-file "${SCRIPT_DIR}/vive.tmux.conf"
+    fi
+    # Ensure mouse is on
+    tmux set-option -t "$session_name" mouse on 2>/dev/null || true
+  fi
+}
+
 attach_session() {
   local session_name=$1
+  local window_name=${2:-}
+  
+  # Select window if specified
+  if [[ -n "$window_name" ]]; then
+    if tmux list-windows -t "$session_name" -F "#{window_name}" | grep -q "^${window_name}$"; then
+      tmux select-window -t "${session_name}:${window_name}"
+    fi
+  fi
   
   if [[ -n "${TMUX:-}" ]]; then
     # Inside tmux: switch client
@@ -98,8 +125,8 @@ cmd_start() {
   fi
   
   local repo_root=$(get_repo_root)
-  local project_name=$(get_project_name)
-  local session_name=$(get_session_name "$issue_id")
+  local session_name=$(get_main_session_name)
+  local window_name=$(get_window_name "$issue_id")
   local worktree_path=$(get_worktree_path "$issue_id")
   local branch_name="feature/issue-${issue_id}"
   
@@ -107,14 +134,12 @@ cmd_start() {
     branch_name="feature/issue-${issue_id}-${description}"
   fi
   
-  # Check if session already exists
-  if tmux has-session -t "$session_name" 2>/dev/null; then
-    log_warn "Session '$session_name' already exists. Attaching..."
-    
-    # Ensure mouse is on even for existing sessions
-    tmux set-option -t "$session_name" mouse on 2>/dev/null || true
-    
-    attach_session "$session_name"
+  ensure_session "$session_name"
+  
+  # Check if window already exists
+  if tmux list-windows -t "$session_name" -F "#{window_name}" 2>/dev/null | grep -q "^${window_name}$"; then
+    log_warn "Window '$window_name' already exists. Switching..."
+    attach_session "$session_name" "$window_name"
     return
   fi
   
@@ -131,7 +156,7 @@ cmd_start() {
       log_info "Copied .env to worktree"
     fi
     
-    # Install dependencies if package.json exists
+    # Install dependencies
     if [[ -f "${worktree_path}/package.json" ]] || [[ -f "${worktree_path}/web/package.json" ]]; then
       log_info "Installing dependencies..."
       if [[ -f "${worktree_path}/web/package.json" ]]; then
@@ -144,122 +169,85 @@ cmd_start() {
     log_info "Worktree already exists: $worktree_path"
   fi
   
-  # Create tmux session
-  log_info "Creating tmux session: $session_name"
-  tmux new-session -d -s "$session_name" -c "$worktree_path"
-  
-  # Load vive configuration
-  if [[ -f "${SCRIPT_DIR}/vive.tmux.conf" ]]; then
-    tmux source-file "${SCRIPT_DIR}/vive.tmux.conf"
-    log_info "Loaded vive tmux config"
-  fi
+  # Create new window
+  log_info "Creating window: $window_name"
+  tmux new-window -t "$session_name" -n "$window_name" -c "$worktree_path"
   
   # Send claude command
-  tmux send-keys -t "$session_name" "claude" C-m
-  
-  # Wait a moment for claude to start
+  tmux send-keys -t "${session_name}:${window_name}" "claude" C-m
   sleep 1
+  tmux send-keys -t "${session_name}:${window_name}" "/fix ${issue_id}"
   
-  # Send /fix command
-  tmux send-keys -t "$session_name" "/fix ${issue_id}"
-  
-  log_success "Session '$session_name' started!"
-  log_info "Attaching to session... (Ctrl+b d to detach)"
-  
-  # Attach to session
-  attach_session "$session_name"
+  log_success "Window '$window_name' started!"
+  attach_session "$session_name" "$window_name"
 }
 
 cmd_attach() {
   local issue_id=${1:-}
-  
-  if [[ -z "$issue_id" ]]; then
-    log_error "Usage: vive attach <issue_id>"
-    exit 1
-  fi
-  
-  local session_name=$(get_session_name "$issue_id")
+  local session_name=$(get_main_session_name)
   
   if ! tmux has-session -t "$session_name" 2>/dev/null; then
     log_error "Session '$session_name' not found"
-    log_info "Available sessions:"
-    cmd_list
     exit 1
   fi
   
-  attach_session "$session_name"
+  if [[ -n "$issue_id" ]]; then
+    local window_name=$(get_window_name "$issue_id")
+    attach_session "$session_name" "$window_name"
+  else
+    attach_session "$session_name"
+  fi
 }
 
 cmd_list() {
-  local project_name=$(get_project_name)
+  local session_name=$(get_main_session_name)
   
-  log_info "Active sessions for '$project_name':"
+  if ! tmux has-session -t "$session_name" 2>/dev/null; then
+    log_info "No active session for project '$session_name'"
+    return
+  fi
+  
+  log_info "Active windows in session '$session_name':"
   echo ""
   
-  # List tmux sessions matching project name
-  tmux list-sessions 2>/dev/null | grep "^${project_name}-" | while read -r line; do
-    local session=$(echo "$line" | cut -d: -f1)
-    local issue_id=$(echo "$session" | sed "s/^${project_name}-//")
-    local worktree_path=$(get_worktree_path "$issue_id")
-    
-    if [[ -d "$worktree_path" ]]; then
-      echo -e "  ${GREEN}●${NC} $session (worktree: $worktree_path)"
-    else
-      echo -e "  ${YELLOW}○${NC} $session (no worktree)"
-    fi
-  done || echo "  (no active sessions)"
-  
+  tmux list-windows -t "$session_name" -F "#{window_index}: #{window_name} (#{window_active})" | while read -r line; do
+    echo -e "  ${GREEN}●${NC} $line"
+  done
   echo ""
 }
 
 cmd_cleanup() {
   local target=${1:-}
-  local project_name=$(get_project_name)
+  local session_name=$(get_main_session_name)
   local repo_root=$(get_repo_root)
   
   if [[ "$target" == "all" ]]; then
-    log_warn "Cleaning up ALL sessions and worktrees for '$project_name'..."
+    log_warn "Cleaning up session and all worktrees..."
     
-    # Kill all sessions
-    tmux list-sessions 2>/dev/null | grep "^${project_name}-" | cut -d: -f1 | while read -r session; do
-      log_info "Killing session: $session"
-      tmux kill-session -t "$session" 2>/dev/null || true
-    done
+    # Kill session
+    tmux kill-session -t "$session_name" 2>/dev/null || true
     
     # Remove all worktrees
     if [[ -d "${repo_root}/.worktrees" ]]; then
-      for worktree in "${repo_root}/.worktrees"/issue-*; do
-        if [[ -d "$worktree" ]]; then
-          local wt_name=$(basename "$worktree")
-          log_info "Removing worktree: $wt_name"
-          git worktree remove "$worktree" --force 2>/dev/null || rm -rf "$worktree"
-        fi
-      done
+      rm -rf "${repo_root}/.worktrees"
     fi
-    
-    # Prune worktree references
     git worktree prune
-    
     log_success "Cleanup complete!"
     
   elif [[ -n "$target" ]]; then
-    local session_name=$(get_session_name "$target")
+    local window_name=$(get_window_name "$target")
     local worktree_path=$(get_worktree_path "$target")
     
-    log_info "Cleaning up session: $session_name"
+    log_info "Cleaning up window: $window_name"
     
-    # Kill session
-    if tmux has-session -t "$session_name" 2>/dev/null; then
-      tmux kill-session -t "$session_name"
-      log_info "Killed session: $session_name"
-    fi
+    # Kill window
+    tmux kill-window -t "${session_name}:${window_name}" 2>/dev/null || true
     
     # Remove worktree
     if [[ -d "$worktree_path" ]]; then
       git worktree remove "$worktree_path" --force 2>/dev/null || rm -rf "$worktree_path"
       log_info "Removed worktree: $worktree_path"
     fi
-    
     git worktree prune
     log_success "Cleanup complete!"
     
@@ -271,31 +259,33 @@ cmd_cleanup() {
 
 cmd_help() {
   cat << EOF
-vive v${VERSION} - parallel AI agent manager
+vive v${VERSION} - parallel AI agent manager (Single Session Mode)
 
 Usage: vive <command> [options]
 
 Commands:
-  start <issue> [desc]  Start a new session for an issue
-  attach <issue>        Attach to an existing session
-  list                  List active sessions
-  cleanup <issue|all>   Clean up session(s) and worktree(s)
+  start <issue> [desc]  Open a new window for an issue
+  attach [issue]        Attach to session (optionally switch to issue)
+  list                  List active windows
+  cleanup <issue|all>   Close window and remove worktree
   help                  Show this help message
   version               Show version
 
 Examples:
-  vive start 123              # Start session for issue #123
-  vive start 123 fix-login    # Start with branch description
-  vive attach 123             # Attach to session #123
-  vive list                   # List all sessions
-  vive cleanup 123            # Clean up issue #123
-  vive cleanup all            # Clean up all sessions
+  vive start 123              # New window for issue #123
+  vive attach 123             # Switch to window #123
+  vive cleanup 123            # Close window #123
+  vive cleanup all            # Kill entire session
 
-Tmux shortcuts (inside session):
-  Ctrl+b d    Detach from session (keeps running)
-  Ctrl+b [    Scroll mode (arrows to navigate, q to exit)
-  Mouse       Scroll wheel to scroll, click to select
-
+Tmux Shortcuts:
+  Ctrl+b c      Create empty window
+  Ctrl+b n/p    Next/Previous window
+  Ctrl+b w      List windows
+  Ctrl+b %      Split pane vertically
+  Ctrl+b "      Split pane horizontally
+  Ctrl+b Space  Change layout
+  Ctrl+b !      Break pane to new window
+  Ctrl+b :join-pane -s <window>  Bring window into current pane
 EOF
 }
 
