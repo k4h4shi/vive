@@ -155,13 +155,19 @@ fn is_git_repository(path: &Path) -> bool {
 /// This function walks the directory tree starting from `root` and collects
 /// all directories that contain a `.git` folder. It does not descend into
 /// `.git` directories or into discovered repositories (to avoid nested repos).
-pub fn scan_for_repositories(root: &Path) -> Result<Vec<PathBuf>> {
+///
+/// The `ignored_dirs` parameter specifies directory names to skip during scanning.
+pub fn scan_for_repositories(root: &Path, ignored_dirs: &[String]) -> Result<Vec<PathBuf>> {
     let mut repositories = Vec::new();
-    scan_directory_recursive(root, &mut repositories)?;
+    scan_directory_recursive(root, &mut repositories, ignored_dirs)?;
     Ok(repositories)
 }
 
-fn scan_directory_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Result<()> {
+fn scan_directory_recursive(
+    dir: &Path,
+    repositories: &mut Vec<PathBuf>,
+    ignored_dirs: &[String],
+) -> Result<()> {
     // Skip if not a directory or not readable
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -171,9 +177,9 @@ fn scan_directory_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Resu
     for entry in entries.flatten() {
         let path = entry.path();
 
-        // Skip hidden directories (except we check for .git)
+        // Skip hidden directories and ignored directories
         if let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && name.starts_with('.')
+            && (name.starts_with('.') || ignored_dirs.iter().any(|ignored| ignored == name))
         {
             continue;
         }
@@ -184,7 +190,7 @@ fn scan_directory_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Resu
                 // Don't descend into git repositories to avoid nested repos
             } else {
                 // Continue scanning subdirectories
-                scan_directory_recursive(&path, repositories)?;
+                scan_directory_recursive(&path, repositories, ignored_dirs)?;
             }
         }
     }
@@ -193,8 +199,10 @@ fn scan_directory_recursive(dir: &Path, repositories: &mut Vec<PathBuf>) -> Resu
 }
 
 /// Discovers all projects and their worktrees starting from a root directory.
-pub fn discover_projects(root: &Path) -> Result<Vec<Project>> {
-    let repo_paths = scan_for_repositories(root)?;
+///
+/// The `ignored_dirs` parameter specifies directory names to skip during scanning.
+pub fn discover_projects(root: &Path, ignored_dirs: &[String]) -> Result<Vec<Project>> {
+    let repo_paths = scan_for_repositories(root, ignored_dirs)?;
 
     let mut projects = Vec::new();
     for repo_path in repo_paths {
@@ -369,12 +377,41 @@ branch refs/heads/main"#;
         std::fs::create_dir_all(repo2.join(".git")).unwrap();
         std::fs::create_dir_all(&not_repo).unwrap();
 
-        let repos = scan_for_repositories(&temp_dir).unwrap();
+        let repos = scan_for_repositories(&temp_dir, &[]).unwrap();
 
         assert_eq!(repos.len(), 2);
         assert!(repos.contains(&repo1));
         assert!(repos.contains(&repo2));
         assert!(!repos.contains(&not_repo));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_scan_for_repositories_with_ignored_dirs() {
+        // Create a temp directory structure:
+        // temp/
+        //   repo1/
+        //     .git/
+        //   ignored/
+        //     repo2/
+        //       .git/
+        let temp_dir = std::env::temp_dir().join("vive_test_scan_ignored");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let repo1 = temp_dir.join("repo1");
+        let repo2 = temp_dir.join("ignored").join("repo2");
+
+        std::fs::create_dir_all(repo1.join(".git")).unwrap();
+        std::fs::create_dir_all(repo2.join(".git")).unwrap();
+
+        let ignored_dirs = vec!["ignored".to_string()];
+        let repos = scan_for_repositories(&temp_dir, &ignored_dirs).unwrap();
+
+        assert_eq!(repos.len(), 1);
+        assert!(repos.contains(&repo1));
+        assert!(!repos.contains(&repo2));
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
