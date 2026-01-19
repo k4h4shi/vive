@@ -1,5 +1,6 @@
 mod discovery;
 mod event;
+mod process;
 mod state;
 mod tmux;
 mod ui;
