@@ -178,10 +178,10 @@ fn scan_directory_recursive(
         let path = entry.path();
 
         // Skip hidden directories and ignored directories
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with('.') || ignored_dirs.iter().any(|ignored| ignored == name) {
-                continue;
-            }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && (name.starts_with('.') || ignored_dirs.iter().any(|ignored| ignored == name))
+        {
+            continue;
         }
 
         if path.is_dir() {
