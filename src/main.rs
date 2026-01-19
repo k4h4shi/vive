@@ -145,7 +145,8 @@ fn handle_action(
                 match output {
                     Ok(output) if output.status.success() => {
                         // Success - refresh project list and show success message
-                        if let Ok(projects) = discover_projects(&state.projects_root, ignored_dirs) {
+                        if let Ok(projects) = discover_projects(&state.projects_root, ignored_dirs)
+                        {
                             state.set_projects(projects);
                         }
                         state.set_success_message(format!("Created worktree '{branch_name}'"));
