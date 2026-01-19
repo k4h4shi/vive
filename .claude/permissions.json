@@ -1,0 +1,29 @@
+{
+  "allow": [
+    "Task(architect)",
+    "Task(planner)",
+    "Task(code-reviewer)",
+    "Task(security-reviewer)",
+    "Task(doc-updater)",
+    "Bash(git status *)",
+    "Bash(git diff *)",
+    "Bash(git fetch *)",
+    "Bash(git push *)",
+    "Bash(git add *)",
+    "Bash(git commit *)",
+    "Bash(git worktree *)",
+    "Bash(gh pr *)",
+    "Bash(gh issue *)",
+    "Bash(vive *)",
+    "Bash(./vive *)",
+    "Bash(grep *)",
+    "Bash(ls *)",
+    "Bash(cd *)",
+    "Bash(mkdir *)",
+    "Bash(rm *)",
+    "Bash(cp *)",
+    "Bash(mv *)",
+    "Bash(chmod *)",
+    "Bash(cat *)"
+  ]
+}

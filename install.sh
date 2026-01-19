@@ -27,10 +27,10 @@ for cmd in tmux git claude; do
   fi
 done
 
-# Create symlink
-if [[ -e "$INSTALL_PATH" ]]; then
+# Create symlink (remove existing file or symlink first)
+if [[ -e "$INSTALL_PATH" ]] || [[ -L "$INSTALL_PATH" ]]; then
   echo "Removing existing installation..."
-  sudo rm "$INSTALL_PATH"
+  sudo rm -f "$INSTALL_PATH"
 fi
 
 sudo ln -s "${SCRIPT_DIR}/vive" "$INSTALL_PATH"
