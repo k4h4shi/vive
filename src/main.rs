@@ -83,16 +83,24 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>) -> Result<()>
 /// Handle the AttachSession action which requires special terminal handling.
 fn handle_attach_session<W: Write>(app: &mut ProductionApp<W>) -> Result<()> {
     if let Some(project) = app.state().selected_project() {
+        // Session info resolution with fallback chain:
+        // 1. Try selected worktree -> use its session_id (project__branch format)
+        // 2. Fall back to default worktree (main/master) -> use its session_id
+        // 3. Final fallback: use project name as session_id with project root path
         let session_info = app
             .state()
             .selected_worktree()
             .and_then(|wt| wt.session_id(&project.name).map(|id| (id, wt.path.clone())))
             .or_else(|| {
+                // Fallback to default worktree (main or master branch)
                 project
                     .default_worktree()
                     .and_then(|wt| wt.session_id(&project.name).map(|id| (id, wt.path.clone())))
             })
-            .or_else(|| Some((project.name.clone(), project.path.clone())));
+            .or_else(|| {
+                // Final fallback: use project name as session with project root
+                Some((project.name.clone(), project.path.clone()))
+            });
 
         if let Some((session_id, worktree_path)) = session_info {
             let worktree_path_str = worktree_path.to_string_lossy();
