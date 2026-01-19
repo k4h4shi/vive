@@ -23,6 +23,45 @@ Manage 10+ AI agents across 5+ repositories without losing your mind.
 - [Architecture](docs/architecture.md)
 - [Functional Requirements](docs/requirements.md)
 
+## Installation
+
+### Prerequisites
+
+- **Rust** (with cargo) - [Install Rust](https://www.rust-lang.org/tools/install)
+- **tmux** - Terminal multiplexer
+- **git** - Version control
+
+### Install from Source
+
+```bash
+git clone https://github.com/k4h4shi/vive.git
+cd vive
+./install.sh
+```
+
+This will:
+1. Build the release binary using `cargo build --release`
+2. Install to `~/.local/bin/vive` (or `/usr/local/bin/vive` if needed)
+
+### Uninstall
+
+```bash
+./install.sh --uninstall
+```
+
+## Usage
+
+```bash
+# Launch the TUI dashboard
+vive
+```
+
+### Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `VIVE_PROJECTS_ROOT` | Root directory for project discovery | `~/src` |
+
 ## Tech Stack
 
 - **Rust**
