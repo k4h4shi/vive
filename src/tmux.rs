@@ -372,9 +372,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// Kill a window in a session.
     pub fn kill_window(&self, session_name: &str, window_name: &str) -> Result<()> {
         let target = format!("{session_name}:{window_name}");
-        let result = self
-            .executor
-            .execute(args!["kill-window", "-t", &target])?;
+        let result = self.executor.execute(args!["kill-window", "-t", &target])?;
 
         if !result.success {
             anyhow::bail!(
@@ -418,11 +416,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     }
 
     /// Split a window/pane vertically (creates panes side by side).
-    pub fn split_window_vertical(
-        &self,
-        target: &str,
-        start_directory: Option<&str>,
-    ) -> Result<()> {
+    pub fn split_window_vertical(&self, target: &str, start_directory: Option<&str>) -> Result<()> {
         let mut cmd_args = args!["split-window", "-h", "-t", target];
 
         if let Some(dir) = start_directory {
@@ -474,14 +468,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// The captured pane content as a string.
     pub fn capture_pane(&self, target: &str, lines: usize) -> Result<String> {
         let start_line = format!("-{lines}");
-        let result = self.executor.execute(args![
-            "capture-pane",
-            "-t",
-            target,
-            "-p",
-            "-S",
-            &start_line,
-        ])?;
+        let result =
+            self.executor
+                .execute(args!["capture-pane", "-t", target, "-p", "-S", &start_line,])?;
 
         if !result.success {
             anyhow::bail!(
@@ -637,9 +626,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
     /// Load a tmux configuration file.
     pub fn source_file(&self, config_path: &str) -> Result<()> {
-        let result = self
-            .executor
-            .execute(args!["source-file", config_path])?;
+        let result = self.executor.execute(args!["source-file", config_path])?;
 
         if !result.success {
             anyhow::bail!(
@@ -654,13 +641,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
     /// Set a tmux option for a session.
     pub fn set_option(&self, session_name: &str, option: &str, value: &str) -> Result<()> {
-        let result = self.executor.execute(args![
-            "set-option",
-            "-t",
-            session_name,
-            option,
-            value,
-        ])?;
+        let result =
+            self.executor
+                .execute(args!["set-option", "-t", session_name, option, value,])?;
 
         // set-option can fail silently for some options, so we don't always error
         if !result.success && !result.stderr.is_empty() {
@@ -887,15 +870,7 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args
-                    == to_strings(&[
-                        "split-window",
-                        "-v",
-                        "-t",
-                        "my-session:main",
-                        "-c",
-                        "/path",
-                    ])
+                *args == to_strings(&["split-window", "-v", "-t", "my-session:main", "-c", "/path"])
             })
             .returning(|_| Ok(mock_success("")));
 
@@ -969,13 +944,7 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args
-                    == to_strings(&[
-                        "select-layout",
-                        "-t",
-                        "my-session:main",
-                        "main-vertical",
-                    ])
+                *args == to_strings(&["select-layout", "-t", "my-session:main", "main-vertical"])
             })
             .returning(|_| Ok(mock_success("")));
 
@@ -1000,9 +969,7 @@ mod tests {
     fn test_set_option() {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
-            .withf(|args| {
-                *args == to_strings(&["set-option", "-t", "my-session", "mouse", "on"])
-            })
+            .withf(|args| *args == to_strings(&["set-option", "-t", "my-session", "mouse", "on"]))
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
@@ -1016,15 +983,7 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args
-                    == to_strings(&[
-                        "capture-pane",
-                        "-t",
-                        "my-session:main",
-                        "-p",
-                        "-S",
-                        "-50",
-                    ])
+                *args == to_strings(&["capture-pane", "-t", "my-session:main", "-p", "-S", "-50"])
             })
             .returning(|_| {
                 Ok(mock_success(
