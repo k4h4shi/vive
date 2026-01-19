@@ -1,3 +1,4 @@
+mod config;
 mod discovery;
 mod event;
 mod process;
@@ -5,9 +6,8 @@ mod state;
 mod tmux;
 mod ui;
 
-use std::path::PathBuf;
+use std::io;
 use std::time::{Duration, Instant};
-use std::{env, io};
 
 use anyhow::Result;
 use crossterm::{
@@ -17,6 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
+use crate::config::Config;
 use crate::discovery::discover_projects;
 use crate::event::Action;
 use crate::state::AppState;
@@ -42,19 +43,14 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-    // Determine project root (default to home directory)
-    let projects_root = env::var("VIVE_PROJECTS_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs_home()
-                .map(|h| h.join("src"))
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
+    // Load configuration
+    let config = Config::load().unwrap_or_default();
+    let projects_root = config.effective_projects_root();
 
     let mut state = AppState::with_projects_root(projects_root.clone());
 
     // Discover projects at startup
-    if let Ok(projects) = discover_projects(&projects_root) {
+    if let Ok(projects) = discover_projects(&projects_root, &config.ignored_dirs) {
         state.set_projects(projects);
     }
 
@@ -71,7 +67,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         // Poll for events
         if let Some(Event::Key(key)) = event::poll_event(Duration::from_millis(100))? {
             let action = event::handle_key_event(key, &mut state);
-            handle_action(action, &mut state, &tmux, terminal)?;
+            handle_action(action, &mut state, &tmux, terminal, &config.ignored_dirs)?;
         }
 
         // Periodic preview update
@@ -93,6 +89,7 @@ fn handle_action(
     state: &mut AppState,
     tmux: &TmuxOrchestrator<RealTmuxExecutor>,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ignored_dirs: &[String],
 ) -> Result<()> {
     match action {
         Action::None | Action::Quit => {}
@@ -148,7 +145,8 @@ fn handle_action(
                 match output {
                     Ok(output) if output.status.success() => {
                         // Success - refresh project list and show success message
-                        if let Ok(projects) = discover_projects(&state.projects_root) {
+                        if let Ok(projects) = discover_projects(&state.projects_root, ignored_dirs)
+                        {
                             state.set_projects(projects);
                         }
                         state.set_success_message(format!("Created worktree '{branch_name}'"));
@@ -196,9 +194,4 @@ fn update_pane_preview(state: &mut AppState, tmux: &TmuxOrchestrator<RealTmuxExe
     }
     // Clear preview if no valid session
     state.set_pane_preview(String::new());
-}
-
-/// Get the user's home directory.
-fn dirs_home() -> Option<PathBuf> {
-    env::var("HOME").ok().map(PathBuf::from)
 }
