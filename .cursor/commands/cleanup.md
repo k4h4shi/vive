@@ -1,24 +1,34 @@
 ---
-description: Clean up worktrees and sessions. Usage: /cleanup
+description: Cleanup a vive task. Usage: /cleanup [ISSUE_ID]
 ---
 
-# Cleanup Worktree (Vive)
+# Cleanup Task
 
-## 1. List Active Sessions
+Cleanup a development task (Worktree + Tmux Session) in Vive.
+
+## Instructions
+
+1.  **Identify the Issue ID**:
+    - If not provided, ask the user or list active sessions.
+
+2.  **Execute Cleanup**:
+    - Use the `vive` CLI or direct Git/Tmux commands (if `vive` CLI cleanup is not yet implemented for external calls).
+    - **Preferred**: Use the `vive` TUI interface (Press 'D' on the task).
+
+    **Manual Fallback (if TUI is not accessible via command):**
+    ```bash
+    # 1. Kill Tmux Session
+    tmux kill-session -t <PROJECT_NAME>:<ISSUE_ID> 2>/dev/null || true
+
+    # 2. Remove Worktree
+    git worktree remove .worktrees/<ISSUE_ID> --force
+
+    # 3. Delete Branch
+    git branch -D feature/<ISSUE_ID> 2>/dev/null || true
+    ```
+
+## Example
 
 ```bash
-./vive list
-```
-
-## 2. Cleanup a Session
-
-To clean up a specific issue session (closes window and removes worktree):
-
-```bash
-./vive cleanup <ISSUE_ID>
-```
-
-Example:
-```bash
-./vive cleanup 123
+/cleanup 123
 ```
