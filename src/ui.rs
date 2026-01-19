@@ -9,7 +9,7 @@ use ratatui::{
 use crate::state::{AppState, FocusMode, ModalType, StatusMessageType};
 
 /// Render the UI based on the current application state.
-pub fn render(frame: &mut Frame, state: &AppState) {
+pub fn render(frame: &mut Frame, state: &mut AppState) {
     let area = frame.area();
 
     // Main layout: Header, Content, Footer
@@ -59,7 +59,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(header, area);
 }
 
-fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // Split content into sidebar and preview
     let content_chunks = Layout::horizontal([
         Constraint::Percentage(30), // Sidebar
@@ -71,15 +71,55 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
     render_preview(frame, content_chunks[1], state);
 }
 
-fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_sidebar(frame: &mut Frame, area: Rect, state: &mut AppState) {
+    // Build list items first (immutable borrow of state)
+    let items = build_sidebar_items(state);
+
+    let sidebar = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Projects"))
+        // Use empty highlight symbol to avoid interfering with item content
+        .highlight_symbol("")
+        // Use minimal highlight style - items already have their own selection styling
+        .highlight_style(Style::default());
+    // Now we can mutably borrow for ListState
+    frame.render_stateful_widget(sidebar, area, state.sidebar_list_state_mut());
+}
+
+fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
     let mut items: Vec<ListItem> = Vec::new();
 
-    for (proj_idx, project) in state.projects.iter().enumerate() {
-        // Project header
-        let is_selected_project = state.selected_project_idx() == Some(proj_idx);
+    let sorted_projects = state.sorted_projects();
+    let has_favorites = state.has_favorites();
+    let has_non_favorites = sorted_projects.iter().any(|p| !state.is_favorite(&p.name));
+    let mut separator_added = false;
+
+    for project in sorted_projects.iter() {
+        let is_favorite = state.is_favorite(&project.name);
+
+        // Add separator between favorites and non-favorites
+        if has_favorites && has_non_favorites && !is_favorite && !separator_added {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "────────────────",
+                Style::default().fg(Color::DarkGray),
+            ))));
+            separator_added = true;
+        }
+
+        // Find original index for selection comparison
+        let orig_idx = state
+            .projects
+            .iter()
+            .position(|p| p.name == project.name)
+            .unwrap();
+        let is_selected_project = state.selected_project_idx() == Some(orig_idx);
+
         let project_style = if is_selected_project && state.selected_worktree_idx().is_none() {
             Style::default()
                 .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else if is_favorite {
+            Style::default()
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
@@ -87,8 +127,10 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
                 .add_modifier(Modifier::BOLD)
         };
 
+        // Add favorite indicator
+        let favorite_indicator = if is_favorite { "★ " } else { "" };
         items.push(ListItem::new(Line::from(vec![Span::styled(
-            format!("{} ", project.name),
+            format!("{}{} ", favorite_indicator, project.name),
             project_style,
         )])));
 
@@ -115,7 +157,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
                 Span::raw("  "),
                 Span::raw(status.icon()),
                 Span::raw(" "),
-                Span::styled(branch_name, style),
+                Span::styled(branch_name.to_string(), style),
             ])));
         }
     }
@@ -127,8 +169,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
         ))));
     }
 
-    let sidebar = List::new(items).block(Block::default().borders(Borders::ALL).title("Projects"));
-    frame.render_widget(sidebar, area);
+    items
 }
 
 fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -160,13 +201,15 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
     let content = match state.focus_mode {
         FocusMode::Normal => Line::from(vec![
             Span::styled("j/k", Style::default().fg(Color::Yellow)),
-            Span::raw(": Navigate  "),
-            Span::styled("Enter/o", Style::default().fg(Color::Yellow)),
+            Span::raw(": Nav  "),
+            Span::styled("o", Style::default().fg(Color::Yellow)),
             Span::raw(": Attach  "),
-            Span::styled("i", Style::default().fg(Color::Yellow)),
-            Span::raw(": Input  "),
             Span::styled("n", Style::default().fg(Color::Yellow)),
-            Span::raw(": New Task  "),
+            Span::raw(": New  "),
+            Span::styled("d", Style::default().fg(Color::Yellow)),
+            Span::raw(": Del  "),
+            Span::styled("f", Style::default().fg(Color::Yellow)),
+            Span::raw(": Fav  "),
             Span::styled("q", Style::default().fg(Color::Yellow)),
             Span::raw(": Quit"),
         ]),
@@ -188,8 +231,15 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
-    let ModalType::CreateTask { input } = modal;
+    match modal {
+        ModalType::CreateTask { input } => render_create_task_modal(frame, area, input),
+        ModalType::ConfirmDeletion { branch_name } => {
+            render_confirm_deletion_modal(frame, area, branch_name)
+        }
+    }
+}
 
+fn render_create_task_modal(frame: &mut Frame, area: Rect, input: &str) {
     // Center the modal
     let modal_width = 50.min(area.width.saturating_sub(4));
     let modal_height = 7;
@@ -207,7 +257,7 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
         Line::from(""),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(Color::Green)),
-            Span::raw(input.as_str()),
+            Span::raw(input),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
         ]),
     ];
@@ -216,6 +266,43 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
         Block::default()
             .borders(Borders::ALL)
             .title("Create Task")
+            .style(Style::default().bg(Color::DarkGray)),
+    );
+    frame.render_widget(modal_widget, modal_area);
+}
+
+fn render_confirm_deletion_modal(frame: &mut Frame, area: Rect, branch_name: &str) {
+    // Center the modal
+    let modal_width = 60.min(area.width.saturating_sub(4));
+    let modal_height = 8;
+    let modal_x = (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = (area.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    // Clear the area behind the modal
+    frame.render_widget(Clear, modal_area);
+
+    let content = vec![
+        Line::from(""),
+        Line::from(format!("Delete task '{branch_name}'?")),
+        Line::from(""),
+        Line::from("This will remove the worktree and branch."),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("y", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw(": Yes  "),
+            Span::styled("n", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw("/"),
+            Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw(": No"),
+        ]),
+    ];
+
+    let modal_widget = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Confirm Deletion")
             .style(Style::default().bg(Color::DarkGray)),
     );
     frame.render_widget(modal_widget, modal_area);

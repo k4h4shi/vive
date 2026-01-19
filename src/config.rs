@@ -4,7 +4,9 @@
 //! - Load configuration from `~/.vive/config.toml`
 //! - Define default values for configuration options
 //! - Support configuration for projects_root, ignored_dirs, and tmux_prefix
+//! - Load and save favorites to `~/.vive/favorites.toml`
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -15,6 +17,8 @@ use serde::{Deserialize, Serialize};
 const CONFIG_DIR_NAME: &str = ".vive";
 /// Configuration file name.
 const CONFIG_FILE_NAME: &str = "config.toml";
+/// Favorites file name.
+const FAVORITES_FILE_NAME: &str = "favorites.toml";
 
 /// Default directories to ignore when scanning for projects.
 const DEFAULT_IGNORED_DIRS: &[&str] = &[".git", "node_modules", ".worktrees", "target", "dist"];
@@ -150,6 +154,103 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
 }
 
+/// Favorites data stored in `~/.vive/favorites.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Favorites {
+    /// Set of favorite project names.
+    #[serde(default)]
+    pub projects: HashSet<String>,
+}
+
+impl Favorites {
+    /// Returns the path to the favorites file (`~/.vive/favorites.toml`).
+    pub fn favorites_file_path() -> Option<PathBuf> {
+        Config::config_dir().map(|dir| dir.join(FAVORITES_FILE_NAME))
+    }
+
+    /// Loads favorites from `~/.vive/favorites.toml`.
+    ///
+    /// If the file doesn't exist, returns empty favorites.
+    /// If the file exists but is invalid, returns an error.
+    pub fn load() -> Result<Self> {
+        let favorites_path = match Self::favorites_file_path() {
+            Some(path) => path,
+            None => return Ok(Self::default()),
+        };
+
+        if !favorites_path.exists() {
+            return Ok(Self::default());
+        }
+
+        let content = fs::read_to_string(&favorites_path).with_context(|| {
+            format!(
+                "Failed to read favorites file: {}",
+                favorites_path.display()
+            )
+        })?;
+
+        let favorites: Favorites = toml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse favorites file: {}",
+                favorites_path.display()
+            )
+        })?;
+
+        Ok(favorites)
+    }
+
+    /// Saves favorites to `~/.vive/favorites.toml`.
+    pub fn save(&self) -> Result<()> {
+        let favorites_path = Self::favorites_file_path()
+            .context("Could not determine favorites file path")?;
+
+        // Ensure config directory exists
+        if let Some(parent) = favorites_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("Failed to create config directory: {}", parent.display())
+                })?;
+            }
+        }
+
+        let content = toml::to_string_pretty(self)
+            .context("Failed to serialize favorites")?;
+
+        fs::write(&favorites_path, content).with_context(|| {
+            format!(
+                "Failed to write favorites file: {}",
+                favorites_path.display()
+            )
+        })?;
+
+        Ok(())
+    }
+
+    /// Check if a project is a favorite.
+    pub fn is_favorite(&self, project_name: &str) -> bool {
+        self.projects.contains(project_name)
+    }
+
+    /// Add a project to favorites.
+    pub fn add(&mut self, project_name: &str) {
+        self.projects.insert(project_name.to_string());
+    }
+
+    /// Remove a project from favorites.
+    pub fn remove(&mut self, project_name: &str) {
+        self.projects.remove(project_name);
+    }
+
+    /// Toggle favorite status.
+    pub fn toggle(&mut self, project_name: &str) {
+        if self.is_favorite(project_name) {
+            self.remove(project_name);
+        } else {
+            self.add(project_name);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +322,70 @@ projects_root = "/home/user/projects"
         let path = path.unwrap();
         assert!(path.to_string_lossy().contains(".vive"));
         assert!(path.to_string_lossy().ends_with("config.toml"));
+    }
+
+    #[test]
+    fn test_favorites_default() {
+        let favorites = Favorites::default();
+        assert!(favorites.projects.is_empty());
+    }
+
+    #[test]
+    fn test_favorites_add_remove() {
+        let mut favorites = Favorites::default();
+
+        favorites.add("project-a");
+        assert!(favorites.is_favorite("project-a"));
+        assert!(!favorites.is_favorite("project-b"));
+
+        favorites.add("project-b");
+        assert!(favorites.is_favorite("project-a"));
+        assert!(favorites.is_favorite("project-b"));
+
+        favorites.remove("project-a");
+        assert!(!favorites.is_favorite("project-a"));
+        assert!(favorites.is_favorite("project-b"));
+    }
+
+    #[test]
+    fn test_favorites_toggle() {
+        let mut favorites = Favorites::default();
+
+        favorites.toggle("project-a");
+        assert!(favorites.is_favorite("project-a"));
+
+        favorites.toggle("project-a");
+        assert!(!favorites.is_favorite("project-a"));
+    }
+
+    #[test]
+    fn test_favorites_parse() {
+        let toml_content = r#"
+projects = ["project-a", "project-b"]
+"#;
+        let favorites: Favorites = toml::from_str(toml_content).unwrap();
+        assert!(favorites.is_favorite("project-a"));
+        assert!(favorites.is_favorite("project-b"));
+        assert!(!favorites.is_favorite("project-c"));
+    }
+
+    #[test]
+    fn test_favorites_serialize() {
+        let mut favorites = Favorites::default();
+        favorites.add("project-a");
+        favorites.add("project-b");
+
+        let serialized = toml::to_string(&favorites).unwrap();
+        assert!(serialized.contains("project-a"));
+        assert!(serialized.contains("project-b"));
+    }
+
+    #[test]
+    fn test_favorites_file_path() {
+        let path = Favorites::favorites_file_path();
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert!(path.to_string_lossy().contains(".vive"));
+        assert!(path.to_string_lossy().ends_with("favorites.toml"));
     }
 }
