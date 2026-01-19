@@ -1,6 +1,7 @@
 mod discovery;
 mod event;
 mod state;
+mod tmux;
 mod ui;
 
 use std::{io, time::Duration};
