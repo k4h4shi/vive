@@ -71,6 +71,7 @@ vive cleanup 123
 | -------- | ------ |
 | `Ctrl+b d` | Detach from session (keeps running) |
 | `Ctrl+b [` | Scroll mode (arrows to navigate, `q` to exit) |
+| Mouse | Scroll wheel to scroll, click to select |
 | `Ctrl+b c` | Create new window |
 | `Ctrl+b n` | Next window |
 | `Ctrl+b p` | Previous window |

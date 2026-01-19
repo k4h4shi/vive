@@ -6,6 +6,16 @@ set -euo pipefail
 
 VERSION="2.0.0"
 
+# Get absolute path to the script directory (resolving symlinks)
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SCRIPT_DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -115,6 +125,13 @@ cmd_start() {
   # Create tmux session
   log_info "Creating tmux session: $session_name"
   tmux new-session -d -s "$session_name" -c "$worktree_path"
+  
+  # Load vive configuration
+  if [[ -f "${SCRIPT_DIR}/vive.tmux.conf" ]]; then
+    tmux source-file "${SCRIPT_DIR}/vive.tmux.conf"
+    log_info "Loaded vive tmux config"
+  fi
+
   
   # Send claude command
   tmux send-keys -t "$session_name" "claude" C-m
