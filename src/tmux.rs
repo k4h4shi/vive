@@ -459,6 +459,26 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         Ok(())
     }
 
+    /// Get the title of a tmux pane.
+    ///
+    /// # Arguments
+    /// * `target` - Target pane (session:window.pane format)
+    ///
+    /// # Returns
+    /// The pane title if available, None if not found or on error.
+    pub fn get_pane_title(&self, target: &str) -> Result<Option<String>> {
+        let result = self
+            .executor
+            .execute(args!["list-panes", "-t", target, "-F", "#{pane_title}"])?;
+
+        if !result.success {
+            return Ok(None);
+        }
+
+        let title = result.stdout.lines().next().map(|s| s.to_string());
+        Ok(title.filter(|s| !s.is_empty()))
+    }
+
     /// Capture the content of a tmux pane.
     ///
     /// # Arguments
@@ -1021,5 +1041,210 @@ mod tests {
     fn test_build_attach_command_inside_tmux() {
         let args = TmuxOrchestrator::<RealTmuxExecutor>::build_attach_command("my-session", true);
         assert_eq!(args, vec!["switch-client", "-t", "my-session"]);
+    }
+
+    #[test]
+    fn test_get_pane_title() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args == to_strings(&["list-panes", "-t", "my-session:main", "-F", "#{pane_title}"])
+            })
+            .returning(|_| Ok(mock_success("⠋ Claude Code - Working\n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let title = orchestrator.get_pane_title("my-session:main").unwrap();
+        assert_eq!(title, Some("⠋ Claude Code - Working".to_string()));
+    }
+
+    #[test]
+    fn test_get_pane_title_empty() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let title = orchestrator.get_pane_title("my-session:main").unwrap();
+        assert_eq!(title, None);
+    }
+
+    #[test]
+    fn test_get_pane_title_failure() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_failure("session not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let title = orchestrator.get_pane_title("invalid-session:main").unwrap();
+        assert_eq!(title, None);
+    }
+
+    #[test]
+    fn test_get_pane_title_multiple_lines_returns_first() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("First title\nSecond title\n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let title = orchestrator.get_pane_title("my-session:main").unwrap();
+        assert_eq!(title, Some("First title".to_string()));
+    }
+
+    #[test]
+    fn test_get_pane_title_whitespace_only() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("   \n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let title = orchestrator.get_pane_title("my-session:main").unwrap();
+        // "   " is not empty, so it should be returned
+        assert_eq!(title, Some("   ".to_string()));
+    }
+
+    #[test]
+    fn test_capture_pane_with_different_line_counts() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args == to_strings(&["capture-pane", "-t", "my-session:main", "-p", "-S", "-100"])
+            })
+            .returning(|_| Ok(mock_success("Line 1\nLine 2\n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let output = orchestrator.capture_pane("my-session:main", 100).unwrap();
+        assert_eq!(output, "Line 1\nLine 2\n");
+    }
+
+    #[test]
+    fn test_create_project_window_new() {
+        let mut mock = MockTmuxExecutor::new();
+
+        // has_session returns false
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-session"]))
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // new_session creates session
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["new-session", "-d", "-s", "my-session"]))
+            .returning(|_| Ok(mock_success("")));
+
+        // list_windows for has_window check
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "list-windows",
+                        "-t",
+                        "my-session",
+                        "-F",
+                        "#{window_index}:#{window_name}:#{window_active}",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("0:main:1\n")));
+
+        // new_window
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "new-window",
+                        "-t",
+                        "my-session",
+                        "-n",
+                        "task-1",
+                        "-c",
+                        "/path/to/worktree",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for initial command
+        mock.expect_execute()
+            .withf(|args| {
+                *args == to_strings(&["send-keys", "-t", "my-session:task-1", "claude", "C-m"])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let created = orchestrator
+            .create_project_window("my-session", "task-1", "/path/to/worktree", Some("claude"))
+            .unwrap();
+        assert!(created); // Session was created
+    }
+
+    #[test]
+    fn test_create_project_window_exists() {
+        let mut mock = MockTmuxExecutor::new();
+
+        // has_session returns true
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-session"]))
+            .returning(|_| Ok(mock_success("")));
+
+        // list_windows shows window already exists
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "list-windows",
+                        "-t",
+                        "my-session",
+                        "-F",
+                        "#{window_index}:#{window_name}:#{window_active}",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("0:main:1\n1:task-1:0\n")));
+
+        // select_window
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["select-window", "-t", "my-session:task-1"]))
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let created = orchestrator
+            .create_project_window("my-session", "task-1", "/path/to/worktree", Some("claude"))
+            .unwrap();
+        assert!(!created); // Session already existed, window existed
+    }
+
+    #[test]
+    fn test_new_session_failure() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_failure("duplicate session")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.new_session("existing-session", None, true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_send_keys_without_enter() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:main", "q"]))
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .send_keys("my-session:main", "q", false)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_new_window_without_directory() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args == to_strings(&["new-window", "-t", "my-session", "-n", "window-name"])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .new_window("my-session", "window-name", None)
+            .unwrap();
     }
 }

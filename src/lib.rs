@@ -6,6 +6,7 @@
 pub mod config;
 pub mod discovery;
 pub mod event;
+pub mod monitor;
 pub mod parser;
 mod process;
 pub mod state;
@@ -79,6 +80,7 @@ where
     config: Config,
     pub last_preview_update: Instant,
     pub preview_update_interval: Duration,
+    status_monitor: monitor::StatusMonitor,
 }
 
 impl<B, E, T, D> App<B, E, T, D>
@@ -108,6 +110,7 @@ where
             config,
             last_preview_update: Instant::now(),
             preview_update_interval: Duration::from_secs(2),
+            status_monitor: monitor::StatusMonitor::new(),
         }
     }
 
@@ -156,7 +159,7 @@ where
         };
         if let Err(e) = favorites.save() {
             // Log error but don't fail - favorites are not critical
-            eprintln!("Warning: Failed to save favorites: {}", e);
+            eprintln!("Warning: Failed to save favorites: {e}");
         }
     }
 
@@ -359,8 +362,19 @@ where
         {
             // Parse the content to detect agent status
             let parsed = parser::parse_status(&content);
-            let status = state::AgentStatus::from_parsed(&parsed);
-            self.state.set_status(session_id.clone(), status);
+            let raw_status = state::AgentStatus::from_parsed(&parsed);
+
+            // Get pane title and combine with parsed status
+            let pane_title = self.tmux.get_pane_title(&session_id).ok().flatten();
+            let title_combined =
+                monitor::combine_status_with_title(raw_status, pane_title.as_deref());
+
+            // Apply hysteresis to smooth out transitions
+            let final_status = self
+                .status_monitor
+                .apply_hysteresis(&session_id, title_combined);
+
+            self.state.set_status(session_id.clone(), final_status);
 
             self.state.set_pane_preview(content);
             return;
