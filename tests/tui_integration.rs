@@ -657,7 +657,7 @@ fn test_footer_shows_help() {
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    assert_buffer_contains(buffer, "Navigate");
+    assert_buffer_contains(buffer, "Nav");
     assert_buffer_contains(buffer, "Quit");
 }
 
