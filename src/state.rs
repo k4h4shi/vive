@@ -41,6 +41,16 @@ impl AgentStatus {
             AgentStatus::Error => "🔴",
         }
     }
+
+    /// Create AgentStatus from parsed terminal content.
+    pub fn from_parsed(parsed: &crate::parser::ParsedStatus) -> Self {
+        use crate::parser::ParsedStatus;
+        match parsed {
+            ParsedStatus::Idle => AgentStatus::Idle,
+            ParsedStatus::Working { .. } => AgentStatus::Working,
+            ParsedStatus::WaitingApproval { .. } => AgentStatus::Waiting,
+        }
+    }
 }
 
 /// Focus mode for the UI.

@@ -6,6 +6,7 @@
 pub mod config;
 pub mod discovery;
 pub mod event;
+pub mod parser;
 mod process;
 pub mod state;
 pub mod tmux;
@@ -347,7 +348,7 @@ where
         Ok(())
     }
 
-    /// Update the pane preview from tmux.
+    /// Update the pane preview from tmux and parse agent status.
     pub fn update_pane_preview(&mut self) {
         if let (Some(project), Some(worktree)) = (
             self.state.selected_project(),
@@ -356,6 +357,11 @@ where
             && self.tmux.has_session(&session_id).unwrap_or(false)
             && let Ok(content) = self.tmux.capture_pane(&session_id, 50)
         {
+            // Parse the content to detect agent status
+            let parsed = parser::parse_status(&content);
+            let status = state::AgentStatus::from_parsed(&parsed);
+            self.state.set_status(session_id.clone(), status);
+
             self.state.set_pane_preview(content);
             return;
         }
