@@ -43,6 +43,20 @@ This will:
 1. Build the release binary using `cargo build --release`
 2. Install to `~/.local/bin/vive` (or `/usr/local/bin/vive` if needed)
 
+For CI/CD or scripted installations, use the `--yes` flag to suppress output:
+
+```bash
+./install.sh --yes
+```
+
+### Install with Cargo (for Rust developers)
+
+```bash
+git clone https://github.com/k4h4shi/vive.git
+cd vive
+cargo install --path .
+```
+
 ### Uninstall
 
 ```bash
