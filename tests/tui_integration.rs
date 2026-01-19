@@ -752,3 +752,369 @@ fn test_preview_placeholder_no_session() {
     let buffer = app.terminal().backend().buffer();
     assert_buffer_contains(buffer, "No active session");
 }
+
+// ============================================================================
+// Additional Integration Tests for Test Coverage Expansion
+// ============================================================================
+
+/// Test: Favorites toggle - Press 'f' to toggle favorite.
+#[test]
+fn test_favorites_toggle_on_f() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // No favorites initially
+    assert!(!app.state().favorites().contains("project-alpha"));
+
+    // Press 'f' to toggle favorite
+    let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Now project-alpha should be a favorite
+    assert!(app.state().favorites().contains("project-alpha"));
+
+    // Toggle again to remove
+    let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert!(!app.state().favorites().contains("project-alpha"));
+}
+
+/// Test: Favorites display - favorite projects show star icon.
+#[test]
+fn test_favorites_show_star_icon() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Toggle favorite
+    let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "★");
+}
+
+/// Test: Deletion modal - Press 'd' on non-main branch opens modal.
+#[test]
+fn test_deletion_modal_opens_on_d() {
+    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
+        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+        Worktree::new(
+            "/path/to/test/.worktrees/feature-x",
+            "def456",
+            Some("feature-x".to_string()),
+        ),
+    ])];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Navigate to feature-x worktree
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Now on feature-x, press 'd'
+    let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Modal should be open
+    assert!(app.state().modal.is_some());
+}
+
+/// Test: Deletion modal - Press 'd' on main branch shows error.
+#[test]
+fn test_deletion_on_main_shows_error() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Currently on main branch (default selection)
+    // Press 'd'
+    let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Should have an error message
+    assert!(app.state().status_message.is_some());
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Cannot delete");
+}
+
+/// Test: Deletion modal renders with branch name.
+#[test]
+fn test_deletion_modal_renders_branch_name() {
+    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
+        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+        Worktree::new(
+            "/path/to/test/.worktrees/my-feature",
+            "def456",
+            Some("my-feature".to_string()),
+        ),
+    ])];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Navigate to my-feature
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Press 'd' to open deletion modal
+    let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "my-feature");
+    assert_buffer_contains(buffer, "Delete");
+}
+
+/// Test: Deletion modal - 'n' cancels deletion.
+#[test]
+fn test_deletion_modal_n_cancels() {
+    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
+        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+        Worktree::new(
+            "/path/to/test/.worktrees/feature-1",
+            "def456",
+            Some("feature-1".to_string()),
+        ),
+    ])];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Navigate and open deletion modal
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert!(app.state().modal.is_some());
+
+    // Press 'n' to cancel
+    let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert!(app.state().modal.is_none());
+}
+
+/// Test: Status - Error status shows red icon.
+#[test]
+fn test_status_error_icon() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    app.state_mut()
+        .set_status("project-alpha__main".to_string(), AgentStatus::Error);
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "🔴");
+}
+
+/// Test: Multiple projects with different statuses.
+#[test]
+fn test_multiple_project_statuses() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Set different statuses for different sessions
+    app.state_mut()
+        .set_status("project-alpha__main".to_string(), AgentStatus::Working);
+    app.state_mut()
+        .set_status("project-beta__main".to_string(), AgentStatus::Waiting);
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should show both green and yellow circles
+    assert_buffer_contains(buffer, "🟢");
+    assert_buffer_contains(buffer, "🟡");
+}
+
+/// Test: Navigation at boundary doesn't crash.
+#[test]
+fn test_navigation_at_boundary() {
+    let projects = vec![Project::new("single-project", "/path/to/single").with_worktrees(vec![
+        Worktree::new("/path/to/single", "abc123", Some("main".to_string())),
+    ])];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Try to move up when already at top
+    let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Should still be at first position
+    assert_eq!(app.state().selected_project_idx(), Some(0));
+    assert_eq!(app.state().selected_worktree_idx(), Some(0));
+
+    // Try to move down when already at bottom
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Should still be at same position
+    assert_eq!(app.state().selected_project_idx(), Some(0));
+    assert_eq!(app.state().selected_worktree_idx(), Some(0));
+}
+
+/// Test: Preview area shows spinner content.
+#[test]
+fn test_preview_shows_spinner_content() {
+    let projects = create_test_projects();
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![(
+            "project-alpha__main",
+            "⠋ Working on task...\nAnalyzing code...",
+        )],
+    );
+
+    app.init().unwrap();
+    app.update_pane_preview();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Working on task");
+}
+
+/// Test: Input mode typing updates input buffer.
+#[test]
+fn test_input_mode_typing_updates_buffer() {
+    let projects = create_test_projects();
+    let mut app = create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", "")]);
+
+    app.init().unwrap();
+
+    // Enter input mode
+    let key = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Type "hello"
+    for c in "hello".chars() {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        let action = app.handle_key_event(key);
+        app.handle_action(action).unwrap();
+    }
+
+    assert_eq!(&app.state().input_buffer, "hello");
+}
+
+/// Test: Input mode backspace removes character.
+#[test]
+fn test_input_mode_backspace_removes_char() {
+    let projects = create_test_projects();
+    let mut app = create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", "")]);
+
+    app.init().unwrap();
+
+    // Enter input mode
+    let key = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Type "ab"
+    for c in "ab".chars() {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        let action = app.handle_key_event(key);
+        app.handle_action(action).unwrap();
+    }
+
+    assert_eq!(&app.state().input_buffer, "ab");
+
+    // Press backspace
+    let key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(&app.state().input_buffer, "a");
+}
+
+/// Test: Modal input with backspace.
+#[test]
+fn test_modal_backspace() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open modal
+    let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Type "abc"
+    for c in "abc".chars() {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        let action = app.handle_key_event(key);
+        app.handle_action(action).unwrap();
+    }
+
+    assert_eq!(app.state().modal_input(), Some("abc"));
+
+    // Press backspace
+    let key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(app.state().modal_input(), Some("ab"));
+}
+
+/// Test: Footer shows delete key hint.
+#[test]
+fn test_footer_shows_delete_hint() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Del");
+}
+
+/// Test: Footer shows favorite key hint.
+#[test]
+fn test_footer_shows_favorite_hint() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Fav");
+}

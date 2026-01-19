@@ -315,4 +315,217 @@ mod tests {
         // Lines are more than 4 apart
         assert!(!detect_button_ui(content));
     }
+
+    // Additional tests for better coverage
+
+    #[test]
+    fn test_detect_file_edit_variations() {
+        // Different phrasings for file edit
+        let cases = [
+            "Edit src/main.rs?",
+            "Do you want to modify the file?",
+            "Allow this edit?",
+            "Write to file /tmp/test.txt?",
+        ];
+        for content in cases {
+            match parse_status(content) {
+                ParsedStatus::WaitingApproval {
+                    approval_type: ApprovalType::FileEdit { .. },
+                } => {}
+                other => panic!("Expected FileEdit for '{}', got {:?}", content, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_detect_file_create_variations() {
+        let cases = [
+            "Create src/new_file.rs?",
+            "Do you want to create this file?",
+            "Allow file create?",
+        ];
+        for content in cases {
+            match parse_status(content) {
+                ParsedStatus::WaitingApproval {
+                    approval_type: ApprovalType::FileCreate { .. },
+                } => {}
+                other => panic!("Expected FileCreate for '{}', got {:?}", content, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_detect_shell_command_variations() {
+        let cases = [
+            "Run command in bash?",
+            "Execute shell command?",
+            "Do you want to run this command?",
+            "Allow bash execution?",
+        ];
+        for content in cases {
+            match parse_status(content) {
+                ParsedStatus::WaitingApproval {
+                    approval_type: ApprovalType::ShellCommand { .. },
+                } => {}
+                other => panic!("Expected ShellCommand for '{}', got {:?}", content, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_detect_general_yesno_variations() {
+        let cases = [
+            "Continue? [Y/n]",
+            "Proceed? [yes/no]",
+            "(Y)es / (N)o",
+            "Yes / No",
+        ];
+        for content in cases {
+            match parse_status(content) {
+                ParsedStatus::WaitingApproval {
+                    approval_type: ApprovalType::General,
+                } => {}
+                other => panic!("Expected General for '{}', got {:?}", content, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_button_ui_with_comma_prefix() {
+        let content = "Some question\n\nYes, proceed\nNo, cancel";
+        assert!(detect_button_ui(content));
+    }
+
+    #[test]
+    fn test_button_ui_only_yes_no_present() {
+        // Only Yes present
+        let content = "Question?\n\nYes";
+        assert!(!detect_button_ui(content));
+
+        // Only No present
+        let content = "Question?\n\nNo";
+        assert!(!detect_button_ui(content));
+    }
+
+    #[test]
+    fn test_detect_all_spinner_characters() {
+        let spinners = ['⏺', '⠿', '⠇', '⠋', '⠙', '⠸', '⠴', '⠦', '⠧', '⠖', '⠏', '▶', '►'];
+        for spinner in spinners {
+            let content = format!("{spinner} Processing...");
+            match parse_status(&content) {
+                ParsedStatus::Working { .. } => {}
+                other => panic!("Expected Working for spinner '{}', got {:?}", spinner, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_working_extracts_task_name() {
+        let content = "⠿ Task (subagent_type: Plan) planning implementation";
+        match parse_status(content) {
+            ParsedStatus::Working { task } => {
+                assert_eq!(task, Some("Plan".to_string()));
+            }
+            other => panic!("Expected Working with task, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_working_without_subagent_pattern() {
+        let content = "⠋ Just a simple spinner";
+        match parse_status(content) {
+            ParsedStatus::Working { task } => {
+                assert_eq!(task, Some("Working".to_string()));
+            }
+            other => panic!("Expected Working, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_subagents_empty() {
+        let content = "Normal content without any subagent";
+        let subagents = parse_subagents(content);
+        assert!(subagents.is_empty());
+    }
+
+    #[test]
+    fn test_parse_subagents_multiple() {
+        let content = "⠿ Task (subagent_type: Explore) first\n⠋ Agent Plan doing stuff";
+        let subagents = parse_subagents(content);
+        assert_eq!(subagents.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_file_path_none() {
+        let content = "Just some text without any relevant info";
+        let path = extract_file_path(content);
+        assert_eq!(path, None);
+    }
+
+    #[test]
+    fn test_extract_file_path_absolute() {
+        let content = "file: /home/user/project/src/main.rs";
+        let path = extract_file_path(content);
+        assert_eq!(path, Some("/home/user/project/src/main.rs".to_string()));
+    }
+
+    #[test]
+    fn test_extract_command_from_code_block() {
+        let content = "Running:\n```bash\nnpm install && npm test\n```";
+        let cmd = extract_command(content);
+        assert_eq!(cmd, Some("npm install && npm test".to_string()));
+    }
+
+    #[test]
+    fn test_extract_command_none() {
+        let content = "No command here";
+        let cmd = extract_command(content);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn test_priority_approval_over_spinner() {
+        // Content has both approval and spinner - approval should win
+        let content = "⠋ Do you want to edit this file?";
+        match parse_status(content) {
+            ParsedStatus::WaitingApproval {
+                approval_type: ApprovalType::FileEdit { .. },
+            } => {}
+            other => panic!("Expected FileEdit (approval has priority), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_priority_approval_over_button_ui() {
+        // Content has both specific approval and button UI
+        let content = "Do you want to run this command?\nYes\nNo";
+        match parse_status(content) {
+            ParsedStatus::WaitingApproval {
+                approval_type: ApprovalType::ShellCommand { .. },
+            } => {}
+            other => panic!(
+                "Expected ShellCommand (specific approval has priority), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_idle_with_non_matching_content() {
+        let cases = [
+            "",
+            "   ",
+            "Just some regular output",
+            "claude code",
+            "finished successfully",
+        ];
+        for content in cases {
+            assert_eq!(
+                parse_status(content),
+                ParsedStatus::Idle,
+                "Expected Idle for '{}'",
+                content
+            );
+        }
+    }
 }

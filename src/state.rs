@@ -302,7 +302,9 @@ impl AppState {
 
         let Some(sorted_idx) = current_sorted_idx else {
             // No current selection, select first in sorted order
-            self.select_project_by_name(&sorted_names[0].to_string());
+            let first_name = sorted_names[0].to_string();
+            drop(sorted);
+            self.select_project_by_name(&first_name);
             self.sync_sidebar_list_state();
             return;
         };
