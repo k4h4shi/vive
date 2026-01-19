@@ -50,6 +50,33 @@ impl Project {
         self.worktrees = worktrees;
         self
     }
+
+    /// Gets the default worktree for this project.
+    ///
+    /// The default worktree is the one with branch name "main" or "master".
+    /// If neither exists, returns the first worktree with a branch name.
+    pub fn default_worktree(&self) -> Option<&Worktree> {
+        // First, try to find "main"
+        if let Some(wt) = self
+            .worktrees
+            .iter()
+            .find(|w| w.branch.as_deref() == Some("main"))
+        {
+            return Some(wt);
+        }
+
+        // Then, try to find "master"
+        if let Some(wt) = self
+            .worktrees
+            .iter()
+            .find(|w| w.branch.as_deref() == Some("master"))
+        {
+            return Some(wt);
+        }
+
+        // Finally, return the first worktree with any branch name
+        self.worktrees.iter().find(|w| w.branch.is_some())
+    }
 }
 
 impl Worktree {
@@ -68,12 +95,14 @@ impl Worktree {
 
     /// Generates a unique Tmux session ID for this worktree.
     ///
-    /// The format is `project_name:branch_name` (e.g., `mechanix:fix-bug-123`).
+    /// The format is `project_name__branch_name` (e.g., `mechanix__fix-bug-123`).
+    /// We use double underscore as separator because tmux interprets `:` as
+    /// session:window.pane delimiter, which would cause "can't find window" errors.
     /// Returns `None` if the worktree has no branch (detached HEAD).
     pub fn session_id(&self, project_name: &str) -> Option<String> {
         self.branch
             .as_ref()
-            .map(|branch_name| format!("{project_name}:{branch_name}"))
+            .map(|branch_name| format!("{project_name}__{branch_name}"))
     }
 }
 
@@ -247,7 +276,7 @@ mod tests {
         );
         assert_eq!(
             wt.session_id("mechanix"),
-            Some("mechanix:fix-bug-123".to_string())
+            Some("mechanix__fix-bug-123".to_string())
         );
     }
 
@@ -415,5 +444,59 @@ branch refs/heads/main"#;
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_default_worktree_prefers_main() {
+        let worktrees = vec![
+            Worktree::new("/path/feature", "abc", Some("feature".to_string())),
+            Worktree::new("/path/main", "def", Some("main".to_string())),
+            Worktree::new("/path/master", "ghi", Some("master".to_string())),
+        ];
+        let project = Project::new("test", "/path").with_worktrees(worktrees);
+
+        let default = project.default_worktree().unwrap();
+        assert_eq!(default.branch, Some("main".to_string()));
+    }
+
+    #[test]
+    fn test_default_worktree_falls_back_to_master() {
+        let worktrees = vec![
+            Worktree::new("/path/feature", "abc", Some("feature".to_string())),
+            Worktree::new("/path/master", "def", Some("master".to_string())),
+        ];
+        let project = Project::new("test", "/path").with_worktrees(worktrees);
+
+        let default = project.default_worktree().unwrap();
+        assert_eq!(default.branch, Some("master".to_string()));
+    }
+
+    #[test]
+    fn test_default_worktree_falls_back_to_first_with_branch() {
+        let worktrees = vec![
+            Worktree::new("/path/detached", "abc", None), // detached HEAD
+            Worktree::new("/path/feature", "def", Some("feature".to_string())),
+        ];
+        let project = Project::new("test", "/path").with_worktrees(worktrees);
+
+        let default = project.default_worktree().unwrap();
+        assert_eq!(default.branch, Some("feature".to_string()));
+    }
+
+    #[test]
+    fn test_default_worktree_none_when_all_detached() {
+        let worktrees = vec![
+            Worktree::new("/path/detached1", "abc", None),
+            Worktree::new("/path/detached2", "def", None),
+        ];
+        let project = Project::new("test", "/path").with_worktrees(worktrees);
+
+        assert!(project.default_worktree().is_none());
+    }
+
+    #[test]
+    fn test_default_worktree_none_when_empty() {
+        let project = Project::new("test", "/path");
+        assert!(project.default_worktree().is_none());
     }
 }
