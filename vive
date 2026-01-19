@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# vive - parallel AI agent manager
+# A simple CLI to manage multiple Claude agents in tmux sessions with git worktrees.
+
+set -euo pipefail
+
+VERSION="2.0.0"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+#######################################
+# Helper functions
+#######################################
+
+log_info() {
+  echo -e "${BLUE}[vive]${NC} $1"
+}
+
+log_success() {
+  echo -e "${GREEN}[vive]${NC} $1"
+}
+
+log_warn() {
+  echo -e "${YELLOW}[vive]${NC} $1"
+}
+
+log_error() {
+  echo -e "${RED}[vive]${NC} $1" >&2
+}
+
+get_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || {
+    log_error "Not a git repository"
+    exit 1
+  }
+}
+
+get_project_name() {
+  basename "$(get_repo_root)"
+}
+
+get_session_name() {
+  local issue_id=$1
+  local project_name=$(get_project_name)
+  echo "${project_name}-${issue_id}"
+}
+
+get_worktree_path() {
+  local issue_id=$1
+  local repo_root=$(get_repo_root)
+  echo "${repo_root}/.worktrees/issue-${issue_id}"
+}
+
+#######################################
+# Commands
+#######################################
+
+cmd_start() {
+  local issue_id=${1:-}
+  local description=${2:-""}
+  
+  if [[ -z "$issue_id" ]]; then
+    log_error "Usage: vive start <issue_id> [description]"
+    exit 1
+  fi
+  
+  local repo_root=$(get_repo_root)
+  local project_name=$(get_project_name)
+  local session_name=$(get_session_name "$issue_id")
+  local worktree_path=$(get_worktree_path "$issue_id")
+  local branch_name="feature/issue-${issue_id}"
+  
+  if [[ -n "$description" ]]; then
+    branch_name="feature/issue-${issue_id}-${description}"
+  fi
+  
+  # Check if session already exists
+  if tmux has-session -t "$session_name" 2>/dev/null; then
+    log_warn "Session '$session_name' already exists. Attaching..."
+    tmux attach -t "$session_name"
+    return
+  fi
+  
+  # Create worktree if not exists
+  if [[ ! -d "$worktree_path" ]]; then
+    log_info "Creating worktree: $worktree_path"
+    mkdir -p "$(dirname "$worktree_path")"
+    git fetch origin main 2>/dev/null || true
+    git worktree add "$worktree_path" -b "$branch_name" origin/main
+    
+    # Copy .env if exists
+    if [[ -f "${repo_root}/.env" ]]; then
+      cp "${repo_root}/.env" "${worktree_path}/.env"
+      log_info "Copied .env to worktree"
+    fi
+    
+    # Install dependencies if package.json exists
+    if [[ -f "${worktree_path}/package.json" ]] || [[ -f "${worktree_path}/web/package.json" ]]; then
+      log_info "Installing dependencies..."
+      if [[ -f "${worktree_path}/web/package.json" ]]; then
+        (cd "${worktree_path}/web" && npm install --silent)
+      else
+        (cd "${worktree_path}" && npm install --silent)
+      fi
+    fi
+  else
+    log_info "Worktree already exists: $worktree_path"
+  fi
+  
+  # Create tmux session
+  log_info "Creating tmux session: $session_name"
+  tmux new-session -d -s "$session_name" -c "$worktree_path"
+  
+  # Send claude command
+  tmux send-keys -t "$session_name" "claude" C-m
+  
+  # Wait a moment for claude to start
+  sleep 1
+  
+  # Send /fix command
+  tmux send-keys -t "$session_name" "/fix ${issue_id}"
+  
+  log_success "Session '$session_name' started!"
+  log_info "Attaching to session... (Ctrl+b d to detach)"
+  
+  # Attach to session
+  tmux attach -t "$session_name"
+}
+
+cmd_attach() {
+  local issue_id=${1:-}
+  
+  if [[ -z "$issue_id" ]]; then
+    log_error "Usage: vive attach <issue_id>"
+    exit 1
+  fi
+  
+  local session_name=$(get_session_name "$issue_id")
+  
+  if ! tmux has-session -t "$session_name" 2>/dev/null; then
+    log_error "Session '$session_name' not found"
+    log_info "Available sessions:"
+    cmd_list
+    exit 1
+  fi
+  
+  tmux attach -t "$session_name"
+}
+
+cmd_list() {
+  local project_name=$(get_project_name)
+  
+  log_info "Active sessions for '$project_name':"
+  echo ""
+  
+  # List tmux sessions matching project name
+  tmux list-sessions 2>/dev/null | grep "^${project_name}-" | while read -r line; do
+    local session=$(echo "$line" | cut -d: -f1)
+    local issue_id=$(echo "$session" | sed "s/^${project_name}-//")
+    local worktree_path=$(get_worktree_path "$issue_id")
+    
+    if [[ -d "$worktree_path" ]]; then
+      echo -e "  ${GREEN}●${NC} $session (worktree: $worktree_path)"
+    else
+      echo -e "  ${YELLOW}○${NC} $session (no worktree)"
+    fi
+  done || echo "  (no active sessions)"
+  
+  echo ""
+}
+
+cmd_cleanup() {
+  local target=${1:-}
+  local project_name=$(get_project_name)
+  local repo_root=$(get_repo_root)
+  
+  if [[ "$target" == "all" ]]; then
+    log_warn "Cleaning up ALL sessions and worktrees for '$project_name'..."
+    
+    # Kill all sessions
+    tmux list-sessions 2>/dev/null | grep "^${project_name}-" | cut -d: -f1 | while read -r session; do
+      log_info "Killing session: $session"
+      tmux kill-session -t "$session" 2>/dev/null || true
+    done
+    
+    # Remove all worktrees
+    if [[ -d "${repo_root}/.worktrees" ]]; then
+      for worktree in "${repo_root}/.worktrees"/issue-*; do
+        if [[ -d "$worktree" ]]; then
+          local wt_name=$(basename "$worktree")
+          log_info "Removing worktree: $wt_name"
+          git worktree remove "$worktree" --force 2>/dev/null || rm -rf "$worktree"
+        fi
+      done
+    fi
+    
+    # Prune worktree references
+    git worktree prune
+    
+    log_success "Cleanup complete!"
+    
+  elif [[ -n "$target" ]]; then
+    local session_name=$(get_session_name "$target")
+    local worktree_path=$(get_worktree_path "$target")
+    
+    log_info "Cleaning up session: $session_name"
+    
+    # Kill session
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+      tmux kill-session -t "$session_name"
+      log_info "Killed session: $session_name"
+    fi
+    
+    # Remove worktree
+    if [[ -d "$worktree_path" ]]; then
+      git worktree remove "$worktree_path" --force 2>/dev/null || rm -rf "$worktree_path"
+      log_info "Removed worktree: $worktree_path"
+    fi
+    
+    git worktree prune
+    log_success "Cleanup complete!"
+    
+  else
+    log_error "Usage: vive cleanup <issue_id|all>"
+    exit 1
+  fi
+}
+
+cmd_help() {
+  cat << EOF
+vive v${VERSION} - parallel AI agent manager
+
+Usage: vive <command> [options]
+
+Commands:
+  start <issue> [desc]  Start a new session for an issue
+  attach <issue>        Attach to an existing session
+  list                  List active sessions
+  cleanup <issue|all>   Clean up session(s) and worktree(s)
+  help                  Show this help message
+  version               Show version
+
+Examples:
+  vive start 123              # Start session for issue #123
+  vive start 123 fix-login    # Start with branch description
+  vive attach 123             # Attach to session #123
+  vive list                   # List all sessions
+  vive cleanup 123            # Clean up issue #123
+  vive cleanup all            # Clean up all sessions
+
+Tmux shortcuts (inside session):
+  Ctrl+b d    Detach from session (keeps running)
+  Ctrl+b [    Scroll mode (arrows to navigate, q to exit)
+
+EOF
+}
+
+cmd_version() {
+  echo "vive v${VERSION}"
+}
+
+#######################################
+# Main
+#######################################
+
+main() {
+  local command=${1:-help}
+  shift || true
+  
+  case "$command" in
+    start)
+      cmd_start "$@"
+      ;;
+    attach|a)
+      cmd_attach "$@"
+      ;;
+    list|ls)
+      cmd_list "$@"
+      ;;
+    cleanup|clean)
+      cmd_cleanup "$@"
+      ;;
+    help|-h|--help)
+      cmd_help
+      ;;
+    version|-v|--version)
+      cmd_version
+      ;;
+    *)
+      log_error "Unknown command: $command"
+      cmd_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
