@@ -12,6 +12,7 @@ Viveは単なるランチャーではなく、**「AIエージェントの司令
 2.  **Monitor**: 特定のタスクの画面（Claudeの出力）をリアルタイムで覗き見ることができる。
 3.  **Command**: わざわざセッションに入り込まなくても、外から指示（承認や追加プロンプト）を飛ばせる。
 4.  **Dive**: 必要であれば瞬時にその開発環境（Tmuxセッション）に没入し、コードを編集できる。
+5.  **Create**: Vive上から直接新しいタスク（Worktree）を作成し、即座に作業を開始できる。
 
 ## 画面構成 (TUI Layout)
 
@@ -66,9 +67,20 @@ Viveは単なるランチャーではなく、**「AIエージェントの司令
 | `j` / `↓` | 次のタスクへ移動 |
 | `k` / `↑` | 前のタスクへ移動 |
 | `Enter` / `o` | **Dive**: 選択中のタスクのTmuxセッションに切り替える（Attach） |
+| `n` | **New**: 新しいタスク（Worktree）を作成する |
 | `i` | **Input**: コマンド入力エリアにフォーカスする |
 | `Esc` | 入力モードから抜ける / 選択解除 |
 | `q` | Viveを終了する |
+
+## 追加機能: タスク作成 (Create Task)
+
+**操作フロー:**
+1.  プロジェクトを選択状態で `n` を押す。
+2.  モーダルダイアログが表示される。
+    - `Issue Number / Branch Name`: (入力必須)
+    - `Base Branch`: (任意, デフォルト: main)
+3.  Enterで実行。
+4.  裏で `git worktree add` が実行され、成功すると一覧に追加される。
 
 ## 技術的仕様（並行開発用）
 
@@ -79,6 +91,7 @@ Viveは単なるランチャーではなく、**「AIエージェントの司令
     - `Project`: 名前、パス、Worktreeのリストを持つ。
     - `Worktree`: ブランチ名、パス、**対応するTmuxセッション/ウィンドウID** を特定できる情報を持つ。
 - **ID管理**: プロジェクト名とブランチ名から一意なID（例: `mechanix:fix-bug-123`）を生成し、これをTmuxセッション名として使用する。
+- **Create機能**: `create_worktree(project: &Project, branch: &str, base: &str) -> Result<Worktree>` を実装する。
 
 ### 2. Tmux Orchestrator (#21)
 - **Capture**: `capture_pane(session_id: &str, lines: usize) -> Result<String>` を実装する。
@@ -93,3 +106,4 @@ Viveは単なるランチャーではなく、**「AIエージェントの司令
 ### 4. TUI / Main (#19)
 - **Input Mode**: `ratatui-textarea` 等を使用して、入力フィールドを実装する。
 - **非同期更新**: ユーザーが入力中でも、バックグラウンドでプレビューエリアが更新されるように、非同期ランタイム（Tokio）とチャネルを利用したアーキテクチャにする。
+- **モーダル**: `Create Task` 用のモーダルコンポーネントを実装する。
