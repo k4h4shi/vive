@@ -18,7 +18,7 @@ use anyhow::Result;
 use crossterm::event::Event;
 use ratatui::{Terminal, backend::Backend};
 
-pub use crate::config::Config;
+pub use crate::config::{Config, Favorites};
 pub use crate::discovery::{Project, discover_projects};
 pub use crate::event::Action;
 pub use crate::state::AppState;
@@ -130,8 +130,14 @@ where
         &mut self.terminal
     }
 
-    /// Initialize the application by discovering projects.
+    /// Initialize the application by discovering projects and loading favorites.
     pub fn init(&mut self) -> Result<()> {
+        // Load favorites from disk
+        if let Ok(favorites) = Favorites::load() {
+            self.state.set_favorites(favorites.projects);
+        }
+
+        // Discover projects
         let projects_root = self.config.effective_projects_root();
         if let Ok(projects) = self
             .discovery
@@ -142,9 +148,21 @@ where
         Ok(())
     }
 
+    /// Save the current favorites to disk.
+    fn save_favorites(&self) {
+        let favorites = Favorites {
+            projects: self.state.favorites().clone(),
+        };
+        if let Err(e) = favorites.save() {
+            // Log error but don't fail - favorites are not critical
+            eprintln!("Warning: Failed to save favorites: {}", e);
+        }
+    }
+
     /// Render the current state to the terminal.
     pub fn render(&mut self) -> Result<()> {
-        self.terminal.draw(|frame| ui::render(frame, &self.state))?;
+        let state = &mut self.state;
+        self.terminal.draw(|frame| ui::render(frame, state))?;
         Ok(())
     }
 
@@ -169,6 +187,11 @@ where
     /// Handle a key event and return the resulting action.
     pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Action {
         event::handle_key_event(key, &mut self.state)
+    }
+
+    /// Handle a mouse event and return the resulting action.
+    pub fn handle_mouse_event(&mut self, mouse: crossterm::event::MouseEvent) -> Action {
+        event::handle_mouse_event(mouse, &mut self.state)
     }
 
     /// Handle an action.
@@ -241,6 +264,83 @@ where
 
             Action::RefreshPreview => {
                 self.update_pane_preview();
+            }
+
+            Action::ToggleFavorite => {
+                self.state.toggle_favorite_selected();
+                self.save_favorites();
+            }
+
+            Action::DeleteTask(branch_name) => {
+                if let Some(project) = self.state.selected_project().cloned() {
+                    // Kill tmux session if it exists
+                    let session_id = format!("{}__{}", project.name, branch_name);
+                    if self.tmux.has_session(&session_id).unwrap_or(false) {
+                        let _ = self.tmux.kill_session(&session_id);
+                    }
+
+                    // Remove worktree
+                    let worktree_path = project.path.join(".worktrees").join(&branch_name);
+                    let worktree_remove = std::process::Command::new("git")
+                        .args([
+                            "worktree",
+                            "remove",
+                            "--force",
+                            &worktree_path.to_string_lossy(),
+                        ])
+                        .current_dir(&project.path)
+                        .output();
+
+                    match worktree_remove {
+                        Ok(output) if output.status.success() => {
+                            // Delete the branch
+                            let branch_delete = std::process::Command::new("git")
+                                .args(["branch", "-D", &branch_name])
+                                .current_dir(&project.path)
+                                .output();
+
+                            match branch_delete {
+                                Ok(output) if output.status.success() => {
+                                    self.state
+                                        .set_success_message(format!("Deleted task '{branch_name}'"));
+                                }
+                                Ok(output) => {
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    self.state.set_error_message(format!(
+                                        "Worktree removed but failed to delete branch: {}",
+                                        stderr.trim()
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.state.set_error_message(format!(
+                                        "Worktree removed but failed to delete branch: {e}"
+                                    ));
+                                }
+                            }
+
+                            // Refresh project list
+                            if let Ok(projects) = self
+                                .discovery
+                                .discover(&self.state.projects_root, &self.config.ignored_dirs)
+                            {
+                                self.state.set_projects(projects);
+                            }
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            self.state.set_error_message(format!(
+                                "Failed to remove worktree: {}",
+                                stderr.trim()
+                            ));
+                        }
+                        Err(e) => {
+                            self.state
+                                .set_error_message(format!("Failed to run git command: {e}"));
+                        }
+                    }
+                } else {
+                    self.state.set_error_message("No project selected");
+                }
             }
         }
 

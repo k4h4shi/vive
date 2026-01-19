@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::{
-    event::Event,
+    event::{DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
 
@@ -41,7 +41,11 @@ fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        app.terminal_mut().backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     app.terminal_mut().show_cursor()?;
 
     result
@@ -55,8 +59,12 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>) -> Result<()>
         app.render()?;
 
         // Poll for events
-        if let Some(Event::Key(key)) = app.event_source.poll(Duration::from_millis(100))? {
-            let action = app.handle_key_event(key);
+        if let Some(event) = app.event_source.poll(Duration::from_millis(100))? {
+            let action = match event {
+                Event::Key(key) => app.handle_key_event(key),
+                Event::Mouse(mouse) => app.handle_mouse_event(mouse),
+                _ => Action::None,
+            };
 
             // Handle AttachSession specially since it requires terminal control
             if action == Action::AttachSession {

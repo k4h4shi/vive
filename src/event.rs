@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 use crate::state::{AppState, FocusMode};
 
@@ -20,6 +20,10 @@ pub enum Action {
     CreateTask(String),
     /// Refresh pane preview for the selected worktree.
     RefreshPreview,
+    /// Toggle favorite status of the selected project.
+    ToggleFavorite,
+    /// Delete a task/worktree with the given branch name.
+    DeleteTask(String),
 }
 
 /// Poll for terminal events with a timeout.
@@ -43,6 +47,37 @@ pub fn handle_key_event(key: KeyEvent, state: &mut AppState) -> Action {
     match state.focus_mode {
         FocusMode::Normal => handle_normal_key_event(key, state),
         FocusMode::Input => handle_input_key_event(key, state),
+    }
+}
+
+/// Handle a mouse event by updating the application state.
+/// Returns an Action that the main loop should perform.
+pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
+    // Ignore mouse events when modal is open or in input mode
+    if state.modal.is_some() || state.focus_mode == FocusMode::Input {
+        return Action::None;
+    }
+
+    match mouse.kind {
+        MouseEventKind::ScrollDown => {
+            // Apply debounce to prevent rapid scrolling
+            if !state.try_scroll() {
+                return Action::None;
+            }
+            state.clear_status_message();
+            state.select_next();
+            Action::RefreshPreview
+        }
+        MouseEventKind::ScrollUp => {
+            // Apply debounce to prevent rapid scrolling
+            if !state.try_scroll() {
+                return Action::None;
+            }
+            state.clear_status_message();
+            state.select_prev();
+            Action::RefreshPreview
+        }
+        _ => Action::None,
     }
 }
 
@@ -83,10 +118,36 @@ fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
             Action::None
         }
 
+        // Toggle favorite
+        KeyCode::Char('f') => {
+            state.clear_status_message();
+            Action::ToggleFavorite
+        }
+
         // New task modal - clear status message when opening modal
         KeyCode::Char('n') => {
             state.clear_status_message();
             state.open_create_task_modal();
+            Action::None
+        }
+
+        // Delete task - only for non-main/master worktrees (d or D)
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            state.clear_status_message();
+            if let Some(worktree) = state.selected_worktree() {
+                if let Some(branch) = &worktree.branch {
+                    // Don't allow deleting main or master branches
+                    if branch == "main" || branch == "master" {
+                        state.set_error_message(format!("Cannot delete '{branch}' branch"));
+                    } else {
+                        state.open_confirm_deletion_modal(branch.clone());
+                    }
+                } else {
+                    state.set_error_message("Cannot delete detached worktree");
+                }
+            } else {
+                state.set_error_message("Select a worktree to delete");
+            }
             Action::None
         }
 
@@ -122,6 +183,17 @@ fn handle_input_key_event(key: KeyEvent, state: &mut AppState) -> Action {
 }
 
 fn handle_modal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
+    use crate::state::ModalType;
+
+    // Check which modal is open and handle accordingly
+    match &state.modal {
+        Some(ModalType::CreateTask { .. }) => handle_create_task_modal_key(key, state),
+        Some(ModalType::ConfirmDeletion { .. }) => handle_confirm_deletion_modal_key(key, state),
+        None => Action::None,
+    }
+}
+
+fn handle_create_task_modal_key(key: KeyEvent, state: &mut AppState) -> Action {
     match key.code {
         KeyCode::Esc => {
             state.close_modal();
@@ -143,6 +215,25 @@ fn handle_modal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         KeyCode::Char(c) => {
             state.modal_input_char(c);
             Action::None
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_confirm_deletion_modal_key(key: KeyEvent, state: &mut AppState) -> Action {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            state.close_modal();
+            Action::None
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            let branch_name = state.deletion_branch_name().unwrap_or("").to_string();
+            state.close_modal();
+            if branch_name.is_empty() {
+                Action::None
+            } else {
+                Action::DeleteTask(branch_name)
+            }
         }
         _ => Action::None,
     }
@@ -342,5 +433,139 @@ mod tests {
         let action = handle_key_event(key_event(KeyCode::Char('x')), &mut state);
         assert!(!state.should_quit());
         assert_eq!(action, Action::None);
+    }
+
+    fn mouse_scroll_down() -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    fn mouse_scroll_up() -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn test_mouse_scroll_down_moves_one_item() {
+        let mut state = create_test_state_with_projects();
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Scroll down should move exactly one item
+        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(action, Action::RefreshPreview);
+
+        // Reset debounce for next scroll test
+        state.reset_scroll_debounce();
+
+        // Scroll down again
+        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
+        assert_eq!(state.selected_project_idx(), Some(1));
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+        assert_eq!(action, Action::RefreshPreview);
+    }
+
+    #[test]
+    fn test_mouse_scroll_up_moves_one_item() {
+        let mut state = create_test_state_with_projects();
+        // Move to second project first
+        state.select_next();
+        state.select_next();
+        assert_eq!(state.selected_project_idx(), Some(1));
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Scroll up should move exactly one item
+        let action = handle_mouse_event(mouse_scroll_up(), &mut state);
+        assert_eq!(state.selected_project_idx(), Some(0));
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(action, Action::RefreshPreview);
+    }
+
+    #[test]
+    fn test_mouse_scroll_debounce_blocks_rapid_scrolls() {
+        let mut state = create_test_state_with_projects();
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // First scroll should work
+        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(action, Action::RefreshPreview);
+
+        // Immediate second scroll should be blocked by debounce
+        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
+        assert_eq!(state.selected_worktree_idx(), Some(1)); // Still at 1, not moved
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_toggle_favorite_on_f() {
+        let mut state = create_test_state_with_projects();
+        let action = handle_key_event(key_event(KeyCode::Char('f')), &mut state);
+        assert_eq!(action, Action::ToggleFavorite);
+    }
+
+    #[test]
+    fn test_d_key_opens_deletion_modal_for_worktree() {
+        let mut state = create_test_state_with_projects();
+        // Select a worktree (not main/master)
+        state.select_next(); // Move to feature worktree
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+
+        let action = handle_key_event(key_event(KeyCode::Char('d')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_some());
+    }
+
+    #[test]
+    fn test_d_key_does_not_delete_main_branch() {
+        let mut state = create_test_state_with_projects();
+        // Select main worktree
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+        let worktree = state.selected_worktree().unwrap();
+        assert_eq!(worktree.branch.as_deref(), Some("main"));
+
+        let action = handle_key_event(key_event(KeyCode::Char('d')), &mut state);
+        // Should not open modal for main branch
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_deletion_modal_confirm_with_y() {
+        let mut state = create_test_state_with_projects();
+        state.select_next(); // Move to feature worktree
+        state.open_confirm_deletion_modal("feature".to_string());
+
+        let action = handle_key_event(key_event(KeyCode::Char('y')), &mut state);
+        assert_eq!(action, Action::DeleteTask("feature".to_string()));
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_deletion_modal_cancel_with_n() {
+        let mut state = create_test_state_with_projects();
+        state.open_confirm_deletion_modal("feature".to_string());
+
+        let action = handle_key_event(key_event(KeyCode::Char('n')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_deletion_modal_cancel_with_esc() {
+        let mut state = create_test_state_with_projects();
+        state.open_confirm_deletion_modal("feature".to_string());
+
+        let action = handle_key_event(key_event(KeyCode::Esc), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_none());
     }
 }

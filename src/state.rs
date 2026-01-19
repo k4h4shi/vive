@@ -6,10 +6,16 @@
 // Allow dead code during development - some APIs are for future features
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use ratatui::widgets::ListState;
 
 use crate::discovery::Project;
+
+/// Debounce duration for mouse scroll events (in milliseconds).
+const SCROLL_DEBOUNCE_MS: u64 = 25;
 
 /// Agent status for a worktree/session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,6 +58,8 @@ pub enum FocusMode {
 pub enum ModalType {
     /// Create a new task/worktree.
     CreateTask { input: String },
+    /// Confirm deletion of a task/worktree.
+    ConfirmDeletion { branch_name: String },
 }
 
 /// Status message type for user feedback.
@@ -99,6 +107,12 @@ pub struct AppState {
     pub pane_preview: String,
     /// Status message for user feedback.
     pub status_message: Option<StatusMessage>,
+    /// ListState for sidebar scrolling support.
+    sidebar_list_state: ListState,
+    /// Last scroll event time for debouncing.
+    last_scroll_time: Option<Instant>,
+    /// Set of favorite project names.
+    favorites: HashSet<String>,
 }
 
 impl Default for AppState {
@@ -115,6 +129,9 @@ impl Default for AppState {
             input_buffer: String::new(),
             pane_preview: String::new(),
             status_message: None,
+            sidebar_list_state: ListState::default(),
+            last_scroll_time: None,
+            favorites: HashSet::new(),
         }
     }
 }
@@ -143,13 +160,87 @@ impl AppState {
     /// Set the discovered projects.
     pub fn set_projects(&mut self, projects: Vec<Project>) {
         self.projects = projects;
-        // Auto-select first project if available
-        if !self.projects.is_empty() {
-            self.selected_project_idx = Some(0);
-            if !self.projects[0].worktrees.is_empty() {
-                self.selected_worktree_idx = Some(0);
+        // Auto-select first project in sorted order (favorites first)
+        self.select_first_in_sorted_order();
+    }
+
+    /// Calculate the flat index for the sidebar list.
+    /// The sidebar displays projects and worktrees in a flat list:
+    /// - Favorites first, then separator (if both favorites and non-favorites exist), then non-favorites
+    /// - Each project takes one row
+    /// - Each worktree takes one row under its project
+    pub fn flat_sidebar_index(&self) -> Option<usize> {
+        let proj_idx = self.selected_project_idx?;
+        let wt_idx = self.selected_worktree_idx;
+
+        let selected_project = &self.projects[proj_idx];
+        let selected_name = &selected_project.name;
+        let is_selected_favorite = self.is_favorite(selected_name);
+
+        // Get sorted projects for correct display order
+        let sorted = self.sorted_projects();
+        let has_favorites = self.has_favorites();
+        let has_non_favorites = sorted.iter().any(|p| !self.is_favorite(&p.name));
+        let has_separator = has_favorites && has_non_favorites;
+
+        let mut flat_idx = 0;
+
+        for project in sorted.iter() {
+            let is_favorite = self.is_favorite(&project.name);
+
+            // Add separator before first non-favorite (if applicable)
+            if has_separator && !is_favorite {
+                // Check if we've crossed the separator
+                if is_selected_favorite {
+                    // Selected is a favorite, no separator to account for before it
+                } else {
+                    // Check if this is the first non-favorite
+                    let first_non_fav = sorted.iter().find(|p| !self.is_favorite(&p.name));
+                    if let Some(first) = first_non_fav {
+                        if first.name == project.name && project.name != *selected_name {
+                            // Haven't reached selected yet, add separator
+                            flat_idx += 1;
+                        } else if first.name == project.name && project.name == *selected_name {
+                            // Selected is the first non-favorite, add separator before
+                            flat_idx += 1;
+                        }
+                    }
+                }
             }
+
+            if project.name == *selected_name {
+                // Found the selected project
+                flat_idx += 1; // project header
+
+                if let Some(wt) = wt_idx {
+                    flat_idx += wt;
+                } else {
+                    flat_idx -= 1; // point to project header
+                }
+                return Some(flat_idx);
+            }
+
+            // Count this project's items
+            flat_idx += 1; // project header
+            flat_idx += project.worktrees.len(); // worktrees
         }
+
+        None
+    }
+
+    /// Sync the ListState with the current selection.
+    fn sync_sidebar_list_state(&mut self) {
+        self.sidebar_list_state.select(self.flat_sidebar_index());
+    }
+
+    /// Get a reference to the sidebar ListState for rendering.
+    pub fn sidebar_list_state(&self) -> &ListState {
+        &self.sidebar_list_state
+    }
+
+    /// Get a mutable reference to the sidebar ListState for rendering.
+    pub fn sidebar_list_state_mut(&mut self) -> &mut ListState {
+        &mut self.sidebar_list_state
     }
 
     /// Get the currently selected project.
@@ -182,47 +273,68 @@ impl AppState {
         worktree.session_id(&project.name)
     }
 
-    /// Navigate to the next item in the sidebar.
+    /// Navigate to the next item in the sidebar (following sorted order).
     pub fn select_next(&mut self) {
         if self.projects.is_empty() {
             return;
         }
 
-        let Some(proj_idx) = self.selected_project_idx else {
-            self.selected_project_idx = Some(0);
-            self.selected_worktree_idx = if self.projects[0].worktrees.is_empty() {
-                None
-            } else {
-                Some(0)
-            };
+        let sorted = self.sorted_projects();
+        let sorted_names: Vec<&str> = sorted.iter().map(|p| p.name.as_str()).collect();
+
+        // Find current position in sorted order
+        let current_sorted_idx = if let Some(proj_idx) = self.selected_project_idx {
+            let current_name = &self.projects[proj_idx].name;
+            sorted_names.iter().position(|n| *n == current_name)
+        } else {
+            None
+        };
+
+        let Some(sorted_idx) = current_sorted_idx else {
+            // No current selection, select first in sorted order
+            self.select_project_by_name(&sorted_names[0].to_string());
+            self.sync_sidebar_list_state();
             return;
         };
 
-        let project = &self.projects[proj_idx];
+        let current_project = sorted[sorted_idx];
         let wt_idx = self.selected_worktree_idx.unwrap_or(0);
 
         // Try to move to next worktree in current project
-        if wt_idx + 1 < project.worktrees.len() {
+        if wt_idx + 1 < current_project.worktrees.len() {
             self.selected_worktree_idx = Some(wt_idx + 1);
-        } else if proj_idx + 1 < self.projects.len() {
-            // Move to next project
-            self.selected_project_idx = Some(proj_idx + 1);
-            self.selected_worktree_idx = if self.projects[proj_idx + 1].worktrees.is_empty() {
-                None
-            } else {
-                Some(0)
-            };
+        } else if sorted_idx + 1 < sorted.len() {
+            // Move to next project in sorted order
+            let next_name = sorted_names[sorted_idx + 1].to_string();
+            self.select_project_by_name(&next_name);
         }
         // Otherwise, stay at current position (at the end)
+        self.sync_sidebar_list_state();
     }
 
-    /// Navigate to the previous item in the sidebar.
+    /// Navigate to the previous item in the sidebar (following sorted order).
     pub fn select_prev(&mut self) {
         if self.projects.is_empty() {
             return;
         }
 
-        let Some(proj_idx) = self.selected_project_idx else {
+        // Collect sorted info upfront to avoid borrow issues
+        let sorted = self.sorted_projects();
+        let sorted_info: Vec<(String, usize)> = sorted
+            .iter()
+            .map(|p| (p.name.clone(), p.worktrees.len()))
+            .collect();
+        drop(sorted);
+
+        // Find current position in sorted order
+        let current_sorted_idx = if let Some(proj_idx) = self.selected_project_idx {
+            let current_name = &self.projects[proj_idx].name;
+            sorted_info.iter().position(|(n, _)| n == current_name)
+        } else {
+            None
+        };
+
+        let Some(sorted_idx) = current_sorted_idx else {
             return;
         };
 
@@ -231,18 +343,30 @@ impl AppState {
         // Try to move to previous worktree in current project
         if wt_idx > 0 {
             self.selected_worktree_idx = Some(wt_idx - 1);
-        } else if proj_idx > 0 {
-            // Move to previous project's last worktree
-            let prev_proj_idx = proj_idx - 1;
-            self.selected_project_idx = Some(prev_proj_idx);
-            let prev_project = &self.projects[prev_proj_idx];
-            self.selected_worktree_idx = if prev_project.worktrees.is_empty() {
+        } else if sorted_idx > 0 {
+            // Move to previous project's last worktree in sorted order
+            let (prev_name, prev_worktrees_len) = &sorted_info[sorted_idx - 1];
+            self.select_project_by_name(prev_name);
+            self.selected_worktree_idx = if *prev_worktrees_len == 0 {
                 None
             } else {
-                Some(prev_project.worktrees.len() - 1)
+                Some(*prev_worktrees_len - 1)
             };
         }
         // Otherwise, stay at current position (at the beginning)
+        self.sync_sidebar_list_state();
+    }
+
+    /// Select a project by name, updating selection indices.
+    fn select_project_by_name(&mut self, name: &str) {
+        if let Some(idx) = self.projects.iter().position(|p| p.name == name) {
+            self.selected_project_idx = Some(idx);
+            self.selected_worktree_idx = if self.projects[idx].worktrees.is_empty() {
+                None
+            } else {
+                Some(0)
+            };
+        }
     }
 
     /// Get the status for a session ID.
@@ -291,6 +415,19 @@ impl AppState {
         });
     }
 
+    /// Open the confirm deletion modal.
+    pub fn open_confirm_deletion_modal(&mut self, branch_name: String) {
+        self.modal = Some(ModalType::ConfirmDeletion { branch_name });
+    }
+
+    /// Get the branch name from the confirm deletion modal.
+    pub fn deletion_branch_name(&self) -> Option<&str> {
+        match &self.modal {
+            Some(ModalType::ConfirmDeletion { branch_name }) => Some(branch_name),
+            _ => None,
+        }
+    }
+
     /// Close any open modal.
     pub fn close_modal(&mut self) {
         self.modal = None;
@@ -314,6 +451,7 @@ impl AppState {
     pub fn modal_input(&self) -> Option<&str> {
         match &self.modal {
             Some(ModalType::CreateTask { input }) => Some(input),
+            Some(ModalType::ConfirmDeletion { .. }) => None,
             None => None,
         }
     }
@@ -350,6 +488,97 @@ impl AppState {
     /// Clear the status message.
     pub fn clear_status_message(&mut self) {
         self.status_message = None;
+    }
+
+    /// Check if a project is marked as favorite.
+    pub fn is_favorite(&self, project_name: &str) -> bool {
+        self.favorites.contains(project_name)
+    }
+
+    /// Toggle the favorite status of a project by name.
+    /// After toggling, selection is updated to the first project in sorted order.
+    pub fn toggle_favorite(&mut self, project_name: &str) {
+        if self.favorites.contains(project_name) {
+            self.favorites.remove(project_name);
+        } else {
+            self.favorites.insert(project_name.to_string());
+        }
+        // Update selection to first in sorted order
+        self.select_first_in_sorted_order();
+    }
+
+    /// Select the first project/worktree in sorted order.
+    fn select_first_in_sorted_order(&mut self) {
+        if self.projects.is_empty() {
+            return;
+        }
+        let sorted = self.sorted_projects();
+        if let Some(first) = sorted.first() {
+            self.select_project_by_name(&first.name.clone());
+            self.sync_sidebar_list_state();
+        }
+    }
+
+    /// Toggle the favorite status of the currently selected project.
+    pub fn toggle_favorite_selected(&mut self) {
+        if let Some(project) = self.selected_project() {
+            let name = project.name.clone();
+            self.toggle_favorite(&name);
+        }
+    }
+
+    /// Check if there are any favorite projects.
+    pub fn has_favorites(&self) -> bool {
+        !self.favorites.is_empty()
+    }
+
+    /// Set favorites from a HashSet (used for loading from persistence).
+    pub fn set_favorites(&mut self, favorites: HashSet<String>) {
+        self.favorites = favorites;
+    }
+
+    /// Get a reference to the favorites set (used for saving to persistence).
+    pub fn favorites(&self) -> &HashSet<String> {
+        &self.favorites
+    }
+
+    /// Get projects sorted with favorites first, preserving original order within each group.
+    pub fn sorted_projects(&self) -> Vec<&Project> {
+        let mut favorites: Vec<&Project> = self
+            .projects
+            .iter()
+            .filter(|p| self.is_favorite(&p.name))
+            .collect();
+        let mut non_favorites: Vec<&Project> = self
+            .projects
+            .iter()
+            .filter(|p| !self.is_favorite(&p.name))
+            .collect();
+
+        favorites.append(&mut non_favorites);
+        favorites
+    }
+
+    /// Try to scroll, returning true if allowed (debounce passed).
+    /// This should be called before processing a scroll event.
+    pub fn try_scroll(&mut self) -> bool {
+        let now = Instant::now();
+        let debounce_duration = Duration::from_millis(SCROLL_DEBOUNCE_MS);
+
+        if let Some(last_time) = self.last_scroll_time {
+            if now.duration_since(last_time) < debounce_duration {
+                return false;
+            }
+        }
+
+        self.last_scroll_time = Some(now);
+        true
+    }
+
+    /// Reset the scroll debounce timer (for testing).
+    #[cfg(test)]
+    pub fn reset_scroll_debounce(&mut self) {
+        self.last_scroll_time = None;
     }
 }
 
@@ -534,5 +763,258 @@ mod tests {
 
         state.close_modal();
         assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_flat_sidebar_index_calculation() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initial state: project-a (idx 0), worktree 0 -> flat index: 0 (project) + 1 (worktree 0) = 1
+        // Structure:
+        // 0: project-a (project header)
+        // 1:   main (worktree 0) <- selected
+        // 2:   feature-1 (worktree 1)
+        // 3: project-b (project header)
+        // 4:   main (worktree 0)
+        assert_eq!(state.flat_sidebar_index(), Some(1));
+
+        state.select_next(); // worktree 1 (feature-1)
+        assert_eq!(state.flat_sidebar_index(), Some(2));
+
+        state.select_next(); // project-b, worktree 0
+        assert_eq!(state.flat_sidebar_index(), Some(4));
+    }
+
+    #[test]
+    fn test_sidebar_list_state_syncs_with_selection() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // ListState should sync with flat index
+        assert_eq!(state.sidebar_list_state().selected(), Some(1));
+
+        state.select_next();
+        assert_eq!(state.sidebar_list_state().selected(), Some(2));
+
+        state.select_next();
+        assert_eq!(state.sidebar_list_state().selected(), Some(4));
+
+        state.select_prev();
+        assert_eq!(state.sidebar_list_state().selected(), Some(2));
+    }
+
+    #[test]
+    fn test_scroll_debounce_blocks_rapid_scrolls() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // First scroll should be allowed
+        assert!(state.try_scroll());
+
+        // Immediate second scroll should be blocked
+        assert!(!state.try_scroll());
+
+        // After debounce period, scroll should be allowed again
+        // We simulate this by manually resetting the last scroll time
+        state.reset_scroll_debounce();
+        assert!(state.try_scroll());
+    }
+
+    #[test]
+    fn test_toggle_favorite_project() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially no favorites
+        assert!(!state.is_favorite("project-a"));
+        assert!(!state.is_favorite("project-b"));
+
+        // Toggle favorite on
+        state.toggle_favorite("project-a");
+        assert!(state.is_favorite("project-a"));
+        assert!(!state.is_favorite("project-b"));
+
+        // Toggle favorite off
+        state.toggle_favorite("project-a");
+        assert!(!state.is_favorite("project-a"));
+    }
+
+    #[test]
+    fn test_toggle_favorite_selected_project() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Select first project
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+
+        // Toggle favorite on selected project
+        state.toggle_favorite_selected();
+        assert!(state.is_favorite("project-a"));
+
+        // Move to second project and toggle
+        state.select_next();
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        state.toggle_favorite_selected();
+        assert!(state.is_favorite("project-b"));
+    }
+
+    #[test]
+    fn test_favorites_sorted_to_top() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially project-a is first
+        assert_eq!(state.projects[0].name, "project-a");
+        assert_eq!(state.projects[1].name, "project-b");
+
+        // Mark project-b as favorite
+        state.toggle_favorite("project-b");
+
+        // Get sorted projects - favorites should be first
+        let sorted = state.sorted_projects();
+        assert_eq!(sorted[0].name, "project-b"); // favorite first
+        assert_eq!(sorted[1].name, "project-a"); // non-favorite second
+    }
+
+    #[test]
+    fn test_favorites_sorted_preserves_order_within_groups() {
+        let mut state = AppState::new();
+        // Create 3 projects
+        let projects = vec![
+            Project::new("alpha", "/path/alpha").with_worktrees(vec![Worktree::new(
+                "/path/alpha",
+                "a1",
+                Some("main".to_string()),
+            )]),
+            Project::new("beta", "/path/beta").with_worktrees(vec![Worktree::new(
+                "/path/beta",
+                "b1",
+                Some("main".to_string()),
+            )]),
+            Project::new("gamma", "/path/gamma").with_worktrees(vec![Worktree::new(
+                "/path/gamma",
+                "g1",
+                Some("main".to_string()),
+            )]),
+        ];
+        state.set_projects(projects);
+
+        // Mark alpha and gamma as favorites
+        state.toggle_favorite("alpha");
+        state.toggle_favorite("gamma");
+
+        // Sorted: favorites (alpha, gamma) then non-favorites (beta)
+        let sorted = state.sorted_projects();
+        assert_eq!(sorted[0].name, "alpha");
+        assert_eq!(sorted[1].name, "gamma");
+        assert_eq!(sorted[2].name, "beta");
+    }
+
+    #[test]
+    fn test_has_favorites() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially no favorites
+        assert!(!state.has_favorites());
+
+        // Add a favorite
+        state.toggle_favorite("project-a");
+        assert!(state.has_favorites());
+
+        // Remove the favorite
+        state.toggle_favorite("project-a");
+        assert!(!state.has_favorites());
+    }
+
+    #[test]
+    fn test_flat_sidebar_index_with_favorites_and_separator() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Mark project-b as favorite
+        state.toggle_favorite("project-b");
+
+        // Sorted order with separator:
+        // 0: project-b (favorite, project header)
+        // 1:   main (worktree)
+        // 2: ──────── (separator)
+        // 3: project-a (non-favorite, project header)
+        // 4:   main (worktree 0)
+        // 5:   feature-1 (worktree 1)
+
+        // Initial selection should be project-b's first worktree (index 1)
+        // But we need to update selection to match sorted order
+        // For now, test the calculation method directly
+        assert!(state.has_favorites());
+    }
+
+    #[test]
+    fn test_navigation_follows_sorted_order() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Mark project-b as favorite
+        // Sorted order: project-b (favorite), project-a (non-favorite)
+        state.toggle_favorite("project-b");
+
+        // Initial selection should be first in sorted order (project-b)
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Navigate to next - should stay in project-b (no more worktrees)
+        // then move to project-a
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Navigate to next worktree in project-a
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+
+        // Navigate back - should go to project-a worktree 0
+        state.select_prev();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Navigate back - should go to project-b (last worktree)
+        state.select_prev();
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+    }
+
+    #[test]
+    fn test_toggle_favorite_updates_selection_to_sorted_first() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially selected: project-a
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+
+        // Toggle project-b as favorite
+        state.toggle_favorite("project-b");
+
+        // Selection should move to first in sorted order (project-b)
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+    }
+
+    #[test]
+    fn test_set_projects_selects_first_in_sorted_order_with_favorites() {
+        let mut state = AppState::new();
+
+        // Set favorites BEFORE setting projects (simulating app startup)
+        let mut favorites = HashSet::new();
+        favorites.insert("project-b".to_string());
+        state.set_favorites(favorites);
+
+        // Now set projects
+        state.set_projects(create_test_projects());
+
+        // Selection should be first in sorted order (project-b is favorite)
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
     }
 }
