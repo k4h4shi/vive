@@ -1,0 +1,107 @@
+description = "Review code against project guidelines using worktree. Usage: /review [PR_NUMBER]"
+prompt = """
+# Code Review (Static Analysis)
+
+Perform a static code review for a specific Pull Request using a dedicated worktree for Vive (Rust/TUI).
+**DO NOT delete the worktree or modify code during this command execution.**
+
+## 1. Worktree Setup
+
+1.  **Get PR Info**:
+    ```bash
+    gh pr view <{args} or PR_NUMBER> --json headRefName,baseRefName
+    ```
+    - `headRefName`: The source branch (e.g., `feature/issue-123`)
+    - `baseRefName`: The target branch (e.g., `main`)
+
+2.  **Check Existing Worktree**:
+    - Run `git worktree list` to check if a worktree for `headRefName` already exists.
+    - **If it exists**: Use the existing worktree to continue the review (do not create a new one).
+    - **If it does not exist**: Proceed to create a new worktree.
+
+3.  **Create Worktree (Only if needed)**:
+    - Use `worktree-manager` skill.
+    - **Branch**: Use the `headRefName` obtained above.
+    - **Base**: Use the `baseRefName` (usually `origin/main`).
+    - **Initialization**: Run `cargo check` to ensure dependencies are resolved.
+
+4.  **Switch Context**:
+    ```bash
+    cd .worktrees/<branch-name>
+    ```
+
+## 2. Review Process
+
+Analyze the code based on the project guidelines.
+
+### Analysis Commands
+
+```bash
+# Get the list of changed files
+git diff --name-only origin/main...HEAD
+
+# Read content of changed files (use 'read_file' tool for specific files)
+# Check for guideline violations
+```
+
+### Perspectives (Rust/TUI & Documentation Consistency)
+
+Check strict consistency between Specifications (Docs) and Implementation (Code).
+
+| Layer | Corresponding Docs | Responsibility & Coverage |
+| :--- | :--- | :--- |
+| **Concept/Requirements** | `docs/concept.md`<br>`docs/requirements.md` | Are new features defined in the scope? |
+| **Architecture** | `docs/architecture.md` | Does the implementation follow the architectural design (Core, TUI, Tmux separation)? |
+| **Tests** | `tests/*.rs` (Integration)<br>`#[test]` (Unit) | Do tests cover the new logic? (TDD approach) |
+| **Spec** | `docs/spec-ja.md` | Does the UI behavior match the user experience spec? |
+
+**Principle**: Code must reflect the Spec.
+
+### Other Perspectives (Rust Specific)
+
+- **Ownership & Borrowing**: Are there unnecessary clones? Is `Arc<Mutex<T>>` used appropriately?
+- **Error Handling**: Is `Result` propagated correctly? Are `unwrap()` calls avoided in production code?
+- **Async/Await**: Is `tokio` runtime used correctly? Are there blocking calls in async context?
+- **Project Structure**: Are modules (`src/core`, `src/infra`, `src/ui`) separated cleanly?
+- **Testing**: Is logic separated from UI/IO to allow unit testing?
+
+## 3. Reporting
+
+Post your review comments to the PR. To avoid shell escaping issues, write the review content to a temporary file first.
+
+1.  **Write Review to File**:
+    ```bash
+    # Use `write_file` tool
+    # content: Review content in Markdown
+    # file_path: ./.tmp/review_body.md (Create .tmp directory in project root if missing)
+    ```
+
+2.  **Post Comment**:
+    ```bash
+    gh pr review <{args} or PR_NUMBER> --comment --body-file ./.tmp/review_body.md
+    ```
+
+    **Write the review comments in JAPANESE.**
+
+    **Review Comment Template**:
+
+    ```markdown
+    ## レビューサマリ
+
+    （全体的な印象）
+
+    ## トレーサビリティ・整合性チェック
+
+    - [ ] Concept/Requirements: ...
+    - [ ] Architecture/Spec: ...
+    - [ ] Tests: ...
+
+    ## 重要事項（要修正）
+
+    - ...
+
+    ## 改善提案
+
+    - ...
+    ```
+"""
