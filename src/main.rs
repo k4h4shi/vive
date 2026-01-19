@@ -99,35 +99,33 @@ fn handle_action(
         Action::AttachSession => {
             if let (Some(project), Some(worktree)) =
                 (state.selected_project(), state.selected_worktree())
+                && let Some(session_id) = worktree.session_id(&project.name)
             {
-                if let Some(session_id) = worktree.session_id(&project.name) {
-                    // Ensure session exists before attaching
-                    let worktree_path = worktree.path.to_string_lossy();
-                    let _ = tmux.ensure_session(&session_id, Some(&worktree_path));
+                // Ensure session exists before attaching
+                let worktree_path = worktree.path.to_string_lossy();
+                let _ = tmux.ensure_session(&session_id, Some(&worktree_path));
 
-                    // Restore terminal before exec
-                    disable_raw_mode()?;
-                    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-                    terminal.show_cursor()?;
+                // Restore terminal before exec
+                disable_raw_mode()?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                terminal.show_cursor()?;
 
-                    // This will replace the current process
-                    let _ = tmux.exec_into_session(&session_id);
+                // This will replace the current process
+                let _ = tmux.exec_into_session(&session_id);
 
-                    // If we get here, exec failed - restore terminal state
-                    enable_raw_mode()?;
-                    execute!(io::stdout(), EnterAlternateScreen)?;
-                }
+                // If we get here, exec failed - restore terminal state
+                enable_raw_mode()?;
+                execute!(io::stdout(), EnterAlternateScreen)?;
             }
         }
 
         Action::SendInput(input) => {
             if let (Some(project), Some(worktree)) =
                 (state.selected_project(), state.selected_worktree())
+                && let Some(session_id) = worktree.session_id(&project.name)
             {
-                if let Some(session_id) = worktree.session_id(&project.name) {
-                    // Send keys to the session
-                    let _ = tmux.send_keys(&session_id, &input, true);
-                }
+                // Send keys to the session
+                let _ = tmux.send_keys(&session_id, &input, true);
             }
         }
 
@@ -187,16 +185,13 @@ fn handle_action(
 }
 
 fn update_pane_preview(state: &mut AppState, tmux: &TmuxOrchestrator<RealTmuxExecutor>) {
-    if let (Some(project), Some(worktree)) = (state.selected_project(), state.selected_worktree()) {
-        if let Some(session_id) = worktree.session_id(&project.name) {
-            // Check if session exists and capture pane content
-            if tmux.has_session(&session_id).unwrap_or(false) {
-                if let Ok(content) = tmux.capture_pane(&session_id, 50) {
-                    state.set_pane_preview(content);
-                    return;
-                }
-            }
-        }
+    if let (Some(project), Some(worktree)) = (state.selected_project(), state.selected_worktree())
+        && let Some(session_id) = worktree.session_id(&project.name)
+        && tmux.has_session(&session_id).unwrap_or(false)
+        && let Ok(content) = tmux.capture_pane(&session_id, 50)
+    {
+        state.set_pane_preview(content);
+        return;
     }
     // Clear preview if no valid session
     state.set_pane_preview(String::new());
