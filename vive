@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.0.2"
 
 # Get absolute path to the script directory (resolving symlinks)
 SOURCE=${BASH_SOURCE[0]}
@@ -66,6 +66,24 @@ get_worktree_path() {
   echo "${repo_root}/.worktrees/issue-${issue_id}"
 }
 
+attach_session() {
+  local session_name=$1
+  
+  if [[ -n "${TMUX:-}" ]]; then
+    # Inside tmux: switch client
+    if ! tmux switch-client -t "$session_name" 2>/dev/null; then
+      log_error "Failed to switch to session '$session_name'"
+      return 1
+    fi
+  else
+    # Outside tmux: attach
+    if ! tmux attach -t "$session_name"; then
+      log_error "Failed to attach to session '$session_name'"
+      return 1
+    fi
+  fi
+}
+
 #######################################
 # Commands
 #######################################
@@ -92,7 +110,11 @@ cmd_start() {
   # Check if session already exists
   if tmux has-session -t "$session_name" 2>/dev/null; then
     log_warn "Session '$session_name' already exists. Attaching..."
-    tmux attach -t "$session_name"
+    
+    # Ensure mouse is on even for existing sessions
+    tmux set-option -t "$session_name" mouse on 2>/dev/null || true
+    
+    attach_session "$session_name"
     return
   fi
   
@@ -131,7 +153,6 @@ cmd_start() {
     tmux source-file "${SCRIPT_DIR}/vive.tmux.conf"
     log_info "Loaded vive tmux config"
   fi
-
   
   # Send claude command
   tmux send-keys -t "$session_name" "claude" C-m
@@ -146,7 +167,7 @@ cmd_start() {
   log_info "Attaching to session... (Ctrl+b d to detach)"
   
   # Attach to session
-  tmux attach -t "$session_name"
+  attach_session "$session_name"
 }
 
 cmd_attach() {
@@ -166,7 +187,7 @@ cmd_attach() {
     exit 1
   fi
   
-  tmux attach -t "$session_name"
+  attach_session "$session_name"
 }
 
 cmd_list() {
@@ -273,6 +294,7 @@ Examples:
 Tmux shortcuts (inside session):
   Ctrl+b d    Detach from session (keeps running)
   Ctrl+b [    Scroll mode (arrows to navigate, q to exit)
+  Mouse       Scroll wheel to scroll, click to select
 
 EOF
 }
