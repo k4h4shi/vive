@@ -5,8 +5,8 @@ mod tmux;
 mod ui;
 
 use std::path::PathBuf;
-use std::{env, io};
 use std::time::{Duration, Instant};
+use std::{env, io};
 
 use anyhow::Result;
 use crossterm::{
@@ -19,7 +19,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use crate::discovery::discover_projects;
 use crate::event::Action;
 use crate::state::AppState;
-use crate::tmux::{TmuxOrchestrator, RealTmuxExecutor};
+use crate::tmux::{RealTmuxExecutor, TmuxOrchestrator};
 
 fn main() -> Result<()> {
     // Setup terminal
@@ -135,7 +135,7 @@ fn handle_action(
             if let Some(project) = state.selected_project().cloned() {
                 // Create a new worktree using git
                 let worktree_path = project.path.join(".worktrees").join(&branch_name);
-                let result = std::process::Command::new("git")
+                let output = std::process::Command::new("git")
                     .args([
                         "worktree",
                         "add",
@@ -146,12 +146,35 @@ fn handle_action(
                     .current_dir(&project.path)
                     .output();
 
-                if result.is_ok() {
-                    // Refresh project list
-                    if let Ok(projects) = discover_projects(&state.projects_root) {
-                        state.set_projects(projects);
+                match output {
+                    Ok(output) if output.status.success() => {
+                        // Success - refresh project list and show success message
+                        if let Ok(projects) = discover_projects(&state.projects_root) {
+                            state.set_projects(projects);
+                        }
+                        state.set_success_message(format!("Created worktree '{branch_name}'"));
+                    }
+                    Ok(output) => {
+                        // Command ran but failed - show error from stderr
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let error_msg = stderr.trim();
+                        if error_msg.is_empty() {
+                            state.set_error_message(format!(
+                                "Failed to create worktree '{branch_name}': unknown error"
+                            ));
+                        } else {
+                            state.set_error_message(format!(
+                                "Failed to create worktree: {error_msg}"
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        // Failed to run command
+                        state.set_error_message(format!("Failed to run git command: {e}"));
                     }
                 }
+            } else {
+                state.set_error_message("No project selected");
             }
         }
 

@@ -54,6 +54,26 @@ pub enum ModalType {
     CreateTask { input: String },
 }
 
+/// Status message type for user feedback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusMessageType {
+    /// Informational message.
+    Info,
+    /// Success message.
+    Success,
+    /// Error message.
+    Error,
+}
+
+/// Status message to display to the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusMessage {
+    /// The message content.
+    pub message: String,
+    /// The message type.
+    pub message_type: StatusMessageType,
+}
+
 /// Application state, separated from UI for testability.
 #[derive(Debug)]
 pub struct AppState {
@@ -77,6 +97,8 @@ pub struct AppState {
     pub input_buffer: String,
     /// Captured pane content for preview.
     pub pane_preview: String,
+    /// Status message for user feedback.
+    pub status_message: Option<StatusMessage>,
 }
 
 impl Default for AppState {
@@ -92,6 +114,7 @@ impl Default for AppState {
             modal: None,
             input_buffer: String::new(),
             pane_preview: String::new(),
+            status_message: None,
         }
     }
 }
@@ -131,7 +154,8 @@ impl AppState {
 
     /// Get the currently selected project.
     pub fn selected_project(&self) -> Option<&Project> {
-        self.selected_project_idx.and_then(|idx| self.projects.get(idx))
+        self.selected_project_idx
+            .and_then(|idx| self.projects.get(idx))
     }
 
     /// Get the currently selected project index.
@@ -147,7 +171,8 @@ impl AppState {
     /// Get the currently selected worktree.
     pub fn selected_worktree(&self) -> Option<&crate::discovery::Worktree> {
         let project = self.selected_project()?;
-        self.selected_worktree_idx.and_then(|idx| project.worktrees.get(idx))
+        self.selected_worktree_idx
+            .and_then(|idx| project.worktrees.get(idx))
     }
 
     /// Get the session ID for the currently selected worktree.
@@ -222,7 +247,10 @@ impl AppState {
 
     /// Get the status for a session ID.
     pub fn get_status(&self, session_id: &str) -> AgentStatus {
-        self.statuses.get(session_id).copied().unwrap_or(AgentStatus::Idle)
+        self.statuses
+            .get(session_id)
+            .copied()
+            .unwrap_or(AgentStatus::Idle)
     }
 
     /// Update the status for a session ID.
@@ -258,7 +286,9 @@ impl AppState {
 
     /// Open the create task modal.
     pub fn open_create_task_modal(&mut self) {
-        self.modal = Some(ModalType::CreateTask { input: String::new() });
+        self.modal = Some(ModalType::CreateTask {
+            input: String::new(),
+        });
     }
 
     /// Close any open modal.
@@ -291,6 +321,35 @@ impl AppState {
     /// Update the pane preview content.
     pub fn set_pane_preview(&mut self, content: String) {
         self.pane_preview = content;
+    }
+
+    /// Set an info status message.
+    pub fn set_info_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some(StatusMessage {
+            message: message.into(),
+            message_type: StatusMessageType::Info,
+        });
+    }
+
+    /// Set a success status message.
+    pub fn set_success_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some(StatusMessage {
+            message: message.into(),
+            message_type: StatusMessageType::Success,
+        });
+    }
+
+    /// Set an error status message.
+    pub fn set_error_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some(StatusMessage {
+            message: message.into(),
+            message_type: StatusMessageType::Error,
+        });
+    }
+
+    /// Clear the status message.
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
     }
 }
 
@@ -401,7 +460,10 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        assert_eq!(state.selected_session_id(), Some("project-a:main".to_string()));
+        assert_eq!(
+            state.selected_session_id(),
+            Some("project-a:main".to_string())
+        );
 
         state.select_next();
         assert_eq!(
