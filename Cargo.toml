@@ -1,0 +1,15 @@
+[package]
+name = "vive"
+version = "0.1.0"
+edition = "2024"
+description = "A TUI application for managing Claude Code sessions with tmux"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.29"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+[dev-dependencies]
+mockall = "0.13"
