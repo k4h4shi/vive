@@ -375,82 +375,11 @@ where
                 .apply_hysteresis(&session_id, title_combined);
 
             self.state.set_status(session_id.clone(), final_status);
-
-            // Filter out trailing input prompt lines before displaying
-            let filtered_content = strip_trailing_prompt_lines(&content);
-            self.state.set_pane_preview(filtered_content);
+            self.state.set_pane_preview(content);
             return;
         }
         self.state.set_pane_preview(String::new());
     }
-}
-
-/// Strip trailing lines that are input prompts, input box frames, or empty.
-///
-/// This removes lines like:
-/// - "> ", ">", "❯ ", "❯" (input prompts)
-/// - Empty/whitespace-only lines
-/// - Input box frame characters (╭, ╰, │, ┌, └, ─, etc.)
-/// - Lines consisting only of horizontal line characters (────)
-///
-/// from the end of the content so they don't clutter the preview.
-fn strip_trailing_prompt_lines(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-
-    // Find the last line that has meaningful content
-    let last_meaningful = lines.iter().rposition(|line| {
-        let trimmed = line.trim();
-        // Keep lines that are not empty and not just a prompt or input box frame
-        !trimmed.is_empty()
-            && !is_prompt_line(trimmed)
-            && !is_input_box_line(trimmed)
-    });
-
-    match last_meaningful {
-        Some(idx) => lines[..=idx].join("\n"),
-        None => String::new(), // All lines are prompts or empty
-    }
-}
-
-/// Check if a line is a prompt line.
-fn is_prompt_line(line: &str) -> bool {
-    let trimmed = line.trim();
-    trimmed == ">"
-        || trimmed == "> "
-        || trimmed == "❯"
-        || trimmed == "❯ "
-        || trimmed.starts_with("❯ ")
-}
-
-/// Check if a line is part of an input box frame or separator.
-///
-/// Input boxes typically use box-drawing characters like:
-/// - ╭, ╮, ╰, ╯ (rounded corners)
-/// - ┌, ┐, └, ┘ (square corners)
-/// - │, ─ (sides)
-/// - Lines that are mostly horizontal line characters (separators)
-fn is_input_box_line(line: &str) -> bool {
-    // Check first non-whitespace character
-    let first_non_ws = line.chars().find(|c| !c.is_whitespace());
-
-    // Check if line starts with box-drawing character
-    if matches!(
-        first_non_ws,
-        Some('╭' | '╰' | '╮' | '╯' | '┌' | '└' | '┐' | '┘' | '│' | '─' | '━')
-    ) {
-        return true;
-    }
-
-    // Check if line is mostly horizontal line characters (separator)
-    // This catches lines like "────────────" even with some spaces
-    let horizontal_chars: usize = line
-        .chars()
-        .filter(|c| *c == '─' || *c == '━' || *c == '-' || *c == '═')
-        .count();
-
-    // If more than 10 horizontal characters and they make up most of the non-whitespace content
-    let non_ws_chars: usize = line.chars().filter(|c| !c.is_whitespace()).count();
-    horizontal_chars >= 10 && non_ws_chars > 0 && horizontal_chars * 100 / non_ws_chars >= 80
 }
 
 /// Type alias for the standard production App.
