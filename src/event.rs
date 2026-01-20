@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
-use crate::state::{AppState, FocusMode};
+use crate::state::{AppState, FocusMode, FocusPane};
 
 /// Action to be performed by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,21 +58,61 @@ pub fn handle_key_event(key: KeyEvent, state: &mut AppState) -> Action {
 
 /// Handle a mouse event by updating the application state.
 /// Returns an Action that the main loop should perform.
+///
+/// The `sidebar_width` parameter is the width of the sidebar in columns,
+/// used to determine which pane was clicked.
 pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
+    handle_mouse_event_with_layout(mouse, state, None, None)
+}
+
+/// Handle a mouse event with layout information.
+/// - `sidebar_width`: width of sidebar pane (for click detection)
+/// - `preview_visible_height`: visible height of preview area (for scroll calculations)
+pub fn handle_mouse_event_with_layout(
+    mouse: MouseEvent,
+    state: &mut AppState,
+    sidebar_width: Option<u16>,
+    preview_visible_height: Option<u16>,
+) -> Action {
     // Ignore mouse events when modal is open or in input mode
     if state.modal.is_some() || state.focus_mode == FocusMode::Input {
         return Action::None;
     }
 
+    // Default visible height for scroll calculations
+    let visible_height = preview_visible_height.unwrap_or(20);
+
     match mouse.kind {
+        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+            // Click to switch focus between panes
+            if let Some(width) = sidebar_width {
+                state.clear_status_message();
+                if mouse.column < width {
+                    state.focus_sidebar();
+                } else {
+                    state.focus_preview();
+                }
+            }
+            Action::None
+        }
         MouseEventKind::ScrollDown => {
             // Apply debounce to prevent rapid scrolling
             if !state.try_scroll() {
                 return Action::None;
             }
             state.clear_status_message();
-            state.select_next();
-            Action::RefreshPreview
+
+            // Scroll behavior depends on focused pane
+            match state.focus_pane() {
+                FocusPane::Sidebar => {
+                    state.select_next();
+                    Action::RefreshPreview
+                }
+                FocusPane::Preview => {
+                    state.scroll_preview_down(visible_height);
+                    Action::None
+                }
+            }
         }
         MouseEventKind::ScrollUp => {
             // Apply debounce to prevent rapid scrolling
@@ -80,25 +120,68 @@ pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
                 return Action::None;
             }
             state.clear_status_message();
-            state.select_prev();
-            Action::RefreshPreview
+
+            // Scroll behavior depends on focused pane
+            match state.focus_pane() {
+                FocusPane::Sidebar => {
+                    state.select_prev();
+                    Action::RefreshPreview
+                }
+                FocusPane::Preview => {
+                    state.scroll_preview_up();
+                    Action::None
+                }
+            }
         }
         _ => Action::None,
     }
 }
 
 fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
+    // Global keys that work regardless of focus pane
     match key.code {
         // Quit
         KeyCode::Char('q') => {
             state.quit();
-            Action::Quit
+            return Action::Quit;
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.quit();
-            Action::Quit
+            return Action::Quit;
         }
 
+        // Tab toggles focus between sidebar and preview
+        KeyCode::Tab => {
+            state.clear_status_message();
+            state.toggle_focus_pane();
+            return Action::None;
+        }
+
+        // h/l also switch focus panes (vim-style left/right)
+        KeyCode::Char('h') | KeyCode::Left => {
+            state.clear_status_message();
+            state.focus_sidebar();
+            return Action::None;
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            state.clear_status_message();
+            state.focus_preview();
+            return Action::None;
+        }
+
+        _ => {}
+    }
+
+    // Dispatch to pane-specific handlers
+    match state.focus_pane() {
+        FocusPane::Sidebar => handle_sidebar_key_event(key, state),
+        FocusPane::Preview => handle_preview_key_event(key, state),
+    }
+}
+
+/// Handle key events when sidebar pane is focused.
+fn handle_sidebar_key_event(key: KeyEvent, state: &mut AppState) -> Action {
+    match key.code {
         // Navigation - clear status message when navigating
         KeyCode::Char('j') | KeyCode::Down => {
             state.clear_status_message();
@@ -161,6 +244,58 @@ fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
                 state.set_error_message("Select a worktree to delete");
             }
             Action::None
+        }
+
+        _ => Action::None,
+    }
+}
+
+/// Handle key events when preview pane is focused.
+fn handle_preview_key_event(key: KeyEvent, state: &mut AppState) -> Action {
+    // Default visible height for scroll calculations (will be adjusted by UI)
+    const DEFAULT_VISIBLE_HEIGHT: u16 = 20;
+
+    match key.code {
+        // j/k scroll the preview content (1 line at a time)
+        KeyCode::Char('j') | KeyCode::Down => {
+            state.clear_status_message();
+            state.scroll_preview_down(DEFAULT_VISIBLE_HEIGHT);
+            Action::None
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            state.clear_status_message();
+            state.scroll_preview_up();
+            Action::None
+        }
+
+        // Ctrl-d/Ctrl-u for half-page scroll
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.clear_status_message();
+            state.scroll_preview_page_down(DEFAULT_VISIBLE_HEIGHT);
+            Action::None
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.clear_status_message();
+            state.scroll_preview_page_up(DEFAULT_VISIBLE_HEIGHT);
+            Action::None
+        }
+
+        // g/G for top/bottom (vim-style)
+        KeyCode::Char('g') => {
+            state.clear_status_message();
+            state.reset_preview_scroll_to_top();
+            Action::None
+        }
+        KeyCode::Char('G') => {
+            state.clear_status_message();
+            state.reset_preview_scroll();
+            Action::None
+        }
+
+        // Enter/o still attaches to session (useful when viewing preview)
+        KeyCode::Enter | KeyCode::Char('o') => {
+            state.clear_status_message();
+            Action::AttachSession
         }
 
         _ => Action::None,
@@ -956,5 +1091,237 @@ mod tests {
         let action = handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
         assert_eq!(action, Action::ToggleExpanded);
         // Note: The actual toggle happens in lib.rs handle_action, not here
+    }
+
+    // ========== Focus Pane Key Event Tests ==========
+
+    #[test]
+    fn test_tab_toggles_focus_pane() {
+        let mut state = create_test_state_with_projects();
+        assert!(state.is_sidebar_focused());
+
+        // Tab should toggle focus to preview
+        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_preview_focused());
+
+        // Tab again should toggle back to sidebar
+        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_sidebar_focused());
+    }
+
+    #[test]
+    fn test_h_key_focuses_sidebar() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        assert!(state.is_preview_focused());
+
+        let action = handle_key_event(key_event(KeyCode::Char('h')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_sidebar_focused());
+    }
+
+    #[test]
+    fn test_l_key_focuses_preview() {
+        let mut state = create_test_state_with_projects();
+        assert!(state.is_sidebar_focused());
+
+        let action = handle_key_event(key_event(KeyCode::Char('l')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_preview_focused());
+    }
+
+    #[test]
+    fn test_left_key_focuses_sidebar() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+
+        let action = handle_key_event(key_event(KeyCode::Left), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_sidebar_focused());
+    }
+
+    #[test]
+    fn test_right_key_focuses_preview() {
+        let mut state = create_test_state_with_projects();
+
+        let action = handle_key_event(key_event(KeyCode::Right), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_preview_focused());
+    }
+
+    // ========== Sidebar Focus Key Event Tests ==========
+
+    #[test]
+    fn test_j_navigates_when_sidebar_focused() {
+        let mut state = create_test_state_with_projects();
+        assert!(state.is_sidebar_focused());
+        assert_eq!(state.selected_worktree_idx(), None); // At project header
+
+        let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
+        assert_eq!(action, Action::RefreshPreview);
+        assert_eq!(state.selected_worktree_idx(), Some(0)); // Moved to worktree
+    }
+
+    #[test]
+    fn test_k_navigates_when_sidebar_focused() {
+        let mut state = create_test_state_with_projects();
+        state.select_next(); // Move to worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        let action = handle_key_event(key_event(KeyCode::Char('k')), &mut state);
+        assert_eq!(action, Action::RefreshPreview);
+        assert_eq!(state.selected_worktree_idx(), None); // Back to project header
+    }
+
+    // ========== Preview Focus Key Event Tests ==========
+
+    #[test]
+    fn test_j_scrolls_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+        assert!(state.is_preview_focused());
+
+        let initial_offset = state.preview_scroll_offset();
+        let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.preview_scroll_offset(), initial_offset + 1);
+    }
+
+    #[test]
+    fn test_k_scrolls_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+        state.scroll_preview_down(20); // Move down first
+        let initial_offset = state.preview_scroll_offset();
+
+        let action = handle_key_event(key_event(KeyCode::Char('k')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(
+            state.preview_scroll_offset(),
+            initial_offset.saturating_sub(1)
+        );
+    }
+
+    #[test]
+    fn test_ctrl_d_scrolls_page_down_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+
+        let action = handle_key_event(
+            key_event_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            &mut state,
+        );
+        assert_eq!(action, Action::None);
+        // Should scroll by half a page (default 10 lines)
+        assert!(state.preview_scroll_offset() > 0);
+    }
+
+    #[test]
+    fn test_ctrl_u_scrolls_page_up_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+        // Scroll down first
+        for _ in 0..20 {
+            state.scroll_preview_down(20);
+        }
+        let initial_offset = state.preview_scroll_offset();
+
+        let action = handle_key_event(
+            key_event_with_modifiers(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            &mut state,
+        );
+        assert_eq!(action, Action::None);
+        assert!(state.preview_scroll_offset() < initial_offset);
+    }
+
+    #[test]
+    fn test_g_scrolls_to_top_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+        state.scroll_preview_down(20); // Move down first
+
+        let action = handle_key_event(key_event(KeyCode::Char('g')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.preview_scroll_offset(), 0);
+    }
+
+    #[test]
+    fn test_G_scrolls_to_bottom_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+
+        let action = handle_key_event(key_event(KeyCode::Char('G')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.preview_scroll_offset(), u16::MAX);
+    }
+
+    #[test]
+    fn test_enter_attaches_when_preview_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        assert_eq!(action, Action::AttachSession);
+    }
+
+    // ========== Mouse Scroll Tests with Focus ==========
+
+    #[test]
+    fn test_mouse_scroll_down_navigates_sidebar_when_focused() {
+        let mut state = create_test_state_with_projects();
+        assert!(state.is_sidebar_focused());
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
+        assert_eq!(action, Action::RefreshPreview);
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+    }
+
+    #[test]
+    fn test_mouse_scroll_down_scrolls_preview_when_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+        let initial_offset = state.preview_scroll_offset();
+
+        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.preview_scroll_offset(), initial_offset + 1);
+    }
+
+    #[test]
+    fn test_mouse_scroll_up_navigates_sidebar_when_focused() {
+        let mut state = create_test_state_with_projects();
+        state.select_next(); // Move to worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+        state.reset_scroll_debounce();
+
+        let action = handle_mouse_event(mouse_scroll_up(), &mut state);
+        assert_eq!(action, Action::RefreshPreview);
+        assert_eq!(state.selected_worktree_idx(), None);
+    }
+
+    #[test]
+    fn test_mouse_scroll_up_scrolls_preview_when_focused() {
+        let mut state = create_test_state_with_projects();
+        state.focus_preview();
+        state.set_preview_line_count(100);
+        state.scroll_preview_down(20); // Move down first
+        let initial_offset = state.preview_scroll_offset();
+
+        let action = handle_mouse_event(mouse_scroll_up(), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(
+            state.preview_scroll_offset(),
+            initial_offset.saturating_sub(1)
+        );
     }
 }
