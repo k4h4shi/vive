@@ -103,6 +103,7 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
 
     for project in sorted_projects.iter() {
         let is_favorite = state.is_favorite(&project.name);
+        let is_expanded = state.is_expanded(&project.name);
 
         // Add separator between favorites and non-favorites
         if has_favorites && has_non_favorites && !is_favorite && !separator_added {
@@ -135,10 +136,15 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
                 .add_modifier(Modifier::BOLD)
         };
 
-        // Project header with ▼ collapse indicator and ★ favorite indicator
+        // Project header with expand/collapse indicator and ★ favorite indicator
+        // ▼ for expanded, ▶ for collapsed
+        let expand_indicator = if is_expanded { "▼" } else { "▶" };
         let favorite_indicator = if is_favorite { " (★)" } else { "" };
         items.push(ListItem::new(Line::from(vec![
-            Span::styled("▼ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{expand_indicator} "),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled(project.name.clone(), project_style),
             Span::styled(
                 favorite_indicator.to_string(),
@@ -146,66 +152,70 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
             ),
         ])));
 
-        // Worktrees under the project with tree structure
-        let worktree_count = project.worktrees.len();
-        for (wt_idx, worktree) in project.worktrees.iter().enumerate() {
-            let is_selected = is_selected_project && state.selected_worktree_idx() == Some(wt_idx);
-            let is_last = wt_idx == worktree_count - 1;
-            let branch_name = worktree.branch.as_deref().unwrap_or("(detached)");
+        // Only show worktrees if project is expanded
+        if is_expanded {
+            // Worktrees under the project with tree structure
+            let worktree_count = project.worktrees.len();
+            for (wt_idx, worktree) in project.worktrees.iter().enumerate() {
+                let is_selected =
+                    is_selected_project && state.selected_worktree_idx() == Some(wt_idx);
+                let is_last = wt_idx == worktree_count - 1;
+                let branch_name = worktree.branch.as_deref().unwrap_or("(detached)");
 
-            // Tree prefix: ├─ for middle items, └─ for last item
-            let tree_prefix = if is_last { "└─" } else { "├─" };
+                // Tree prefix: ├─ for middle items, └─ for last item
+                let tree_prefix = if is_last { "└─" } else { "├─" };
 
-            // Get status for this worktree
-            let status = worktree
-                .session_id(&project.name)
-                .map(|sid| state.get_status(&sid))
-                .unwrap_or_default();
+                // Get status for this worktree
+                let status = worktree
+                    .session_id(&project.name)
+                    .map(|sid| state.get_status(&sid))
+                    .unwrap_or_default();
 
-            // Status icon with color based on type
-            let (icon, icon_color) = get_status_icon_and_color(&status);
+                // Status icon with color based on type
+                let (icon, icon_color) = get_status_icon_and_color(&status);
 
-            // Branch name style
-            let branch_style = if is_selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-            } else {
-                Style::default().fg(Color::Cyan)
-            };
+                // Branch name style
+                let branch_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
 
-            // Fixed-width branch name (truncate if too long, pad if short)
-            // Uses character count to handle UTF-8 safely
-            let max_branch_len = 24;
-            let branch_char_count = branch_name.chars().count();
-            let branch_display = if branch_char_count > max_branch_len {
-                let truncated: String = branch_name.chars().take(max_branch_len - 3).collect();
-                format!("{truncated}...")
-            } else {
-                branch_name.to_string()
-            };
+                // Fixed-width branch name (truncate if too long, pad if short)
+                // Uses character count to handle UTF-8 safely
+                let max_branch_len = 24;
+                let branch_char_count = branch_name.chars().count();
+                let branch_display = if branch_char_count > max_branch_len {
+                    let truncated: String = branch_name.chars().take(max_branch_len - 3).collect();
+                    format!("{truncated}...")
+                } else {
+                    branch_name.to_string()
+                };
 
-            // Padding dots between branch name and status
-            let display_char_count = branch_display.chars().count();
-            let padding_len = max_branch_len.saturating_sub(display_char_count) + 1;
-            let padding = ".".repeat(padding_len);
+                // Padding dots between branch name and status
+                let display_char_count = branch_display.chars().count();
+                let padding_len = max_branch_len.saturating_sub(display_char_count) + 1;
+                let padding = ".".repeat(padding_len);
 
-            // Status text for inline display
-            let status_text = status.status_text();
+                // Status text for inline display
+                let status_text = status.status_text();
 
-            items.push(ListItem::new(Line::from(vec![
-                Span::styled("  ", Style::default()), // indent
-                Span::styled(
-                    tree_prefix.to_string(),
-                    Style::default().fg(Color::DarkGray),
-                ), // tree chars
-                Span::styled(" ", Style::default()),
-                Span::styled(branch_display, branch_style), // branch name
-                Span::styled(format!(" {padding} "), Style::default().fg(Color::DarkGray)), // padding
-                Span::styled(icon.to_string(), Style::default().fg(icon_color)), // status icon
-                Span::styled(" ", Style::default()),
-                Span::styled(status_text, Style::default().fg(Color::DarkGray)), // status text
-            ])));
+                items.push(ListItem::new(Line::from(vec![
+                    Span::styled("  ", Style::default()), // indent
+                    Span::styled(
+                        tree_prefix.to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ), // tree chars
+                    Span::styled(" ", Style::default()),
+                    Span::styled(branch_display, branch_style), // branch name
+                    Span::styled(format!(" {padding} "), Style::default().fg(Color::DarkGray)), // padding
+                    Span::styled(icon.to_string(), Style::default().fg(icon_color)), // status icon
+                    Span::styled(" ", Style::default()),
+                    Span::styled(status_text, Style::default().fg(Color::DarkGray)), // status text
+                ])));
+            }
         }
     }
 
