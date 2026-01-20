@@ -151,26 +151,7 @@ fn handle_dashboard_attach<W: Write>(
         .tmux
         .ensure_dashboard_session(project_name, &worktree_sessions);
 
-    // Handle based on launch strategy
-    match config.terminal.strategy {
-        LaunchStrategy::Spawn => {
-            // Spawn external terminal without suspending TUI
-            spawn_terminal_session(&config.terminal, &dashboard_session, app)?;
-        }
-        LaunchStrategy::Inline => {
-            // Restore terminal before exec (inline mode replaces the process)
-            disable_raw_mode()?;
-            execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
-            app.terminal_mut().show_cursor()?;
-
-            // This will replace the current process
-            let _ = app.tmux.exec_into_session(&dashboard_session);
-
-            // If we get here, exec failed - restore terminal state
-            enable_raw_mode()?;
-            execute!(io::stdout(), EnterAlternateScreen)?;
-        }
-    }
+    execute_launch(app, config, &dashboard_session)?;
 
     Ok(())
 }
@@ -211,28 +192,40 @@ fn handle_worktree_attach<W: Write>(
             .tmux
             .ensure_session(&session_id, Some(&worktree_path_str));
 
-        // Handle based on launch strategy
-        match config.terminal.strategy {
-            LaunchStrategy::Spawn => {
-                // Spawn external terminal without suspending TUI
-                spawn_terminal_session(&config.terminal, &session_id, app)?;
-            }
-            LaunchStrategy::Inline => {
-                // Restore terminal before exec (inline mode replaces the process)
-                disable_raw_mode()?;
-                execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
-                app.terminal_mut().show_cursor()?;
-
-                // This will replace the current process
-                let _ = app.tmux.exec_into_session(&session_id);
-
-                // If we get here, exec failed - restore terminal state
-                enable_raw_mode()?;
-                execute!(io::stdout(), EnterAlternateScreen)?;
-            }
-        }
+        execute_launch(app, config, &session_id)?;
     }
 
+    Ok(())
+}
+
+/// Execute the launch strategy for attaching to a tmux session.
+///
+/// This helper function handles both inline and spawn strategies:
+/// - **Inline**: Suspends TUI and replaces the process with tmux attach
+/// - **Spawn**: Launches external terminal without suspending TUI
+fn execute_launch<W: Write>(
+    app: &mut ProductionApp<W>,
+    config: &Config,
+    session_id: &str,
+) -> Result<()> {
+    match config.terminal.strategy {
+        LaunchStrategy::Spawn => {
+            spawn_terminal_session(&config.terminal, session_id, app)?;
+        }
+        LaunchStrategy::Inline => {
+            // Restore terminal before exec (inline mode replaces the process)
+            disable_raw_mode()?;
+            execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
+            app.terminal_mut().show_cursor()?;
+
+            // This will replace the current process
+            let _ = app.tmux.exec_into_session(session_id);
+
+            // If we get here, exec failed - restore terminal state
+            enable_raw_mode()?;
+            execute!(io::stdout(), EnterAlternateScreen)?;
+        }
+    }
     Ok(())
 }
 
