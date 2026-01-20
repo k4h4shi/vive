@@ -114,6 +114,16 @@ git push origin HEAD
 
 ### 6. PR 作成
 
+`pr-creator` スキルを使用して PR を作成します。
+
+1.  スキルを呼び出すか、以下の形式でコマンドを実行します。
+    - **タイトル命名規則**: `[#番号] Type: Title` (例: `[#123] feat: Add login`)
+    - **本文**: `Closes #番号` を含める
+
 ```bash
-gh pr create --fill
+# pr-creator スキルが使えない場合の手動実行例
+gh pr create --title "[#<番号>] feat: タイトル" --body "## 概要
+変更内容の説明
+
+Closes #<番号>" --base main
 ```
