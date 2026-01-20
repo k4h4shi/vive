@@ -113,11 +113,16 @@ impl AgentStatus {
 }
 
 /// Truncate a detail string to fit in the sidebar.
+///
+/// Uses character-based truncation to avoid panics on UTF-8 boundaries.
 fn truncate_detail(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let truncate_at = max_len.saturating_sub(3);
+        let truncated: String = s.chars().take(truncate_at).collect();
+        format!("{truncated}...")
     }
 }
 
@@ -1232,6 +1237,35 @@ mod tests {
         // Should be truncated
         assert!(text.len() < format!("Wait: {}", long_command).len());
         assert!(text.contains("..."));
+    }
+
+    #[test]
+    fn test_agent_status_text_truncates_utf8_safely() {
+        // Test with Japanese characters - should not panic on UTF-8 boundaries
+        let japanese_detail = "日本語のタスク説明文字列テスト";
+        let status = AgentStatus::Working {
+            detail: Some(japanese_detail.to_string()),
+        };
+        let text = status.status_text();
+        // Should not panic and should contain "..."
+        assert!(text.contains("...") || text.contains(japanese_detail));
+
+        // Test with emoji - should not panic
+        let emoji_detail = "🚀🎉✨ Working on feature 🔥💪";
+        let status = AgentStatus::Working {
+            detail: Some(emoji_detail.to_string()),
+        };
+        let text = status.status_text();
+        // Should not panic
+        assert!(text.starts_with("Working"));
+
+        // Test with mixed content
+        let mixed_detail = "Fix バグ in 機能 with emoji 🐛";
+        let status = AgentStatus::Working {
+            detail: Some(mixed_detail.to_string()),
+        };
+        let text = status.status_text();
+        assert!(text.starts_with("Working"));
     }
 
     #[test]
