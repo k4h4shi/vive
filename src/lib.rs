@@ -136,9 +136,18 @@ where
 
     /// Initialize the application by discovering projects and loading favorites.
     pub fn init(&mut self) -> Result<()> {
-        // Load favorites from disk
-        if let Ok(favorites) = Favorites::load() {
-            self.state.set_favorites(favorites.projects);
+        // Load favorites from disk - use robust loading that handles errors gracefully
+        match Favorites::load() {
+            Ok(favorites) => {
+                self.state.set_favorites(favorites.projects);
+            }
+            Err(e) => {
+                // Log the error but don't fail - user can still use the app
+                // Important: we mark that loading failed so we don't overwrite
+                // potentially valid data on the next save
+                eprintln!("Warning: Failed to load favorites: {e}");
+                self.state.mark_favorites_load_failed();
+            }
         }
 
         // Discover projects
@@ -153,7 +162,16 @@ where
     }
 
     /// Save the current favorites to disk.
+    ///
+    /// This method is defensive: if favorites failed to load at startup,
+    /// we don't save (to avoid overwriting potentially valid data).
     fn save_favorites(&self) {
+        // Don't save if loading failed - we might lose valid data
+        if self.state.favorites_load_failed() {
+            eprintln!("Warning: Skipping favorites save because loading failed at startup");
+            return;
+        }
+
         let favorites = Favorites {
             projects: self.state.favorites().clone(),
         };

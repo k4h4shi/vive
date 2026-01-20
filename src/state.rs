@@ -201,6 +201,9 @@ pub struct AppState {
     last_scroll_time: Option<Instant>,
     /// Set of favorite project names.
     favorites: HashSet<String>,
+    /// Flag indicating whether favorites failed to load at startup.
+    /// When true, we avoid saving favorites to prevent data loss.
+    favorites_load_failed: bool,
 }
 
 impl Default for AppState {
@@ -220,6 +223,7 @@ impl Default for AppState {
             sidebar_list_state: ListState::default(),
             last_scroll_time: None,
             favorites: HashSet::new(),
+            favorites_load_failed: false,
         }
     }
 }
@@ -630,6 +634,17 @@ impl AppState {
     /// Get a reference to the favorites set (used for saving to persistence).
     pub fn favorites(&self) -> &HashSet<String> {
         &self.favorites
+    }
+
+    /// Mark that favorites failed to load at startup.
+    /// This prevents saving favorites to avoid overwriting potentially valid data.
+    pub fn mark_favorites_load_failed(&mut self) {
+        self.favorites_load_failed = true;
+    }
+
+    /// Check if favorites failed to load at startup.
+    pub fn favorites_load_failed(&self) -> bool {
+        self.favorites_load_failed
     }
 
     /// Get projects sorted with favorites first, preserving original order within each group.
@@ -1503,5 +1518,46 @@ mod tests {
         // Test clear
         state.clear_status_message();
         assert!(state.status_message.is_none());
+    }
+
+    #[test]
+    fn test_favorites_load_failed_default() {
+        let state = AppState::new();
+        assert!(!state.favorites_load_failed());
+    }
+
+    #[test]
+    fn test_mark_favorites_load_failed() {
+        let mut state = AppState::new();
+        assert!(!state.favorites_load_failed());
+
+        state.mark_favorites_load_failed();
+        assert!(state.favorites_load_failed());
+    }
+
+    #[test]
+    fn test_favorites_load_failed_prevents_data_loss_scenario() {
+        // This test documents the scenario that caused favorites to be lost:
+        // 1. Favorites failed to load (e.g., corrupted file)
+        // 2. User toggles a favorite
+        // 3. Save would overwrite the file with incomplete data
+        //
+        // With the fix:
+        // - favorites_load_failed flag is set when loading fails
+        // - save_favorites() checks this flag and skips saving
+        // - This prevents data loss
+
+        let mut state = AppState::new();
+
+        // Simulate loading failure
+        state.mark_favorites_load_failed();
+        assert!(state.favorites_load_failed());
+
+        // User adds a favorite (this would normally trigger save)
+        state.toggle_favorite("project-a");
+        assert!(state.is_favorite("project-a"));
+
+        // The flag should still be set, indicating save should be skipped
+        assert!(state.favorites_load_failed());
     }
 }
