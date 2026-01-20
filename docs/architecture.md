@@ -97,3 +97,34 @@ graph TD
     - **Robustness**: If loading fails (e.g., corrupted file), a `favorites_load_failed` flag is set.
     - When this flag is set, saving is skipped to prevent overwriting potentially valid data.
     - This prevents data loss in edge cases where the file cannot be read but may still contain valid favorites.
+
+## Configuration
+
+Configuration is stored in `~/.vive/config.toml`.
+
+### Terminal Launch Strategy
+
+The `[terminal]` section controls how Vive launches tmux sessions:
+
+```toml
+[terminal]
+# Launch strategy: "inline" (default) or "spawn"
+# - inline: Replace current process with tmux attach (default)
+# - spawn: Launch external terminal without suspending TUI
+strategy = "spawn"
+
+# Command to run for spawn strategy (e.g., "ghostty", "wezterm", "alacritty")
+command = "ghostty"
+
+# Arguments for the spawn command
+# Use {session_id} as placeholder for the target session name
+args = ["+e", "tmux attach -t {session_id}"]
+```
+
+**Strategies**:
+- **inline** (default): Traditional behavior. The TUI is suspended and the current process is replaced with `tmux attach`. This is seamless but leaves the TUI.
+- **spawn**: Launches a new terminal window without suspending the TUI. Vive remains open as a dashboard while the session runs in a separate window. Requires `command` to be configured.
+
+**Use Cases**:
+- Use `inline` for quick, focused work on a single task.
+- Use `spawn` when monitoring multiple sessions or using Vive as a persistent dashboard.
