@@ -186,9 +186,126 @@ pub fn format_worktree_display_name(
     }
 }
 
+/// Represents a GitHub Issue from the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubIssue {
+    /// Issue number.
+    pub number: u32,
+    /// Issue title.
+    pub title: String,
+}
+
+impl GitHubIssue {
+    /// Create a new GitHubIssue.
+    pub fn new(number: u32, title: impl Into<String>) -> Self {
+        Self {
+            number,
+            title: title.into(),
+        }
+    }
+
+    /// Generate a branch name from this issue.
+    pub fn branch_name(&self) -> String {
+        format!("feature/issue-{}", self.number)
+    }
+}
+
+/// Result of fetching the Issue list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IssueListResult {
+    /// Issues were fetched successfully.
+    Found(Vec<GitHubIssue>),
+    /// No issues found.
+    Empty,
+    /// An error occurred during fetch.
+    Error(String),
+}
+
+/// Trait for fetching Issue lists, abstracted for testing.
+pub trait IssueListFetcher: Send + Sync {
+    /// Fetch open issues from a repository.
+    fn fetch_issues(&self, repo_path: &str) -> IssueListResult;
+}
+
+/// Real implementation that uses the `gh` CLI to fetch issue lists.
+impl IssueListFetcher for GhIssueFetcher {
+    fn fetch_issues(&self, repo_path: &str) -> IssueListResult {
+        fetch_issue_list_sync(repo_path)
+    }
+}
+
+/// Fetch open issues using `gh issue list`.
+///
+/// This function runs synchronously and returns a list of issues if successful.
+pub fn fetch_issue_list_sync(repo_path: &str) -> IssueListResult {
+    let output = Command::new("gh")
+        .args([
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,title",
+            "-q",
+            ".[] | \"\\(.number)\\t\\(.title)\"",
+        ])
+        .current_dir(repo_path)
+        .output();
+
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let issues: Vec<GitHubIssue> = stdout
+                    .lines()
+                    .filter_map(|line| {
+                        let parts: Vec<&str> = line.splitn(2, '\t').collect();
+                        if parts.len() == 2 {
+                            let number = parts[0].parse().ok()?;
+                            let title = parts[1].to_string();
+                            Some(GitHubIssue::new(number, title))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if issues.is_empty() {
+                    IssueListResult::Empty
+                } else {
+                    IssueListResult::Found(issues)
+                }
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                IssueListResult::Error(stderr.trim().to_string())
+            }
+        }
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                IssueListResult::Error("gh CLI not installed".to_string())
+            } else {
+                IssueListResult::Error(e.to_string())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_github_issue_new() {
+        let issue = GitHubIssue::new(42, "Test Issue");
+        assert_eq!(issue.number, 42);
+        assert_eq!(issue.title, "Test Issue");
+    }
+
+    #[test]
+    fn test_github_issue_branch_name() {
+        let issue = GitHubIssue::new(123, "Add feature");
+        assert_eq!(issue.branch_name(), "feature/issue-123");
+    }
 
     #[test]
     fn test_issue_title_cache_new() {
