@@ -806,14 +806,16 @@ fn test_favorites_show_star_icon() {
 /// Test: Deletion modal - Press 'd' on non-main branch opens modal.
 #[test]
 fn test_deletion_modal_opens_on_d() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/feature-x",
-            "def456",
-            Some("feature-x".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature-x",
+                "def456",
+                Some("feature-x".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -858,14 +860,16 @@ fn test_deletion_on_main_shows_error() {
 /// Test: Deletion modal renders with branch name.
 #[test]
 fn test_deletion_modal_renders_branch_name() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/my-feature",
-            "def456",
-            Some("my-feature".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/my-feature",
+                "def456",
+                Some("my-feature".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -890,14 +894,16 @@ fn test_deletion_modal_renders_branch_name() {
 /// Test: Deletion modal - 'n' cancels deletion.
 #[test]
 fn test_deletion_modal_n_cancels() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/feature-1",
-            "def456",
-            Some("feature-1".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature-1",
+                "def456",
+                Some("feature-1".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -963,9 +969,13 @@ fn test_multiple_project_statuses() {
 /// Test: Navigation at boundary doesn't crash.
 #[test]
 fn test_navigation_at_boundary() {
-    let projects = vec![Project::new("single-project", "/path/to/single").with_worktrees(vec![
-        Worktree::new("/path/to/single", "abc123", Some("main".to_string())),
-    ])];
+    let projects = vec![
+        Project::new("single-project", "/path/to/single").with_worktrees(vec![Worktree::new(
+            "/path/to/single",
+            "abc123",
+            Some("main".to_string()),
+        )]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -1028,11 +1038,8 @@ fn test_preview_scrolls_to_bottom() {
     lines.push("This is the most recent output".to_string());
     let content = lines.join("\n");
 
-    let mut app = create_test_app_with_tmux(
-        projects,
-        vec![],
-        vec![("project-alpha__main", &content)],
-    );
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", &content)]);
 
     app.init().unwrap();
     app.update_pane_preview();
