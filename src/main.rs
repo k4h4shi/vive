@@ -2,6 +2,7 @@
 
 use std::io::{self, Write};
 use std::process::Command;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -14,10 +15,53 @@ use ratatui::Terminal;
 
 use vive::{
     App, Config, EventSource, GhIssueFetcher, LaunchStrategy, ProductionApp, RealEventSource,
-    RealProjectDiscovery, event::Action, tmux::TmuxOrchestrator,
+    RealProjectDiscovery,
+    event::Action,
+    mcp::{ViveStateSnapshot, run_mcp_server},
+    tmux::TmuxOrchestrator,
 };
 
 fn main() -> Result<()> {
+    // Check for --mcp-server flag
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--mcp-server") {
+        return run_mcp_server_mode();
+    }
+
+    // Normal TUI mode
+    run_tui_mode()
+}
+
+/// Run the application in MCP server mode.
+///
+/// In this mode, the application exposes Vive's state via the Model Context Protocol
+/// over stdio. This allows external tools like Claude Code to query Vive's state.
+fn run_mcp_server_mode() -> Result<()> {
+    // Create the tokio runtime for the MCP server
+    let rt = tokio::runtime::Runtime::new()?;
+
+    // Create a shared state that will be populated with real data
+    let shared_state = Arc::new(RwLock::new(ViveStateSnapshot::default()));
+
+    // Discover projects and populate the state
+    let config = Config::load().unwrap_or_default();
+    let projects_root = config.effective_projects_root();
+    if let Ok(projects) = vive::discover_projects(&projects_root, &config.ignored_dirs) {
+        let mut state = shared_state.write().unwrap();
+        state.projects = projects
+            .iter()
+            .map(vive::mcp::ProjectSnapshot::from)
+            .collect();
+    }
+
+    // Run the MCP server
+    rt.block_on(run_mcp_server(shared_state))?;
+
+    Ok(())
+}
+
+/// Run the application in normal TUI mode.
+fn run_tui_mode() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();

@@ -98,6 +98,67 @@ graph TD
     - When this flag is set, saving is skipped to prevent overwriting potentially valid data.
     - This prevents data loss in edge cases where the file cannot be read but may still contain valid favorites.
 
+### 6. MCP Server (Model Context Protocol)
+
+The MCP server exposes Vive's internal state to external tools (like Claude Code) via the Model Context Protocol.
+
+- **Transport**: Stdio (standard input/output)
+- **Mode**: Standalone server mode (`vive --mcp-server`)
+- **Implementation**: Uses the `rmcp` crate (official Rust MCP SDK)
+
+#### Resources
+
+| URI | Description |
+|-----|-------------|
+| `vive://projects` | All projects and worktrees discovered by Vive |
+| `vive://status` | Agent statuses for all sessions (project:branch) |
+| `vive://logs/{session_id}` | Pane preview content for a specific session |
+
+#### Architecture
+
+```mermaid
+graph LR
+    subgraph Vive MCP Server
+        SS[SharedState<br/>Arc&lt;RwLock&lt;ViveStateSnapshot&gt;&gt;]
+        MH[MCP Handler<br/>ViveMcpServer]
+    end
+
+    subgraph External
+        CC[Claude Code<br/>or other MCP client]
+    end
+
+    CC -->|stdio| MH
+    MH -->|read| SS
+```
+
+#### State Snapshot
+
+The MCP server uses a `ViveStateSnapshot` struct that captures:
+- **Projects**: Name, path, and worktrees for each discovered project
+- **Statuses**: Agent status (Working, Idle, Waiting, etc.) for each session
+- **Pane Previews**: Terminal output content for each session
+
+#### Usage
+
+To run Vive as an MCP server:
+
+```bash
+vive --mcp-server
+```
+
+Configure in Claude Desktop's `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "vive": {
+      "command": "vive",
+      "args": ["--mcp-server"]
+    }
+  }
+}
+```
+
 ## Configuration
 
 Configuration is stored in `~/.vive/config.toml`.
