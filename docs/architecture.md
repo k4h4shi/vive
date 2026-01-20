@@ -40,6 +40,13 @@
 - **Cockpit Layout**: Automatically splits windows based on active tasks when a project is opened.
 - **Session Management**: Ensures persistent sessions even when the TUI is closed.
 
+### 5. GitHub Integration (The "Bridge")
+- Provides integration with GitHub via the `gh` CLI.
+- **Issue Title Fetching**: Fetches Issue titles to display alongside worktree names (e.g., `#123 Fix login bug`).
+- **Issue List Fetching**: Fetches open issues from the repository for the Issue Picker.
+- **Caching**: Issue titles are cached to minimize API calls.
+- **Branch Name Generation**: Auto-generates branch names from issues (e.g., `feature/issue-123`).
+
 ## Data Flow
 
 ```mermaid
@@ -47,6 +54,7 @@ graph TD
     subgraph Core
         D[Discovery Module] -->|Projects & Worktrees| S[AppState]
         M[Monitor Module] -->|Statuses (Map)| S
+        GH[GitHub Module] -->|Issue Titles & Lists| S
     end
 
     subgraph TUI
@@ -58,12 +66,14 @@ graph TD
         A -->|Create/Switch| T[Tmux Orchestrator]
         A -->|Send Keys| T
         A -->|Create Worktree| G[Git Wrapper]
+        A -->|Fetch Issues| GH
     end
 
     V -->|Display| User
     User -->|Keyboard/Mouse| K
     T -->|Manage| Tmux[Tmux Process]
     G -->|Update| D
+    GH -->|gh CLI| GitHub[GitHub API]
 ```
 
 ## State Management Strategy
