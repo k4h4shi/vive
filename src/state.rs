@@ -191,6 +191,8 @@ pub struct AppState {
     pub modal: Option<ModalType>,
     /// Command input buffer.
     pub input_buffer: String,
+    /// Cursor position within input_buffer (in characters, not bytes).
+    input_cursor: usize,
     /// Captured pane content for preview.
     pub pane_preview: String,
     /// Status message for user feedback.
@@ -221,6 +223,7 @@ impl Default for AppState {
             focus_mode: FocusMode::Normal,
             modal: None,
             input_buffer: String::new(),
+            input_cursor: 0,
             pane_preview: String::new(),
             status_message: None,
             sidebar_list_state: ListState::default(),
@@ -484,6 +487,7 @@ impl AppState {
     pub fn enter_input_mode(&mut self) {
         self.focus_mode = FocusMode::Input;
         self.input_buffer.clear();
+        self.input_cursor = 0;
     }
 
     /// Exit input mode.
@@ -491,18 +495,64 @@ impl AppState {
         self.focus_mode = FocusMode::Normal;
     }
 
-    /// Add a character to the input buffer.
+    /// Add a character to the input buffer at the cursor position.
     pub fn input_char(&mut self, c: char) {
-        self.input_buffer.push(c);
+        let char_count = self.input_buffer.chars().count();
+        if self.input_cursor >= char_count {
+            // Cursor at end, just push
+            self.input_buffer.push(c);
+        } else {
+            // Insert at cursor position
+            let byte_idx = self
+                .input_buffer
+                .char_indices()
+                .nth(self.input_cursor)
+                .map(|(i, _)| i)
+                .unwrap_or(self.input_buffer.len());
+            self.input_buffer.insert(byte_idx, c);
+        }
+        self.input_cursor += 1;
     }
 
-    /// Remove the last character from the input buffer.
+    /// Remove the character before the cursor from the input buffer.
     pub fn input_backspace(&mut self) {
-        self.input_buffer.pop();
+        if self.input_cursor > 0 {
+            let remove_idx = self.input_cursor - 1;
+            // Safe UTF-8 character removal by reconstructing the string
+            let chars: Vec<char> = self.input_buffer.chars().collect();
+            self.input_buffer = chars
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != remove_idx)
+                .map(|(_, c)| c)
+                .collect();
+            self.input_cursor -= 1;
+        }
+    }
+
+    /// Move cursor left within input buffer.
+    pub fn input_cursor_left(&mut self) {
+        if self.input_cursor > 0 {
+            self.input_cursor -= 1;
+        }
+    }
+
+    /// Move cursor right within input buffer.
+    pub fn input_cursor_right(&mut self) {
+        let char_count = self.input_buffer.chars().count();
+        if self.input_cursor < char_count {
+            self.input_cursor += 1;
+        }
+    }
+
+    /// Get the current cursor position in the input buffer (in characters).
+    pub fn input_cursor(&self) -> usize {
+        self.input_cursor
     }
 
     /// Take the current input and clear the buffer.
     pub fn take_input(&mut self) -> String {
+        self.input_cursor = 0;
         std::mem::take(&mut self.input_buffer)
     }
 
@@ -896,6 +946,126 @@ mod tests {
 
         state.exit_input_mode();
         assert_eq!(state.focus_mode, FocusMode::Normal);
+    }
+
+    #[test]
+    fn test_input_cursor_movement() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        // Type "hello"
+        for c in "hello".chars() {
+            state.input_char(c);
+        }
+        assert_eq!(state.input_buffer, "hello");
+        assert_eq!(state.input_cursor(), 5);
+
+        // Move cursor left twice
+        state.input_cursor_left();
+        state.input_cursor_left();
+        assert_eq!(state.input_cursor(), 3);
+
+        // Insert character at cursor position
+        state.input_char('X');
+        assert_eq!(state.input_buffer, "helXlo");
+        assert_eq!(state.input_cursor(), 4);
+
+        // Move cursor right
+        state.input_cursor_right();
+        assert_eq!(state.input_cursor(), 5);
+
+        // Backspace removes character before cursor
+        state.input_backspace();
+        assert_eq!(state.input_buffer, "helXo");
+        assert_eq!(state.input_cursor(), 4);
+    }
+
+    #[test]
+    fn test_input_cursor_boundary() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        // Cursor at start, left should not move
+        assert_eq!(state.input_cursor(), 0);
+        state.input_cursor_left();
+        assert_eq!(state.input_cursor(), 0);
+
+        // Cursor at end, right should not move
+        state.input_char('a');
+        assert_eq!(state.input_cursor(), 1);
+        state.input_cursor_right();
+        assert_eq!(state.input_cursor(), 1);
+
+        // Backspace at start should do nothing
+        state.input_cursor_left();
+        assert_eq!(state.input_cursor(), 0);
+        state.input_backspace();
+        assert_eq!(state.input_buffer, "a");
+        assert_eq!(state.input_cursor(), 0);
+    }
+
+    #[test]
+    fn test_input_cursor_with_utf8() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        // Type Japanese characters
+        for c in "日本語".chars() {
+            state.input_char(c);
+        }
+        assert_eq!(state.input_buffer, "日本語");
+        assert_eq!(state.input_cursor(), 3); // 3 characters
+
+        // Move cursor left
+        state.input_cursor_left();
+        assert_eq!(state.input_cursor(), 2);
+
+        // Insert ASCII character
+        state.input_char('X');
+        assert_eq!(state.input_buffer, "日本X語");
+        assert_eq!(state.input_cursor(), 3);
+
+        // Backspace removes 'X'
+        state.input_backspace();
+        assert_eq!(state.input_buffer, "日本語");
+        assert_eq!(state.input_cursor(), 2);
+
+        // Backspace removes '本'
+        state.input_backspace();
+        assert_eq!(state.input_buffer, "日語");
+        assert_eq!(state.input_cursor(), 1);
+    }
+
+    #[test]
+    fn test_input_cursor_reset_on_take() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        state.input_char('a');
+        state.input_char('b');
+        state.input_char('c');
+        state.input_cursor_left();
+        assert_eq!(state.input_cursor(), 2);
+
+        let _ = state.take_input();
+        assert_eq!(state.input_cursor(), 0);
+        assert!(state.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_input_cursor_reset_on_enter_mode() {
+        let mut state = AppState::new();
+
+        // First session
+        state.enter_input_mode();
+        state.input_char('a');
+        assert_eq!(state.input_cursor(), 1);
+        state.exit_input_mode();
+
+        // Second session - cursor should be reset
+        state.enter_input_mode();
+        assert_eq!(state.input_cursor(), 0);
+        assert!(state.input_buffer.is_empty());
     }
 
     #[test]
