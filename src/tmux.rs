@@ -36,6 +36,26 @@ pub struct TmuxPane {
     pub index: u32,
     pub active: bool,
     pub current_path: String,
+    /// Unique pane ID (e.g., "%0", "%1") for reliable targeting.
+    pub pane_id: String,
+}
+
+/// Information about a pane's layout position and size.
+#[derive(Debug, Clone)]
+pub struct PaneLayout {
+    pub index: u32,
+    pub width: u16,
+    pub height: u16,
+    pub left: u16,
+    pub top: u16,
+}
+
+/// Dashboard layout with pane positions and content.
+#[derive(Debug, Clone)]
+pub struct DashboardLayout {
+    pub total_width: u16,
+    pub total_height: u16,
+    pub panes: Vec<(PaneLayout, String)>, // (layout, content)
 }
 
 /// Layout strategy for the Cockpit view.
@@ -391,16 +411,26 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     // ========================================================================
 
     /// Split a window/pane horizontally (creates panes stacked vertically).
+    ///
+    /// # Arguments
+    /// * `target` - The target pane (session:window.pane)
+    /// * `start_directory` - Optional directory to start the new pane in
+    /// * `command` - Optional command to run in the new pane (instead of default shell)
     pub fn split_window_horizontal(
         &self,
         target: &str,
         start_directory: Option<&str>,
+        command: Option<&str>,
     ) -> Result<()> {
         let mut cmd_args = args!["split-window", "-v", "-t", target];
 
         if let Some(dir) = start_directory {
             cmd_args.push("-c".to_string());
             cmd_args.push(dir.to_string());
+        }
+
+        if let Some(cmd) = command {
+            cmd_args.push(cmd.to_string());
         }
 
         let result = self.executor.execute(cmd_args)?;
@@ -417,12 +447,26 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     }
 
     /// Split a window/pane vertically (creates panes side by side).
-    pub fn split_window_vertical(&self, target: &str, start_directory: Option<&str>) -> Result<()> {
+    ///
+    /// # Arguments
+    /// * `target` - The target pane (session:window.pane)
+    /// * `start_directory` - Optional directory to start the new pane in
+    /// * `command` - Optional command to run in the new pane (instead of default shell)
+    pub fn split_window_vertical(
+        &self,
+        target: &str,
+        start_directory: Option<&str>,
+        command: Option<&str>,
+    ) -> Result<()> {
         let mut cmd_args = args!["split-window", "-h", "-t", target];
 
         if let Some(dir) = start_directory {
             cmd_args.push("-c".to_string());
             cmd_args.push(dir.to_string());
+        }
+
+        if let Some(cmd) = command {
+            cmd_args.push(cmd.to_string());
         }
 
         let result = self.executor.execute(cmd_args)?;
@@ -505,9 +549,16 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// The captured pane content as a string.
     pub fn capture_pane(&self, target: &str, lines: usize) -> Result<String> {
         let start_line = format!("-{lines}");
-        let result =
-            self.executor
-                .execute(args!["capture-pane", "-t", target, "-p", "-S", &start_line,])?;
+        // -e flag preserves ANSI escape sequences (colors)
+        let result = self.executor.execute(args![
+            "capture-pane",
+            "-t",
+            target,
+            "-p",
+            "-e",
+            "-S",
+            &start_line,
+        ])?;
 
         if !result.success {
             anyhow::bail!(
@@ -518,6 +569,31 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
 
         Ok(result.stdout)
+    }
+
+    /// Capture content from all panes in a session.
+    ///
+    /// Returns a combined string with each pane's content separated by a header.
+    pub fn capture_all_panes(&self, session: &str, lines_per_pane: usize) -> Result<String> {
+        let panes = self.list_panes(session)?;
+
+        if panes.is_empty() {
+            return Ok(String::new());
+        }
+
+        let mut combined = String::new();
+        for (idx, pane) in panes.iter().enumerate() {
+            // Use pane_id for reliable targeting across sessions
+            if let Ok(content) = self.capture_pane(&pane.pane_id, lines_per_pane) {
+                if idx > 0 {
+                    combined.push_str("\n─────────────────────────────────────────\n");
+                }
+                combined.push_str(&format!("── Pane {} ──\n", idx + 1));
+                combined.push_str(&content);
+            }
+        }
+
+        Ok(combined)
     }
 
     /// Select a layout for the current window.
@@ -564,22 +640,22 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             CockpitLayout::TwoVertical => {
                 // Split vertically (side by side)
                 if directories.len() >= 2 {
-                    self.split_window_vertical(&target, Some(directories[1]))?;
+                    self.split_window_vertical(&target, Some(directories[1]), None)?;
                 }
             }
             CockpitLayout::TwoHorizontal => {
                 // Split horizontally (stacked)
                 if directories.len() >= 2 {
-                    self.split_window_horizontal(&target, Some(directories[1]))?;
+                    self.split_window_horizontal(&target, Some(directories[1]), None)?;
                 }
             }
             CockpitLayout::MainLeft => {
                 // Main pane on left, smaller panes stacked on right
                 if directories.len() >= 2 {
-                    self.split_window_vertical(&target, Some(directories[1]))?;
+                    self.split_window_vertical(&target, Some(directories[1]), None)?;
                     if directories.len() >= 3 {
                         let right_pane = format!("{target}.1");
-                        self.split_window_horizontal(&right_pane, Some(directories[2]))?;
+                        self.split_window_horizontal(&right_pane, Some(directories[2]), None)?;
                     }
                 }
                 self.select_layout(&target, "main-vertical")?;
@@ -587,10 +663,10 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             CockpitLayout::MainTop => {
                 // Main pane on top, smaller panes below
                 if directories.len() >= 2 {
-                    self.split_window_horizontal(&target, Some(directories[1]))?;
+                    self.split_window_horizontal(&target, Some(directories[1]), None)?;
                     if directories.len() >= 3 {
                         let bottom_pane = format!("{target}.1");
-                        self.split_window_vertical(&bottom_pane, Some(directories[2]))?;
+                        self.split_window_vertical(&bottom_pane, Some(directories[2]), None)?;
                     }
                 }
                 self.select_layout(&target, "main-horizontal")?;
@@ -598,13 +674,21 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             CockpitLayout::Grid => {
                 // 2x2 grid layout
                 if directories.len() >= 2 {
-                    self.split_window_vertical(&target, Some(directories[1]))?;
+                    self.split_window_vertical(&target, Some(directories[1]), None)?;
                 }
                 if directories.len() >= 3 {
-                    self.split_window_horizontal(&format!("{target}.0"), Some(directories[2]))?;
+                    self.split_window_horizontal(
+                        &format!("{target}.0"),
+                        Some(directories[2]),
+                        None,
+                    )?;
                 }
                 if directories.len() >= 4 {
-                    self.split_window_horizontal(&format!("{target}.1"), Some(directories[3]))?;
+                    self.split_window_horizontal(
+                        &format!("{target}.1"),
+                        Some(directories[3]),
+                        None,
+                    )?;
                 }
                 self.select_layout(&target, "tiled")?;
             }
@@ -621,6 +705,237 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             3 => CockpitLayout::MainLeft,
             _ => CockpitLayout::Grid,
         }
+    }
+
+    // ========================================================================
+    // Dashboard Session Operations
+    // ========================================================================
+
+    /// Create a dashboard session for a project.
+    ///
+    /// The dashboard session shows all worktree sessions in a tiled layout.
+    /// Each pane attaches to a worktree session using nested tmux.
+    ///
+    /// # Arguments
+    /// * `project_name` - Name of the project
+    /// * `worktree_sessions` - List of (session_id, worktree_path) for each worktree
+    ///
+    /// # Returns
+    /// `Ok(true)` if the dashboard session was created, `Ok(false)` if it already existed.
+    pub fn create_dashboard_session(
+        &self,
+        project_name: &str,
+        worktree_sessions: &[(String, String)],
+    ) -> Result<bool> {
+        let dashboard_session = format!("{project_name}__dashboard");
+
+        // Check if dashboard already exists
+        if self.has_session(&dashboard_session)? {
+            return Ok(false);
+        }
+
+        // Create the dashboard session (detached)
+        // Use the first worktree's path as the starting directory
+        let start_dir = worktree_sessions.first().map(|(_, path)| path.as_str());
+        self.new_session(&dashboard_session, start_dir, true)?;
+
+        // Set aggressive-resize for proper nested tmux behavior
+        let _ = self.set_option(&dashboard_session, "aggressive-resize", "on");
+
+        // Create panes for each worktree
+        // Use session name only as target (tmux selects active window automatically)
+        // This avoids issues with base-index settings (window could be 0 or 1)
+        let target = &dashboard_session;
+
+        for (idx, (session_id, _path)) in worktree_sessions.iter().enumerate() {
+            let attach_cmd = format!(
+                "unset TMUX; tmux attach -t {session_id} 2>/dev/null || echo 'Session not found: {session_id}'"
+            );
+
+            if idx == 0 {
+                // First pane: use send_keys since the session was just created with a shell
+                self.send_keys(target, &attach_cmd, true)?;
+            } else {
+                // Additional panes: split with command directly
+                // This runs the attach command immediately in the new pane
+                self.split_window_horizontal(target, None, Some(&attach_cmd))?;
+            }
+        }
+
+        // Apply tiled layout for even distribution
+        self.select_layout(target, "tiled")?;
+
+        Ok(true)
+    }
+
+    /// Get the dashboard session name for a project.
+    /// Uses double underscore to avoid tmux's session:window delimiter.
+    pub fn dashboard_session_name(project_name: &str) -> String {
+        format!("{project_name}__dashboard")
+    }
+
+    /// Add a pane to an existing dashboard session for a new worktree.
+    ///
+    /// This is called when a new worktree is created and the dashboard
+    /// already exists. It adds a new pane and re-tiles the layout.
+    ///
+    /// # Arguments
+    /// * `project_name` - Name of the project
+    /// * `session_id` - Session ID for the new worktree
+    ///
+    /// # Returns
+    /// `Ok(true)` if the pane was added, `Ok(false)` if dashboard doesn't exist.
+    pub fn add_pane_to_dashboard(&self, project_name: &str, session_id: &str) -> Result<bool> {
+        let dashboard_session = Self::dashboard_session_name(project_name);
+
+        // Check if dashboard exists
+        if !self.has_session(&dashboard_session)? {
+            return Ok(false);
+        }
+
+        // Use session name only as target (avoids base-index issues)
+        let target = &dashboard_session;
+
+        // Build attach command
+        let attach_cmd = format!(
+            "unset TMUX; tmux attach -t {session_id} 2>/dev/null || echo 'Session not found: {session_id}'"
+        );
+
+        // Split window with command to attach to worktree session directly
+        self.split_window_horizontal(target, None, Some(&attach_cmd))?;
+
+        // Re-apply tiled layout for even distribution
+        self.select_layout(target, "tiled")?;
+
+        Ok(true)
+    }
+
+    /// Synchronize the dashboard session with the current worktrees.
+    ///
+    /// This recreates the dashboard session to reflect the current state
+    /// of worktrees. Used after worktree deletion to remove stale panes.
+    ///
+    /// # Arguments
+    /// * `project_name` - Name of the project
+    /// * `worktree_sessions` - Current list of (session_id, worktree_path)
+    ///
+    /// # Returns
+    /// `Ok(true)` if the dashboard was synced, `Ok(false)` if dashboard didn't exist.
+    pub fn sync_dashboard(
+        &self,
+        project_name: &str,
+        worktree_sessions: &[(String, String)],
+    ) -> Result<bool> {
+        let dashboard_session = Self::dashboard_session_name(project_name);
+
+        // Check if dashboard exists
+        if !self.has_session(&dashboard_session)? {
+            return Ok(false);
+        }
+
+        // Kill the old dashboard and recreate it
+        self.kill_session(&dashboard_session)?;
+        self.create_dashboard_session(project_name, worktree_sessions)?;
+
+        Ok(true)
+    }
+
+    /// List panes in a target (session:window).
+    pub fn list_panes(&self, target: &str) -> Result<Vec<TmuxPane>> {
+        let result = self.executor.execute(args![
+            "list-panes",
+            "-t",
+            target,
+            "-F",
+            "#{pane_id}:#{pane_index}:#{pane_active}:#{pane_current_path}",
+        ])?;
+
+        if !result.success {
+            anyhow::bail!(
+                "Failed to list panes in '{}': {}",
+                target,
+                result.stderr.trim()
+            );
+        }
+
+        let panes = result
+            .stdout
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() >= 4 {
+                    Some(TmuxPane {
+                        pane_id: parts[0].to_string(),
+                        index: parts[1].parse().unwrap_or(0),
+                        active: parts[2] == "1",
+                        current_path: parts[3..].join(":"), // Handle paths with colons
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(panes)
+    }
+
+    /// Kill a specific pane.
+    pub fn kill_pane(&self, target: &str) -> Result<()> {
+        let result = self.executor.execute(args!["kill-pane", "-t", target])?;
+
+        if !result.success {
+            anyhow::bail!("Failed to kill pane '{}': {}", target, result.stderr.trim());
+        }
+
+        Ok(())
+    }
+
+    /// Respawn a pane with a new command.
+    ///
+    /// This kills the current process in the pane and starts the specified command.
+    /// More reliable than send_keys for initial pane setup.
+    pub fn respawn_pane(&self, target: &str, command: &str) -> Result<()> {
+        let result = self
+            .executor
+            .execute(args!["respawn-pane", "-k", "-t", target, command])?;
+
+        if !result.success {
+            anyhow::bail!(
+                "Failed to respawn pane '{}': {}",
+                target,
+                result.stderr.trim()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Ensure a dashboard session exists and all panes are properly attached.
+    ///
+    /// This method:
+    /// - Creates a new dashboard if it doesn't exist
+    /// - If it exists, refreshes all panes by re-sending attach commands
+    /// - Adds missing panes if worktrees have been added
+    ///
+    /// # Arguments
+    /// * `project_name` - Name of the project
+    /// * `worktree_sessions` - List of (session_id, worktree_path) for each worktree
+    pub fn ensure_dashboard_session(
+        &self,
+        project_name: &str,
+        worktree_sessions: &[(String, String)],
+    ) -> Result<()> {
+        let dashboard_session = Self::dashboard_session_name(project_name);
+
+        // If dashboard exists, kill it to recreate fresh
+        // This ensures all panes are properly connected to their sessions
+        if self.has_session(&dashboard_session)? {
+            let _ = self.kill_session(&dashboard_session);
+        }
+
+        // Create fresh dashboard with all worktree panes
+        self.create_dashboard_session(project_name, worktree_sessions)?;
+        Ok(())
     }
 
     // ========================================================================
@@ -910,7 +1225,7 @@ mod tests {
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         orchestrator
-            .split_window_vertical("my-session:main", None)
+            .split_window_vertical("my-session:main", None, None)
             .unwrap();
     }
 
@@ -925,7 +1240,7 @@ mod tests {
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         orchestrator
-            .split_window_horizontal("my-session:main", Some("/path"))
+            .split_window_horizontal("my-session:main", Some("/path"), None)
             .unwrap();
     }
 
@@ -1032,7 +1347,16 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args == to_strings(&["capture-pane", "-t", "my-session:main", "-p", "-S", "-50"])
+                *args
+                    == to_strings(&[
+                        "capture-pane",
+                        "-t",
+                        "my-session:main",
+                        "-p",
+                        "-e",
+                        "-S",
+                        "-50",
+                    ])
             })
             .returning(|_| {
                 Ok(mock_success(
@@ -1134,7 +1458,16 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args == to_strings(&["capture-pane", "-t", "my-session:main", "-p", "-S", "-100"])
+                *args
+                    == to_strings(&[
+                        "capture-pane",
+                        "-t",
+                        "my-session:main",
+                        "-p",
+                        "-e",
+                        "-S",
+                        "-100",
+                    ])
             })
             .returning(|_| Ok(mock_success("Line 1\nLine 2\n")));
 
@@ -1275,6 +1608,709 @@ mod tests {
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         orchestrator
             .new_window("my-session", "window-name", None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_list_panes() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "list-panes",
+                        "-t",
+                        "my-session:0",
+                        "-F",
+                        "#{pane_id}:#{pane_index}:#{pane_active}:#{pane_current_path}",
+                    ])
+            })
+            .returning(|_| {
+                Ok(mock_success(
+                    "%0:0:1:/home/user\n%1:1:0:/home/user/project\n",
+                ))
+            });
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let panes = orchestrator.list_panes("my-session:0").unwrap();
+
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].pane_id, "%0");
+        assert_eq!(panes[0].index, 0);
+        assert!(panes[0].active);
+        assert_eq!(panes[0].current_path, "/home/user");
+        assert_eq!(panes[1].pane_id, "%1");
+        assert_eq!(panes[1].index, 1);
+        assert!(!panes[1].active);
+        assert_eq!(panes[1].current_path, "/home/user/project");
+    }
+
+    #[test]
+    fn test_list_panes_handles_path_with_colon() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("%0:0:1:/path:with:colons\n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let panes = orchestrator.list_panes("my-session:0").unwrap();
+
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].pane_id, "%0");
+        assert_eq!(panes[0].current_path, "/path:with:colons");
+    }
+
+    #[test]
+    fn test_kill_pane() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["kill-pane", "-t", "my-session:0.1"]))
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator.kill_pane("my-session:0.1").unwrap();
+    }
+
+    #[test]
+    fn test_kill_pane_failure() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_failure("pane not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.kill_pane("invalid-pane");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_pane_to_dashboard_no_existing_dashboard() {
+        let mut mock = MockTmuxExecutor::new();
+
+        // has_session returns false - dashboard doesn't exist
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .returning(|_| Ok(mock_failure("session not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let added = orchestrator
+            .add_pane_to_dashboard("my-project", "my-project__feature")
+            .unwrap();
+        assert!(!added);
+    }
+
+    #[test]
+    fn test_add_pane_to_dashboard_success() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns true
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // split_window_horizontal with command
+        mock.expect_execute()
+            .withf(|args| {
+                args[0] == "split-window"
+                    && args[1] == "-v"
+                    && args[2] == "-t"
+                    && args[3] == "my-project__dashboard"
+                    && args[4].contains("tmux attach -t my-project__feature")
+            })
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // select_layout
+        mock.expect_execute()
+            .withf(|args| {
+                *args == to_strings(&["select-layout", "-t", "my-project__dashboard", "tiled"])
+            })
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let added = orchestrator
+            .add_pane_to_dashboard("my-project", "my-project__feature")
+            .unwrap();
+        assert!(added);
+    }
+
+    #[test]
+    fn test_sync_dashboard_no_existing_dashboard() {
+        let mut mock = MockTmuxExecutor::new();
+
+        // has_session returns false - dashboard doesn't exist
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .returning(|_| Ok(mock_failure("session not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let synced = orchestrator
+            .sync_dashboard(
+                "my-project",
+                &[("my-project__main".to_string(), "/path/main".to_string())],
+            )
+            .unwrap();
+        assert!(!synced);
+    }
+
+    #[test]
+    fn test_dashboard_session_name() {
+        assert_eq!(
+            TmuxOrchestrator::<RealTmuxExecutor>::dashboard_session_name("my-project"),
+            "my-project__dashboard"
+        );
+        assert_eq!(
+            TmuxOrchestrator::<RealTmuxExecutor>::dashboard_session_name("project-with-dashes"),
+            "project-with-dashes__dashboard"
+        );
+    }
+
+    #[test]
+    fn test_list_panes_failure() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_failure("session not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.list_panes("invalid-session:0");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_list_panes_empty() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute().returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let panes = orchestrator.list_panes("my-session:0").unwrap();
+        assert!(panes.is_empty());
+    }
+
+    #[test]
+    fn test_add_pane_to_dashboard_split_fails() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns true
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // split_window_horizontal with command fails
+        mock.expect_execute()
+            .withf(|args| {
+                args[0] == "split-window"
+                    && args[1] == "-v"
+                    && args[2] == "-t"
+                    && args[3] == "my-project__dashboard"
+                    && args[4].contains("tmux attach -t my-project__feature")
+            })
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("no space for new pane")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.add_pane_to_dashboard("my-project", "my-project__feature");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sync_dashboard_success() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns true (dashboard exists)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // kill_session
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["kill-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // has_session for create_dashboard_session (should return false after kill)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // new_session
+        mock.expect_execute()
+            .withf(|args| {
+                args[0] == "new-session" && args.contains(&"my-project__dashboard".to_string())
+            })
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // set_option (aggressive-resize)
+        mock.expect_execute()
+            .withf(|args| args[0] == "set-option")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (input)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3].contains("main"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (enter)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3] == "C-m")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // select_layout
+        mock.expect_execute()
+            .withf(|args| args[0] == "select-layout")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let synced = orchestrator
+            .sync_dashboard(
+                "my-project",
+                &[("my-project__main".to_string(), "/path/main".to_string())],
+            )
+            .unwrap();
+        assert!(synced);
+    }
+
+    #[test]
+    fn test_sync_dashboard_kill_fails() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns true
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // kill_session fails
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["kill-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("session not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.sync_dashboard(
+            "my-project",
+            &[("my-project__main".to_string(), "/path/main".to_string())],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_dashboard_session_already_exists() {
+        let mut mock = MockTmuxExecutor::new();
+
+        // has_session returns true (dashboard already exists)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let created = orchestrator
+            .create_dashboard_session(
+                "my-project",
+                &[("my-project__main".to_string(), "/path/main".to_string())],
+            )
+            .unwrap();
+        assert!(!created);
+    }
+
+    #[test]
+    fn test_create_dashboard_session_multiple_worktrees() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns false (dashboard doesn't exist)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // new_session
+        mock.expect_execute()
+            .withf(|args| args[0] == "new-session")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // set_option
+        mock.expect_execute()
+            .withf(|args| args[0] == "set-option")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (input)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3].contains("main"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (enter)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3] == "C-m")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // split_window for second pane with command
+        mock.expect_execute()
+            .withf(|args| args[0] == "split-window" && args[4].contains("feature"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // select_layout
+        mock.expect_execute()
+            .withf(|args| args[0] == "select-layout" && args[3] == "tiled")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let created = orchestrator
+            .create_dashboard_session(
+                "my-project",
+                &[
+                    ("my-project__main".to_string(), "/path/main".to_string()),
+                    (
+                        "my-project__feature".to_string(),
+                        "/path/feature".to_string(),
+                    ),
+                ],
+            )
+            .unwrap();
+        assert!(created);
+    }
+
+    #[test]
+    fn test_list_panes_invalid_format_skipped() {
+        let mut mock = MockTmuxExecutor::new();
+        // Return some invalid lines mixed with valid ones (format: pane_id:index:active:path)
+        mock.expect_execute().returning(|_| {
+            Ok(mock_success(
+                "invalid\n%0:0:1:/home\nincomplete:data:only\n%1:1:0:/work\n",
+            ))
+        });
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let panes = orchestrator.list_panes("my-session:0").unwrap();
+
+        // Should only include valid entries (4+ parts)
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].pane_id, "%0");
+        assert_eq!(panes[0].index, 0);
+        assert_eq!(panes[1].pane_id, "%1");
+        assert_eq!(panes[1].index, 1);
+    }
+
+    // ========================================================================
+    // TDD: respawn_pane tests
+    // ========================================================================
+
+    /// Test: respawn_pane runs a command in the specified pane.
+    #[test]
+    fn test_respawn_pane() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args == to_strings(&["respawn-pane", "-k", "-t", "my-session:0.1", "echo hello"])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .respawn_pane("my-session:0.1", "echo hello")
+            .unwrap();
+    }
+
+    /// Test: respawn_pane failure returns error.
+    #[test]
+    fn test_respawn_pane_failure() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_failure("pane not found")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator.respawn_pane("invalid-pane", "echo hello");
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // TDD: ensure_dashboard_session tests
+    // ========================================================================
+
+    /// Test: ensure_dashboard_session creates new dashboard when it doesn't exist.
+    #[test]
+    fn test_ensure_dashboard_session_creates_new() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session from ensure_dashboard_session returns false (no kill needed)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // has_session from create_dashboard_session also returns false
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // new_session
+        mock.expect_execute()
+            .withf(|args| args[0] == "new-session")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // set_option
+        mock.expect_execute()
+            .withf(|args| args[0] == "set-option")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (input)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3].contains("main"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (enter)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3] == "C-m")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // select_layout
+        mock.expect_execute()
+            .withf(|args| args[0] == "select-layout")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .ensure_dashboard_session(
+                "my-project",
+                &[("my-project__main".to_string(), "/path/main".to_string())],
+            )
+            .unwrap();
+    }
+
+    /// Test: ensure_dashboard_session recreates existing dashboard (kill + create).
+    #[test]
+    fn test_ensure_dashboard_session_refreshes_existing() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns true (dashboard already exists)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // kill_session to remove old dashboard
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["kill-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // has_session from create_dashboard_session returns false (just killed)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // new_session
+        mock.expect_execute()
+            .withf(|args| args[0] == "new-session")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // set_option
+        mock.expect_execute()
+            .withf(|args| args[0] == "set-option")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (input)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3].contains("main"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (enter)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3] == "C-m")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // split_window for second pane with command
+        mock.expect_execute()
+            .withf(|args| args[0] == "split-window" && args[4].contains("feature"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // select_layout
+        mock.expect_execute()
+            .withf(|args| args[0] == "select-layout")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .ensure_dashboard_session(
+                "my-project",
+                &[
+                    ("my-project__main".to_string(), "/path/main".to_string()),
+                    (
+                        "my-project__feature".to_string(),
+                        "/path/feature".to_string(),
+                    ),
+                ],
+            )
+            .unwrap();
+    }
+
+    /// Test: ensure_dashboard_session handles worktrees increasing (recreates dashboard).
+    #[test]
+    fn test_ensure_dashboard_session_adds_missing_panes() {
+        use mockall::Sequence;
+
+        let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // has_session returns true (dashboard exists with fewer panes)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // kill_session to remove old dashboard
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["kill-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // has_session from create_dashboard_session returns false
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-project__dashboard"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_failure("not found")));
+
+        // new_session
+        mock.expect_execute()
+            .withf(|args| args[0] == "new-session")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // set_option
+        mock.expect_execute()
+            .withf(|args| args[0] == "set-option")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (input)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3].contains("main"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for first pane (enter)
+        mock.expect_execute()
+            .withf(|args| args[0] == "send-keys" && args[3] == "C-m")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // split_window for second pane with command
+        mock.expect_execute()
+            .withf(|args| args[0] == "split-window" && args[4].contains("feature"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // select_layout to re-tile
+        mock.expect_execute()
+            .withf(|args| args[0] == "select-layout")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .ensure_dashboard_session(
+                "my-project",
+                &[
+                    ("my-project__main".to_string(), "/path/main".to_string()),
+                    (
+                        "my-project__feature".to_string(),
+                        "/path/feature".to_string(),
+                    ),
+                ],
+            )
             .unwrap();
     }
 }

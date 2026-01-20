@@ -264,12 +264,22 @@ where
 
                     match output {
                         Ok(output) if output.status.success() => {
+                            // Refresh project list
                             if let Ok(projects) = self
                                 .discovery
                                 .discover(&self.state.projects_root, &self.config.ignored_dirs)
                             {
                                 self.state.set_projects(projects);
                             }
+
+                            // Add pane to dashboard if it exists
+                            let session_id = format!("{}__{}", project.name, branch_name);
+                            let worktree_path_str = worktree_path.to_string_lossy();
+                            let _ = self
+                                .tmux
+                                .ensure_session(&session_id, Some(&worktree_path_str));
+                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
                             self.state
                                 .set_success_message(format!("Created worktree '{branch_name}'"));
                         }
@@ -307,6 +317,8 @@ where
 
             Action::DeleteTask(branch_name) => {
                 if let Some(project) = self.state.selected_project().cloned() {
+                    let project_name = project.name.clone();
+
                     // Kill tmux session if it exists
                     let session_id = format!("{}__{}", project.name, branch_name);
                     if self.tmux.has_session(&session_id).unwrap_or(false) {
@@ -358,6 +370,27 @@ where
                                 .discovery
                                 .discover(&self.state.projects_root, &self.config.ignored_dirs)
                             {
+                                // Sync dashboard with updated worktrees before moving projects
+                                if let Some(updated_project) =
+                                    projects.iter().find(|p| p.name == project_name)
+                                {
+                                    let worktree_sessions: Vec<(String, String)> = updated_project
+                                        .worktrees
+                                        .iter()
+                                        .filter_map(|wt| {
+                                            wt.session_id(&project_name).map(|id| {
+                                                (id, wt.path.to_string_lossy().to_string())
+                                            })
+                                        })
+                                        .collect();
+
+                                    if !worktree_sessions.is_empty() {
+                                        let _ = self
+                                            .tmux
+                                            .sync_dashboard(&project_name, &worktree_sessions);
+                                    }
+                                }
+
                                 self.state.set_projects(projects);
                             }
                         }
@@ -384,6 +417,7 @@ where
 
     /// Update the pane preview from tmux and parse agent status.
     pub fn update_pane_preview(&mut self) {
+        // Try worktree session first (when a worktree is selected)
         if let (Some(project), Some(worktree)) = (
             self.state.selected_project(),
             self.state.selected_worktree(),
@@ -409,6 +443,45 @@ where
             self.state.set_pane_preview(content);
             return;
         }
+
+        // Try dashboard session (when project header is selected, no worktree)
+        if let Some(project) = self.state.selected_project()
+            && self.state.selected_worktree_idx().is_none()
+        {
+            let dashboard_session = TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
+            if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
+                // Capture individual panes for split preview
+                if let Ok(panes) = self.tmux.list_panes(&dashboard_session) {
+                    // Get branch names from worktrees (panes are created in worktree order)
+                    let branch_names: Vec<String> = project
+                        .worktrees
+                        .iter()
+                        .filter_map(|wt| wt.branch.clone())
+                        .collect();
+
+                    let mut pane_contents: Vec<(String, String)> = Vec::new();
+                    for (idx, pane) in panes.iter().enumerate() {
+                        // Use pane_id for reliable targeting across sessions
+                        if let Ok(content) = self.tmux.capture_pane(&pane.pane_id, 20) {
+                            let branch_name = branch_names
+                                .get(idx)
+                                .cloned()
+                                .unwrap_or_else(|| format!("Pane {}", idx + 1));
+                            pane_contents.push((branch_name, content));
+                        }
+                    }
+                    self.state.set_dashboard_panes(pane_contents);
+
+                    // Also set combined preview for fallback
+                    if let Ok(content) = self.tmux.capture_all_panes(&dashboard_session, 15) {
+                        self.state.set_pane_preview(content);
+                    }
+                    return;
+                }
+            }
+        }
+
+        self.state.clear_dashboard_panes();
         self.state.set_pane_preview(String::new());
     }
 }
