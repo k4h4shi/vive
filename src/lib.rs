@@ -6,6 +6,7 @@
 pub mod config;
 pub mod discovery;
 pub mod event;
+pub mod mcp;
 pub mod monitor;
 pub mod parser;
 mod process;
