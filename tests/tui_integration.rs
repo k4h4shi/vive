@@ -1048,6 +1048,100 @@ fn test_preview_scrolls_to_bottom() {
     assert_buffer_not_contains(buffer, "FIRST_LINE_MARKER_OLD");
 }
 
+/// Test: Preview hides input cursor/prompt lines.
+/// Lines like "> " or empty prompt lines at the end should not be displayed.
+#[test]
+fn test_preview_hides_input_cursor_line() {
+    let projects = create_test_projects();
+
+    // Content with an input prompt line at the end (like Claude Code's "> ")
+    let content = "Analyzing your code...\nDone!\n> ";
+
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![("project-alpha__main", content)],
+    );
+
+    app.init().unwrap();
+    app.update_pane_preview();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+
+    // The actual content should be visible
+    assert_buffer_contains(buffer, "Analyzing your code");
+    assert_buffer_contains(buffer, "Done!");
+
+    // The input prompt "> " should NOT be visible
+    // Note: We check for "> " with space to avoid matching other content
+    assert_buffer_not_contains(buffer, ">                    ");
+}
+
+/// Test: Preview hides various input prompt patterns.
+#[test]
+fn test_preview_hides_various_prompt_patterns() {
+    let projects = create_test_projects();
+
+    // Test different prompt patterns
+    let test_cases = vec![
+        ("Output line 1\n> ", "Output line 1"),                    // Simple prompt
+        ("Output line 2\n>", "Output line 2"),                     // Prompt without space
+        ("Output line 3\n", "Output line 3"),                      // Trailing newline only
+    ];
+
+    for (content, expected) in test_cases {
+        let mut app = create_test_app_with_tmux(
+            projects.clone(),
+            vec![],
+            vec![("project-alpha__main", content)],
+        );
+
+        app.init().unwrap();
+        app.update_pane_preview();
+
+        // The stored preview should have trailing prompt lines removed
+        let preview = &app.state().pane_preview;
+        assert!(
+            !preview.ends_with("> ") && !preview.ends_with(">") && !preview.ends_with("\n\n"),
+            "Preview should not end with prompt patterns. Got: {:?}",
+            preview
+        );
+        assert!(
+            preview.contains(expected),
+            "Preview should contain the actual content"
+        );
+    }
+}
+
+/// Test: Preview hides input box frame (borders around input area).
+#[test]
+fn test_preview_hides_input_box_frame() {
+    let projects = create_test_projects();
+
+    // Content with input box frame at the end (Claude Code style)
+    let content = "Analyzing code...\nDone!\n╭──────────────────────────────────────────────────────────╮\n│>                                                         │\n╰──────────────────────────────────────────────────────────╯";
+
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![("project-alpha__main", content)],
+    );
+
+    app.init().unwrap();
+    app.update_pane_preview();
+
+    let preview = &app.state().pane_preview;
+
+    // The actual content should be present
+    assert!(preview.contains("Analyzing code"), "Should contain main content");
+    assert!(preview.contains("Done!"), "Should contain main content");
+
+    // The input box frame should be removed
+    assert!(!preview.contains("╭"), "Should not contain top border");
+    assert!(!preview.contains("╰"), "Should not contain bottom border");
+}
+
 /// Test: Input mode typing updates input buffer.
 #[test]
 fn test_input_mode_typing_updates_buffer() {

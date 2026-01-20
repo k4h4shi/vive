@@ -376,26 +376,54 @@ where
 
             self.state.set_status(session_id.clone(), final_status);
 
-            self.state.set_pane_preview(content);
+            // Filter out trailing input prompt lines before displaying
+            let filtered_content = strip_trailing_prompt_lines(&content);
+            self.state.set_pane_preview(filtered_content);
             return;
         }
         self.state.set_pane_preview(String::new());
     }
+}
 
-    /// Run the main application loop.
-    pub fn run(&mut self) -> Result<()> {
-        self.init()?;
+/// Strip trailing lines that are input prompts, input box frames, or empty.
+///
+/// This removes lines like:
+/// - "> ", ">" (input prompts)
+/// - Empty/whitespace-only lines
+/// - Input box frame characters (╭, ╰, │, ┌, └, etc.)
+///
+/// from the end of the content so they don't clutter the preview.
+fn strip_trailing_prompt_lines(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
 
-        loop {
-            self.render()?;
+    // Find the last line that has meaningful content
+    let last_meaningful = lines.iter().rposition(|line| {
+        let trimmed = line.trim();
+        // Keep lines that are not empty and not just a prompt or input box frame
+        !trimmed.is_empty()
+            && trimmed != ">"
+            && trimmed != "> "
+            && !is_input_box_line(trimmed)
+    });
 
-            if !self.tick(Duration::from_millis(100))? {
-                break;
-            }
-        }
-
-        Ok(())
+    match last_meaningful {
+        Some(idx) => lines[..=idx].join("\n"),
+        None => String::new(), // All lines are prompts or empty
     }
+}
+
+/// Check if a line is part of an input box frame.
+///
+/// Input boxes typically use box-drawing characters like:
+/// - ╭, ╮, ╰, ╯ (rounded corners)
+/// - ┌, ┐, └, ┘ (square corners)
+/// - │, ─ (sides)
+fn is_input_box_line(line: &str) -> bool {
+    let first_char = line.chars().next();
+    matches!(
+        first_char,
+        Some('╭' | '╰' | '╮' | '╯' | '┌' | '└' | '┐' | '┘' | '│' | '─')
+    )
 }
 
 /// Type alias for the standard production App.
