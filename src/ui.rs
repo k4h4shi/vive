@@ -613,9 +613,17 @@ fn render_issue_picker_modal(
                 };
 
                 // Truncate title if too long
+                // Use saturating_sub to prevent underflow on narrow terminals
                 let max_title_len = (modal_width as usize).saturating_sub(12);
-                let title = if issue.title.chars().count() > max_title_len {
-                    let truncated: String = issue.title.chars().take(max_title_len - 3).collect();
+                let title = if max_title_len <= 3 {
+                    // Too narrow to show any title, just show ellipsis
+                    "...".to_string()
+                } else if issue.title.chars().count() > max_title_len {
+                    let truncated: String = issue
+                        .title
+                        .chars()
+                        .take(max_title_len.saturating_sub(3))
+                        .collect();
                     format!("{truncated}...")
                 } else {
                     issue.title.clone()
@@ -871,5 +879,98 @@ mod tests {
     fn test_idle_status_has_muted_color() {
         let (_, color) = get_status_icon_and_color(&AgentStatus::Idle);
         assert_eq!(color, Color::DarkGray);
+    }
+
+    // ========== Title Truncation Tests (Issue #55 / Codex P2 Fix) ==========
+
+    /// Helper function to truncate issue title (mirrors logic in render_issue_picker_modal)
+    fn truncate_issue_title(title: &str, modal_width: u16) -> String {
+        let max_title_len = (modal_width as usize).saturating_sub(12);
+        if max_title_len <= 3 {
+            "...".to_string()
+        } else if title.chars().count() > max_title_len {
+            let truncated: String = title
+                .chars()
+                .take(max_title_len.saturating_sub(3))
+                .collect();
+            format!("{truncated}...")
+        } else {
+            title.to_string()
+        }
+    }
+
+    #[test]
+    fn test_title_truncation_normal_width() {
+        // Normal width (70 chars) - title fits
+        let title = "Short title";
+        let result = truncate_issue_title(title, 70);
+        assert_eq!(result, "Short title");
+    }
+
+    #[test]
+    fn test_title_truncation_long_title() {
+        // Normal width but long title - should truncate
+        let title = "This is a very long issue title that exceeds the maximum length allowed";
+        let result = truncate_issue_title(title, 50);
+        // max_title_len = 50 - 12 = 38, truncate at 38 - 3 = 35
+        assert!(result.ends_with("..."));
+        assert!(result.len() < title.len());
+    }
+
+    #[test]
+    fn test_title_truncation_narrow_width() {
+        // Very narrow width (15 chars) - should not underflow
+        let title = "Some title";
+        let result = truncate_issue_title(title, 15);
+        // max_title_len = 15 - 12 = 3, which is <= 3, so returns "..."
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_title_truncation_minimal_width() {
+        // Minimal width (10 chars) - should not underflow
+        let title = "Test";
+        let result = truncate_issue_title(title, 10);
+        // max_title_len = 10 - 12 = 0 (saturating), which is <= 3
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_title_truncation_zero_width() {
+        // Zero width - should not panic
+        let title = "Test";
+        let result = truncate_issue_title(title, 0);
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_title_truncation_exact_boundary() {
+        // Width where max_title_len is exactly 4 (just above the guard)
+        // modal_width = 16, max_title_len = 16 - 12 = 4
+        let title = "ABCD"; // 4 chars, exactly max_title_len
+        let result = truncate_issue_title(title, 16);
+        assert_eq!(result, "ABCD"); // No truncation needed
+
+        // 5 chars with max_title_len = 4 should truncate
+        let title = "ABCDE";
+        let result = truncate_issue_title(title, 16);
+        // truncate at 4 - 3 = 1, so "A..."
+        assert_eq!(result, "A...");
+    }
+
+    #[test]
+    fn test_title_truncation_utf8() {
+        // UTF-8 characters (Japanese)
+        let title = "日本語のイシュータイトル";
+        let result = truncate_issue_title(title, 50);
+        // max_title_len = 38, title is 12 chars, no truncation
+        assert_eq!(result, "日本語のイシュータイトル");
+
+        // With narrow width forcing truncation (width = 22 -> max_title_len = 10)
+        // Title has 12 chars, which exceeds 10, so truncation happens
+        let result = truncate_issue_title(title, 22);
+        // max_title_len = 10, truncate at 10 - 3 = 7, so "日本語のイシュ..."
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 10); // 7 chars + "..."
     }
 }
