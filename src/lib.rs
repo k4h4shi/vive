@@ -245,7 +245,9 @@ where
                             // Add pane to dashboard if it exists
                             let session_id = format!("{}__{}", project.name, branch_name);
                             let worktree_path_str = worktree_path.to_string_lossy();
-                            let _ = self.tmux.ensure_session(&session_id, Some(&worktree_path_str));
+                            let _ = self
+                                .tmux
+                                .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
 
                             self.state
@@ -416,8 +418,7 @@ where
         if let Some(project) = self.state.selected_project()
             && self.state.selected_worktree_idx().is_none()
         {
-            let dashboard_session =
-                TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
+            let dashboard_session = TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
             if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
                 // Capture individual panes for split preview
                 if let Ok(panes) = self.tmux.list_panes(&dashboard_session) {
@@ -430,8 +431,8 @@ where
 
                     let mut pane_contents: Vec<(String, String)> = Vec::new();
                     for (idx, pane) in panes.iter().enumerate() {
-                        let pane_target = format!("{dashboard_session}.{}", pane.index);
-                        if let Ok(content) = self.tmux.capture_pane(&pane_target, 20) {
+                        // Use pane_id for reliable targeting across sessions
+                        if let Ok(content) = self.tmux.capture_pane(&pane.pane_id, 20) {
                             let branch_name = branch_names
                                 .get(idx)
                                 .cloned()

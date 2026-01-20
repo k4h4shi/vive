@@ -36,6 +36,8 @@ pub struct TmuxPane {
     pub index: u32,
     pub active: bool,
     pub current_path: String,
+    /// Unique pane ID (e.g., "%0", "%1") for reliable targeting.
+    pub pane_id: String,
 }
 
 /// Information about a pane's layout position and size.
@@ -581,8 +583,8 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
         let mut combined = String::new();
         for (idx, pane) in panes.iter().enumerate() {
-            let pane_target = format!("{session}.{}", pane.index);
-            if let Ok(content) = self.capture_pane(&pane_target, lines_per_pane) {
+            // Use pane_id for reliable targeting across sessions
+            if let Ok(content) = self.capture_pane(&pane.pane_id, lines_per_pane) {
                 if idx > 0 {
                     combined.push_str("\n─────────────────────────────────────────\n");
                 }
@@ -675,10 +677,18 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
                     self.split_window_vertical(&target, Some(directories[1]), None)?;
                 }
                 if directories.len() >= 3 {
-                    self.split_window_horizontal(&format!("{target}.0"), Some(directories[2]), None)?;
+                    self.split_window_horizontal(
+                        &format!("{target}.0"),
+                        Some(directories[2]),
+                        None,
+                    )?;
                 }
                 if directories.len() >= 4 {
-                    self.split_window_horizontal(&format!("{target}.1"), Some(directories[3]), None)?;
+                    self.split_window_horizontal(
+                        &format!("{target}.1"),
+                        Some(directories[3]),
+                        None,
+                    )?;
                 }
                 self.select_layout(&target, "tiled")?;
             }
@@ -837,7 +847,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             "-t",
             target,
             "-F",
-            "#{pane_index}:#{pane_active}:#{pane_current_path}",
+            "#{pane_id}:#{pane_index}:#{pane_active}:#{pane_current_path}",
         ])?;
 
         if !result.success {
@@ -853,11 +863,12 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             .lines()
             .filter_map(|line| {
                 let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 3 {
+                if parts.len() >= 4 {
                     Some(TmuxPane {
-                        index: parts[0].parse().unwrap_or(0),
-                        active: parts[1] == "1",
-                        current_path: parts[2..].join(":"), // Handle paths with colons
+                        pane_id: parts[0].to_string(),
+                        index: parts[1].parse().unwrap_or(0),
+                        active: parts[2] == "1",
+                        current_path: parts[3..].join(":"), // Handle paths with colons
                     })
                 } else {
                     None
@@ -873,11 +884,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         let result = self.executor.execute(args!["kill-pane", "-t", target])?;
 
         if !result.success {
-            anyhow::bail!(
-                "Failed to kill pane '{}': {}",
-                target,
-                result.stderr.trim()
-            );
+            anyhow::bail!("Failed to kill pane '{}': {}", target, result.stderr.trim());
         }
 
         Ok(())
@@ -1615,18 +1622,24 @@ mod tests {
                         "-t",
                         "my-session:0",
                         "-F",
-                        "#{pane_index}:#{pane_active}:#{pane_current_path}",
+                        "#{pane_id}:#{pane_index}:#{pane_active}:#{pane_current_path}",
                     ])
             })
-            .returning(|_| Ok(mock_success("0:1:/home/user\n1:0:/home/user/project\n")));
+            .returning(|_| {
+                Ok(mock_success(
+                    "%0:0:1:/home/user\n%1:1:0:/home/user/project\n",
+                ))
+            });
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let panes = orchestrator.list_panes("my-session:0").unwrap();
 
         assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].pane_id, "%0");
         assert_eq!(panes[0].index, 0);
         assert!(panes[0].active);
         assert_eq!(panes[0].current_path, "/home/user");
+        assert_eq!(panes[1].pane_id, "%1");
         assert_eq!(panes[1].index, 1);
         assert!(!panes[1].active);
         assert_eq!(panes[1].current_path, "/home/user/project");
@@ -1636,12 +1649,13 @@ mod tests {
     fn test_list_panes_handles_path_with_colon() {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
-            .returning(|_| Ok(mock_success("0:1:/path:with:colons\n")));
+            .returning(|_| Ok(mock_success("%0:0:1:/path:with:colons\n")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let panes = orchestrator.list_panes("my-session:0").unwrap();
 
         assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].pane_id, "%0");
         assert_eq!(panes[0].current_path, "/path:with:colons");
     }
 
@@ -2008,16 +2022,21 @@ mod tests {
     #[test]
     fn test_list_panes_invalid_format_skipped() {
         let mut mock = MockTmuxExecutor::new();
-        // Return some invalid lines mixed with valid ones
-        mock.expect_execute()
-            .returning(|_| Ok(mock_success("invalid\n0:1:/home\nincomplete:data\n1:0:/work\n")));
+        // Return some invalid lines mixed with valid ones (format: pane_id:index:active:path)
+        mock.expect_execute().returning(|_| {
+            Ok(mock_success(
+                "invalid\n%0:0:1:/home\nincomplete:data:only\n%1:1:0:/work\n",
+            ))
+        });
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let panes = orchestrator.list_panes("my-session:0").unwrap();
 
-        // Should only include valid entries
+        // Should only include valid entries (4+ parts)
         assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].pane_id, "%0");
         assert_eq!(panes[0].index, 0);
+        assert_eq!(panes[1].pane_id, "%1");
         assert_eq!(panes[1].index, 1);
     }
 
@@ -2031,14 +2050,7 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args
-                    == to_strings(&[
-                        "respawn-pane",
-                        "-k",
-                        "-t",
-                        "my-session:0.1",
-                        "echo hello",
-                    ])
+                *args == to_strings(&["respawn-pane", "-k", "-t", "my-session:0.1", "echo hello"])
             })
             .returning(|_| Ok(mock_success("")));
 
