@@ -242,6 +242,9 @@ pub struct AppState {
     favorites_modified: bool,
     /// Cache for Issue titles fetched from GitHub.
     issue_title_cache: IssueTitleCache,
+    /// Set of project names that are expanded (showing worktrees).
+    /// Projects not in this set are collapsed.
+    expanded_projects: HashSet<String>,
 }
 
 impl Default for AppState {
@@ -266,6 +269,7 @@ impl Default for AppState {
             favorites_load_failed: false,
             favorites_modified: false,
             issue_title_cache: IssueTitleCache::new(),
+            expanded_projects: HashSet::new(),
         }
     }
 }
@@ -302,7 +306,7 @@ impl AppState {
     /// The sidebar displays projects and worktrees in a flat list:
     /// - Favorites first, then separator (if both favorites and non-favorites exist), then non-favorites
     /// - Each project takes one row
-    /// - Each worktree takes one row under its project
+    /// - Worktrees only shown if project is expanded
     pub fn flat_sidebar_index(&self) -> Option<usize> {
         let proj_idx = self.selected_project_idx?;
         let wt_idx = self.selected_worktree_idx;
@@ -321,6 +325,7 @@ impl AppState {
 
         for project in sorted.iter() {
             let is_favorite = self.is_favorite(&project.name);
+            let is_expanded = self.is_expanded(&project.name);
 
             // Add separator before first non-favorite (if applicable)
             if has_separator && !is_favorite {
@@ -356,7 +361,10 @@ impl AppState {
 
             // Count this project's items
             flat_idx += 1; // project header
-            flat_idx += project.worktrees.len(); // worktrees
+            // Only count worktrees if project is expanded
+            if is_expanded {
+                flat_idx += project.worktrees.len();
+            }
         }
 
         None
@@ -411,8 +419,7 @@ impl AppState {
     ///
     /// Navigation order:
     /// - Project header (worktree_idx = None)
-    /// - First worktree (worktree_idx = Some(0))
-    /// - ... more worktrees ...
+    /// - If expanded: First worktree (worktree_idx = Some(0)), ... more worktrees ...
     /// - Next project header
     pub fn select_next(&mut self) {
         if self.projects.is_empty() {
@@ -440,14 +447,16 @@ impl AppState {
         };
 
         let current_project = sorted[sorted_idx];
+        let is_current_expanded = self.is_expanded(&current_project.name);
 
         match self.selected_worktree_idx {
             None => {
-                // Currently on project header, move to first worktree if any
-                if !current_project.worktrees.is_empty() {
+                // Currently on project header
+                // Only move to worktrees if project is expanded and has worktrees
+                if is_current_expanded && !current_project.worktrees.is_empty() {
                     self.selected_worktree_idx = Some(0);
                 } else if sorted_idx + 1 < sorted.len() {
-                    // No worktrees, move to next project header
+                    // Project collapsed or no worktrees, move to next project header
                     let next_name = sorted_names[sorted_idx + 1].to_string();
                     drop(sorted);
                     self.select_project_header_by_name(&next_name);
@@ -474,7 +483,7 @@ impl AppState {
     ///
     /// Navigation order (reverse):
     /// - From first worktree (worktree_idx = Some(0)) -> project header (worktree_idx = None)
-    /// - From project header -> previous project's last worktree
+    /// - From project header -> previous project's last worktree (if expanded) or header (if collapsed)
     pub fn select_prev(&mut self) {
         if self.projects.is_empty() {
             return;
@@ -482,16 +491,16 @@ impl AppState {
 
         // Collect sorted info upfront to avoid borrow issues
         let sorted = self.sorted_projects();
-        let sorted_info: Vec<(String, usize)> = sorted
+        let sorted_info: Vec<(String, usize, bool)> = sorted
             .iter()
-            .map(|p| (p.name.clone(), p.worktrees.len()))
+            .map(|p| (p.name.clone(), p.worktrees.len(), self.is_expanded(&p.name)))
             .collect();
         drop(sorted);
 
         // Find current position in sorted order
         let current_sorted_idx = if let Some(proj_idx) = self.selected_project_idx {
             let current_name = &self.projects[proj_idx].name;
-            sorted_info.iter().position(|(n, _)| n == current_name)
+            sorted_info.iter().position(|(n, _, _)| n == current_name)
         } else {
             None
         };
@@ -502,15 +511,16 @@ impl AppState {
 
         match self.selected_worktree_idx {
             None => {
-                // Currently on project header, move to previous project's last worktree
+                // Currently on project header, move to previous project
                 if sorted_idx > 0 {
-                    let (prev_name, prev_worktrees_len) = &sorted_info[sorted_idx - 1];
+                    let (prev_name, prev_worktrees_len, prev_expanded) =
+                        &sorted_info[sorted_idx - 1];
                     self.select_project_header_by_name(prev_name);
-                    // Move to last worktree of previous project (if any)
-                    self.selected_worktree_idx = if *prev_worktrees_len == 0 {
-                        None
-                    } else {
+                    // Move to last worktree of previous project only if it's expanded
+                    self.selected_worktree_idx = if *prev_expanded && *prev_worktrees_len > 0 {
                         Some(*prev_worktrees_len - 1)
+                    } else {
+                        None // Stay on header if collapsed or no worktrees
                     };
                 }
                 // Otherwise, stay at current position (at the beginning)
@@ -902,11 +912,16 @@ impl AppState {
 
     /// Toggle the favorite status of a project by name.
     /// After toggling, selection is updated to the first project in sorted order.
+    /// Also updates expanded state: favorites are expanded, non-favorites are collapsed.
     pub fn toggle_favorite(&mut self, project_name: &str) {
         if self.favorites.contains(project_name) {
             self.favorites.remove(project_name);
+            // When removing from favorites, also collapse
+            self.expanded_projects.remove(project_name);
         } else {
             self.favorites.insert(project_name.to_string());
+            // When adding to favorites, also expand
+            self.expanded_projects.insert(project_name.to_string());
         }
         // Mark that user has explicitly modified favorites
         self.favorites_modified = true;
@@ -963,6 +978,29 @@ impl AppState {
     /// Check if favorites were modified by the user during this session.
     pub fn favorites_modified(&self) -> bool {
         self.favorites_modified
+    }
+
+    /// Check if a project is expanded (showing worktrees).
+    /// Projects in `expanded_projects` are shown expanded; others are collapsed.
+    pub fn is_expanded(&self, project_name: &str) -> bool {
+        self.expanded_projects.contains(project_name)
+    }
+
+    /// Toggle the expanded state of a project by name.
+    pub fn toggle_expanded(&mut self, project_name: &str) {
+        if self.expanded_projects.contains(project_name) {
+            self.expanded_projects.remove(project_name);
+        } else {
+            self.expanded_projects.insert(project_name.to_string());
+        }
+    }
+
+    /// Toggle the expanded state of the currently selected project.
+    pub fn toggle_expanded_selected(&mut self) {
+        if let Some(project) = self.selected_project() {
+            let name = project.name.clone();
+            self.toggle_expanded(&name);
+        }
     }
 
     /// Get a cached Issue title for a worktree.
@@ -1086,6 +1124,9 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Expand project-a to allow worktree navigation
+        state.toggle_expanded("project-a");
+
         // Starts at project-a header (worktree_idx = None)
         assert_eq!(state.selected_worktree_idx(), None);
 
@@ -1100,6 +1141,9 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Expand project-a to allow worktree navigation
+        state.toggle_expanded("project-a");
+
         state.select_next(); // project-a, worktree 0
         state.select_next(); // project-a, worktree 1
 
@@ -1111,6 +1155,9 @@ mod tests {
     fn test_select_next_moves_to_next_project_header() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
+
+        // Expand project-a to allow worktree navigation
+        state.toggle_expanded("project-a");
 
         // Navigate: project-a header -> worktree 0 -> worktree 1 -> project-b header
         state.select_next(); // project-a, worktree 0
@@ -1127,6 +1174,9 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Expand project-a to allow worktree navigation
+        state.toggle_expanded("project-a");
+
         state.select_next(); // project-a, worktree 0
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
@@ -1138,6 +1188,9 @@ mod tests {
     fn test_select_prev_within_project() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
+
+        // Expand project-a to allow worktree navigation
+        state.toggle_expanded("project-a");
 
         state.select_next(); // project-a, worktree 0
         state.select_next(); // project-a, worktree 1
@@ -1151,6 +1204,10 @@ mod tests {
     fn test_select_prev_moves_to_prev_project_last_worktree() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
+
+        // Expand both projects to allow worktree navigation
+        state.toggle_expanded("project-a");
+        state.toggle_expanded("project-b");
 
         // Navigate to project-b header
         state.select_next(); // project-a, worktree 0
@@ -1172,6 +1229,9 @@ mod tests {
 
         // On project header, no session id
         assert_eq!(state.selected_session_id(), None);
+
+        // Expand project-a to allow worktree navigation
+        state.toggle_expanded("project-a");
 
         state.select_next(); // Move to first worktree
         assert_eq!(
@@ -1415,8 +1475,12 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Expand both projects to allow worktree navigation
+        state.toggle_expanded("project-a");
+        state.toggle_expanded("project-b");
+
         // Initial state: project-a header selected
-        // Structure:
+        // Structure (both expanded):
         // 0: project-a (project header) <- selected
         // 1:   main (worktree 0)
         // 2:   feature-1 (worktree 1)
@@ -1441,6 +1505,10 @@ mod tests {
     fn test_sidebar_list_state_syncs_with_selection() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
+
+        // Expand both projects to allow worktree navigation
+        state.toggle_expanded("project-a");
+        state.toggle_expanded("project-b");
 
         // ListState should sync with flat index
         // Starts at project-a header
@@ -1596,8 +1664,10 @@ mod tests {
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // Mark project-b as favorite
+        // Mark project-b as favorite (this also expands it)
         state.toggle_favorite("project-b");
+        // Also expand project-a for this test
+        state.toggle_expanded("project-a");
 
         // After toggle, selection moves to first in sorted order (project-b header)
         assert!(state.has_favorites());
@@ -1605,7 +1675,7 @@ mod tests {
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // Sorted order with separator:
+        // Sorted order with separator (both expanded):
         // 0: project-b (favorite, project header) <- selected
         // 1:   main (worktree)
         // 2: ──────── (separator)
@@ -1641,25 +1711,35 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Mark project-b as favorite
-        // Sorted order: project-b (favorite), project-a (non-favorite)
+        // Mark project-b as favorite (this also expands it)
+        // Sorted order: project-b (favorite, expanded), project-a (non-favorite, collapsed)
         state.toggle_favorite("project-b");
 
         // Initial selection should be first in sorted order (project-b header)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), None); // Project header
+        assert!(state.is_expanded("project-b")); // Favorite is expanded
+        assert!(!state.is_expanded("project-a")); // Non-favorite is collapsed
 
         // Navigate: project-b header -> worktree 0 -> project-a header
-        state.select_next(); // project-b, worktree 0
+        state.select_next(); // project-b, worktree 0 (expanded, so goes to worktree)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        state.select_next(); // project-a header
+        state.select_next(); // project-a header (project-b has only 1 worktree)
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // Navigate to project-a worktrees
-        state.select_next(); // project-a, worktree 0
+        // project-a is collapsed, so select_next stays at project-a header (last item)
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None); // Still on header
+
+        // Now expand project-a to navigate into worktrees
+        state.toggle_expanded("project-a");
+        assert!(state.is_expanded("project-a"));
+
+        state.select_next(); // Now goes to project-a, worktree 0
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
@@ -1676,7 +1756,7 @@ mod tests {
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        state.select_prev(); // project-b, last worktree (worktree 0)
+        state.select_prev(); // project-b, last worktree (worktree 0, since project-b is expanded)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
     }
@@ -2374,5 +2454,229 @@ mod tests {
         state.issue_picker_filter_char('k');
         assert_eq!(state.filtered_issues().len(), 1);
         assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
+    }
+
+    // ========== Tests for project expand/collapse feature ==========
+
+    #[test]
+    fn test_is_expanded_default_for_favorite() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+        state.toggle_favorite("project-a");
+
+        // Favorite projects should be expanded by default
+        assert!(state.is_expanded("project-a"));
+    }
+
+    #[test]
+    fn test_is_expanded_default_for_non_favorite() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Non-favorite projects should be collapsed by default
+        assert!(!state.is_expanded("project-a"));
+        assert!(!state.is_expanded("project-b"));
+    }
+
+    #[test]
+    fn test_toggle_expanded() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Start collapsed (non-favorite)
+        assert!(!state.is_expanded("project-a"));
+
+        // Toggle to expand
+        state.toggle_expanded("project-a");
+        assert!(state.is_expanded("project-a"));
+
+        // Toggle to collapse
+        state.toggle_expanded("project-a");
+        assert!(!state.is_expanded("project-a"));
+    }
+
+    #[test]
+    fn test_toggle_expanded_selected_project() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Select project-a header
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+
+        // Should be collapsed initially (non-favorite)
+        assert!(!state.is_expanded("project-a"));
+
+        // Toggle expanded for selected project
+        state.toggle_expanded_selected();
+        assert!(state.is_expanded("project-a"));
+    }
+
+    #[test]
+    fn test_toggle_favorite_updates_expanded_state() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially collapsed (non-favorite)
+        assert!(!state.is_expanded("project-a"));
+
+        // Toggle to favorite - should expand
+        state.toggle_favorite("project-a");
+        assert!(state.is_expanded("project-a"));
+
+        // Toggle off favorite - should collapse
+        state.toggle_favorite("project-a");
+        assert!(!state.is_expanded("project-a"));
+    }
+
+    #[test]
+    fn test_expanded_state_preserved_across_favorites() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Manually expand a non-favorite
+        state.toggle_expanded("project-a");
+        assert!(state.is_expanded("project-a"));
+
+        // Toggle favorite on
+        state.toggle_favorite("project-a");
+        // Should still be expanded (favorite default is expanded anyway)
+        assert!(state.is_expanded("project-a"));
+
+        // Toggle favorite off - but user manually expanded, so stay expanded
+        // Actually, per requirements: "non-favorite default collapsed"
+        // This means toggling favorite off should collapse unless user explicitly expanded
+        // For simplicity, we'll have toggle_favorite reset to default behavior
+    }
+
+    #[test]
+    fn test_flat_sidebar_index_with_collapsed_projects() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially both projects are collapsed (non-favorite)
+        // Structure when all collapsed:
+        // 0: ▶ project-a (collapsed) <- selected
+        // 1: ▶ project-b (collapsed)
+        assert_eq!(state.flat_sidebar_index(), Some(0));
+
+        // Navigate to project-b header
+        state.select_next(); // Should go to project-b header (skipping worktrees)
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.flat_sidebar_index(), Some(1));
+    }
+
+    #[test]
+    fn test_flat_sidebar_index_with_expanded_project() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Expand project-a
+        state.toggle_expanded("project-a");
+
+        // Structure with project-a expanded:
+        // 0: ▼ project-a (expanded) <- selected
+        // 1:   main
+        // 2:   feature-1
+        // 3: ▶ project-b (collapsed)
+        assert_eq!(state.flat_sidebar_index(), Some(0));
+
+        // Navigate to first worktree
+        state.select_next();
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+        assert_eq!(state.flat_sidebar_index(), Some(1));
+
+        // Navigate to second worktree
+        state.select_next();
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(state.flat_sidebar_index(), Some(2));
+
+        // Navigate to project-b header
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None);
+        assert_eq!(state.flat_sidebar_index(), Some(3));
+    }
+
+    #[test]
+    fn test_navigation_skips_collapsed_worktrees() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Both projects collapsed
+        // Starts at project-a header
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        // select_next should skip to project-b header (not project-a worktrees)
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        // select_prev should go back to project-a header (not project-b worktrees)
+        state.select_prev();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
+    }
+
+    #[test]
+    fn test_navigation_within_expanded_project() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Expand project-a
+        state.toggle_expanded("project-a");
+
+        // Start at project-a header
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        // select_next goes to first worktree (project is expanded)
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // select_next goes to second worktree
+        state.select_next();
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+
+        // select_next goes to project-b header (project-b is collapsed)
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None);
+    }
+
+    #[test]
+    fn test_navigation_prev_with_mixed_expanded() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Expand project-a only
+        state.toggle_expanded("project-a");
+
+        // Navigate to project-b header
+        state.select_next(); // project-a worktree 0
+        state.select_next(); // project-a worktree 1
+        state.select_next(); // project-b header
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+
+        // select_prev should go to project-a last worktree (project-a is expanded)
+        state.select_prev();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), Some(1)); // last worktree
+    }
+
+    #[test]
+    fn test_navigation_prev_with_all_collapsed() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Both collapsed
+        // Navigate to project-b
+        state.select_next();
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+
+        // select_prev should go to project-a header (not worktrees)
+        state.select_prev();
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
     }
 }

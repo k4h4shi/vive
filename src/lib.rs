@@ -429,6 +429,10 @@ where
                 }
             }
 
+            Action::ToggleExpanded => {
+                self.state.toggle_expanded_selected();
+            }
+
             Action::DeleteTask(branch_name) => {
                 if let Some(project) = self.state.selected_project().cloned() {
                     let project_name = project.name.clone();
