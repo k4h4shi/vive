@@ -229,9 +229,7 @@ pub fn assert_buffer_contains(buffer: &Buffer, expected: &str) {
     let content = buffer_to_string(buffer);
     assert!(
         content.contains(expected),
-        "Expected buffer to contain '{}', but got:\n{}",
-        expected,
-        content
+        "Expected buffer to contain '{expected}', but got:\n{content}"
     );
 }
 
@@ -240,9 +238,7 @@ pub fn assert_buffer_not_contains(buffer: &Buffer, unexpected: &str) {
     let content = buffer_to_string(buffer);
     assert!(
         !content.contains(unexpected),
-        "Expected buffer NOT to contain '{}', but found it in:\n{}",
-        unexpected,
-        content
+        "Expected buffer NOT to contain '{unexpected}', but found it in:\n{content}"
     );
 }
 
@@ -765,7 +761,11 @@ fn test_favorites_toggle_on_f() {
 
     app.init().unwrap();
 
-    // No favorites initially
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
+
+    // No favorites initially (after clearing)
     assert!(!app.state().favorites().contains("project-alpha"));
 
     // Press 'f' to toggle favorite
@@ -792,7 +792,11 @@ fn test_favorites_show_star_icon() {
 
     app.init().unwrap();
 
-    // Toggle favorite
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
+
+    // Toggle favorite to add project-alpha
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
@@ -1032,7 +1036,7 @@ fn test_preview_scrolls_to_bottom() {
     let mut lines = Vec::new();
     lines.push("FIRST_LINE_MARKER_OLD".to_string());
     for i in 2..=30 {
-        lines.push(format!("Old line {}", i));
+        lines.push(format!("Old line {i}"));
     }
     lines.push(">>> LATEST MESSAGE <<<".to_string());
     lines.push("This is the most recent output".to_string());
