@@ -174,6 +174,14 @@ fn handle_input_key_event(key: KeyEvent, state: &mut AppState) -> Action {
             state.input_backspace();
             Action::None
         }
+        KeyCode::Left => {
+            state.input_cursor_left();
+            Action::None
+        }
+        KeyCode::Right => {
+            state.input_cursor_right();
+            Action::None
+        }
         KeyCode::Char(c) => {
             state.input_char(c);
             Action::None
@@ -399,6 +407,57 @@ mod tests {
         let action = handle_key_event(key_event(KeyCode::Esc), &mut state);
         assert_eq!(action, Action::None);
         assert_eq!(state.focus_mode, FocusMode::Normal);
+    }
+
+    #[test]
+    fn test_input_mode_cursor_left() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        handle_key_event(key_event(KeyCode::Char('a')), &mut state);
+        handle_key_event(key_event(KeyCode::Char('b')), &mut state);
+        handle_key_event(key_event(KeyCode::Char('c')), &mut state);
+        assert_eq!(state.input_cursor(), 3);
+
+        let action = handle_key_event(key_event(KeyCode::Left), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.input_cursor(), 2);
+
+        let action = handle_key_event(key_event(KeyCode::Left), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.input_cursor(), 1);
+    }
+
+    #[test]
+    fn test_input_mode_cursor_right() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        handle_key_event(key_event(KeyCode::Char('a')), &mut state);
+        handle_key_event(key_event(KeyCode::Char('b')), &mut state);
+        handle_key_event(key_event(KeyCode::Left), &mut state);
+        handle_key_event(key_event(KeyCode::Left), &mut state);
+        assert_eq!(state.input_cursor(), 0);
+
+        let action = handle_key_event(key_event(KeyCode::Right), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.input_cursor(), 1);
+    }
+
+    #[test]
+    fn test_input_mode_insert_at_cursor() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        // Type "ac"
+        handle_key_event(key_event(KeyCode::Char('a')), &mut state);
+        handle_key_event(key_event(KeyCode::Char('c')), &mut state);
+
+        // Move cursor left, insert 'b'
+        handle_key_event(key_event(KeyCode::Left), &mut state);
+        handle_key_event(key_event(KeyCode::Char('b')), &mut state);
+
+        assert_eq!(state.input_buffer, "abc");
     }
 
     #[test]

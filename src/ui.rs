@@ -22,11 +22,16 @@ pub fn render(frame: &mut Frame, state: &mut AppState) {
 
     render_header(frame, main_chunks[0], state);
     render_content(frame, main_chunks[1], state);
-    render_footer(frame, main_chunks[2], state);
+    let cursor_position = render_footer(frame, main_chunks[2], state);
 
     // Render modal on top if present
     if let Some(modal) = &state.modal {
         render_modal(frame, area, modal);
+    }
+
+    // Set cursor position for IME input when in input mode
+    if let Some((x, y)) = cursor_position {
+        frame.set_cursor_position((x, y));
     }
 }
 
@@ -257,7 +262,10 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(preview, area);
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
+/// Render the footer and return the cursor position if in input mode.
+fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) -> Option<(u16, u16)> {
+    let mut cursor_position = None;
+
     let content = match state.focus_mode {
         FocusMode::Normal => Line::from(vec![
             Span::styled("j/k", Style::default().fg(Color::Yellow)),
@@ -273,21 +281,55 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("q", Style::default().fg(Color::Yellow)),
             Span::raw(": Quit"),
         ]),
-        FocusMode::Input => Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::Green)),
-            Span::raw(&state.input_buffer),
-            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
-            Span::raw("  "),
-            Span::styled("Enter", Style::default().fg(Color::Yellow)),
-            Span::raw(": Send  "),
-            Span::styled("Esc", Style::default().fg(Color::Yellow)),
-            Span::raw(": Cancel"),
-        ]),
+        FocusMode::Input => {
+            // Split input_buffer at cursor position for display
+            let chars: Vec<char> = state.input_buffer.chars().collect();
+            let cursor_pos = state.input_cursor();
+            let (before, after) = chars.split_at(cursor_pos.min(chars.len()));
+            let before_str: String = before.iter().collect();
+            let after_str: String = after.iter().collect();
+
+            // Calculate display width of the text before cursor (for cursor positioning)
+            // Account for: border (1) + "> " prefix (2)
+            let prefix_width = 3u16; // border + "> "
+            let before_width: u16 = before_str.chars().map(unicode_display_width).sum();
+
+            // Cursor position: area.x + prefix_width + before_width
+            cursor_position = Some((area.x + prefix_width + before_width, area.y + 1));
+
+            Line::from(vec![
+                Span::styled("> ", Style::default().fg(Color::Green)),
+                Span::raw(before_str),
+                Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+                Span::raw(after_str),
+                Span::raw("  "),
+                Span::styled("Enter", Style::default().fg(Color::Yellow)),
+                Span::raw(": Send  "),
+                Span::styled("Esc", Style::default().fg(Color::Yellow)),
+                Span::raw(": Cancel  "),
+                Span::styled("</>", Style::default().fg(Color::Yellow)),
+                Span::raw(": Move"),
+            ])
+        }
     };
 
     let footer =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Commands"));
     frame.render_widget(footer, area);
+
+    cursor_position
+}
+
+/// Calculate the display width of a character.
+fn unicode_display_width(c: char) -> u16 {
+    // Simple heuristic: CJK and full-width chars are 2 columns, others are 1
+    // For more accuracy, consider using unicode-width crate
+    if c.is_ascii() {
+        1
+    } else {
+        // Most CJK characters and full-width symbols are 2 columns wide
+        2
+    }
 }
 
 fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
