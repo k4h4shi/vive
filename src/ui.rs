@@ -309,10 +309,7 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
 
     let pane_chunks = Layout::horizontal(constraints).split(pane_area);
 
-    for (idx, (content, chunk)) in state.dashboard_panes.iter().zip(pane_chunks.iter()).enumerate()
-    {
-        let pane_title = format!("Pane {}", idx + 1);
-
+    for ((branch_name, content), chunk) in state.dashboard_panes.iter().zip(pane_chunks.iter()) {
         // Parse ANSI escape sequences to preserve Claude Code colors
         let text = content
             .as_bytes()
@@ -327,7 +324,7 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
         let pane_widget = Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0))
-            .block(Block::default().borders(Borders::ALL).title(pane_title));
+            .block(Block::default().borders(Borders::ALL).title(branch_name.clone()));
         frame.render_widget(pane_widget, *chunk);
     }
 }

@@ -193,8 +193,8 @@ pub struct AppState {
     pub input_buffer: String,
     /// Captured pane content for preview.
     pub pane_preview: String,
-    /// Dashboard pane contents (for multi-pane preview).
-    pub dashboard_panes: Vec<String>,
+    /// Dashboard pane contents (for multi-pane preview): (branch_name, content).
+    pub dashboard_panes: Vec<(String, String)>,
     /// Status message for user feedback.
     pub status_message: Option<StatusMessage>,
     /// ListState for sidebar scrolling support.
@@ -600,7 +600,8 @@ impl AppState {
     }
 
     /// Update the dashboard pane contents for multi-pane preview.
-    pub fn set_dashboard_panes(&mut self, panes: Vec<String>) {
+    /// Each tuple is (branch_name, content).
+    pub fn set_dashboard_panes(&mut self, panes: Vec<(String, String)>) {
         self.dashboard_panes = panes;
     }
 
