@@ -18,9 +18,11 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 
 ### 2.2 タスク（Worktree）管理
 - [ ] **Auto-Discovery**: `git worktree list` を解析し、既存のワークツリーを「タスク」として自動検出する。
-- [ ] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
+- [x] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
+    - **Manual**: ブランチ名を手動入力する。
+    - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`feature/issue-{番号}` 形式でブランチを自動生成する。
 - [ ] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
-- [ ] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する。
+- [ ] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
 
 ### 2.3 エージェント監視 (Monitoring)
 - [ ] **Status Detection**: Claude Codeのプロセス状態と出力を解析し、リアルタイムで状態を表示する。
@@ -71,7 +73,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | :--- | :--- | :--- |
 | `j` / `k` | カーソル移動 | プロジェクト・タスク間を移動 |
 | `Enter` / `o` | **Open/Attach** | 選択中のタスクを開く。プロジェクト選択時はDashboardを開く。 |
-| `n` | **New Task** | タスク作成モーダルを開く |
+| `n` | **New Task** | タスク作成方法選択モーダルを開く（Manual / Pick from Issue） |
 | `D` (Shift+d) | **Delete Task** | タスク削除確認モーダルを開く |
 | `f` | **Favorite** | 選択中のプロジェクトをお気に入りトグル |
 | `i` | **Input** | コマンド入力モードへ移行 |
@@ -88,6 +90,49 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | `Esc` | キャンセル | 入力モードを解除 |
 
 入力モードでは日本語入力（IME）にも対応しています。カーソル位置がIME変換ウィンドウの表示位置に反映されます。
+
+#### Issue Picker Modal
+
+`n` キーを押すと、まずタスク作成方法を選択するモーダルが表示されます。
+
+```text
++------------------------------------------+
+|            Create Task                   |
+|------------------------------------------|
+|                                          |
+| How would you like to create a task?     |
+|                                          |
+|   [M] Manual - Enter branch name         |
+|   [I] Pick from Issue                    |
+|                                          |
+| j/k: Select  Enter: Confirm  Esc: Cancel |
++------------------------------------------+
+```
+
+「Pick from Issue」を選択すると、GitHub Issueリストが表示されます。
+
+```text
++----------------------------------------------------------+
+|                    Pick from Issue                       |
+|----------------------------------------------------------|
+| Filter: _                                                |
+|                                                          |
+| > #55  Add Issue Picker to New Task flow                 |
+|   #54  Display Issue title in preview                    |
+|   #42  Improve error handling                            |
+|   #38  Add dark mode support                             |
+|                                                          |
+| j/k: Navigate  Enter: Select  Esc: Cancel                |
++----------------------------------------------------------+
+```
+
+| キー | 動作 |
+| :--- | :--- |
+| `j` / `k` | Issue選択を上下に移動 |
+| `Enter` | 選択したIssueから `feature/issue-{番号}` ブランチを作成 |
+| 文字入力 | インクリメンタルフィルター（Issue番号またはタイトルで絞り込み） |
+| `Backspace` | フィルター文字を削除 |
+| `Esc` | キャンセル |
 
 ## 4. 技術仕様 (Architecture)
 
@@ -119,5 +164,19 @@ enum AgentStatus {
     Waiting { reason: String }, // "Edit", "Shell", etc.
     Idle,
     Error { message: String },
+}
+
+// GitHub Issue (for Issue Picker)
+struct GitHubIssue {
+    number: u32,
+    title: String,
+}
+
+// Modal types
+enum ModalType {
+    CreateTaskMethod { selected: CreateTaskMethod },  // Manual or Pick from Issue
+    CreateTask { input: String },                     // Manual branch name input
+    IssuePicker { issues: Vec<GitHubIssue>, ... },   // Issue selection
+    ConfirmDeletion { branch_name: String },          // Delete confirmation
 }
 ```
