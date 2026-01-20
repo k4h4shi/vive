@@ -99,7 +99,7 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
         // Add separator between favorites and non-favorites
         if has_favorites && has_non_favorites && !is_favorite && !separator_added {
             items.push(ListItem::new(Line::from(Span::styled(
-                "────────────────",
+                "────────────────────────────",
                 Style::default().fg(Color::DarkGray),
             ))));
             separator_added = true;
@@ -127,17 +127,26 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
                 .add_modifier(Modifier::BOLD)
         };
 
-        // Add favorite indicator
-        let favorite_indicator = if is_favorite { "★ " } else { "" };
-        items.push(ListItem::new(Line::from(vec![Span::styled(
-            format!("{}{} ", favorite_indicator, project.name),
-            project_style,
-        )])));
+        // Project header with ▼ collapse indicator and ★ favorite indicator
+        let favorite_indicator = if is_favorite { " (★)" } else { "" };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled("▼ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(project.name.clone(), project_style),
+            Span::styled(
+                favorite_indicator.to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
+        ])));
 
-        // Worktrees under the project
+        // Worktrees under the project with tree structure
+        let worktree_count = project.worktrees.len();
         for (wt_idx, worktree) in project.worktrees.iter().enumerate() {
             let is_selected = is_selected_project && state.selected_worktree_idx() == Some(wt_idx);
+            let is_last = wt_idx == worktree_count - 1;
             let branch_name = worktree.branch.as_deref().unwrap_or("(detached)");
+
+            // Tree prefix: ├─ for middle items, └─ for last item
+            let tree_prefix = if is_last { "└─" } else { "├─" };
 
             // Get status for this worktree
             let status = worktree
@@ -145,19 +154,45 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
                 .map(|sid| state.get_status(&sid))
                 .unwrap_or_default();
 
-            let style = if is_selected {
+            // Status icon with color based on type
+            let (icon, icon_color) = get_status_icon_and_color(&status);
+
+            // Branch name style
+            let branch_style = if is_selected {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD | Modifier::REVERSED)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(Color::Cyan)
             };
 
+            // Fixed-width branch name (truncate if too long, pad if short)
+            let max_branch_len = 16;
+            let branch_display = if branch_name.len() > max_branch_len {
+                format!("{}...", &branch_name[..max_branch_len - 3])
+            } else {
+                branch_name.to_string()
+            };
+
+            // Padding dots between branch name and status
+            let padding_len = max_branch_len.saturating_sub(branch_display.len()) + 1;
+            let padding = ".".repeat(padding_len);
+
+            // Status text for inline display
+            let status_text = status.status_text();
+
             items.push(ListItem::new(Line::from(vec![
-                Span::raw("  "),
-                Span::raw(status.icon()),
-                Span::raw(" "),
-                Span::styled(branch_name.to_string(), style),
+                Span::styled("  ", Style::default()), // indent
+                Span::styled(
+                    tree_prefix.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ), // tree chars
+                Span::styled(" ", Style::default()),
+                Span::styled(branch_display, branch_style), // branch name
+                Span::styled(format!(" {padding} "), Style::default().fg(Color::DarkGray)), // padding
+                Span::styled(icon.to_string(), Style::default().fg(icon_color)), // status icon
+                Span::styled(" ", Style::default()),
+                Span::styled(status_text, Style::default().fg(Color::DarkGray)), // status text
             ])));
         }
     }
@@ -170,6 +205,20 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
     }
 
     items
+}
+
+/// Get the icon and color for a given agent status.
+fn get_status_icon_and_color(status: &crate::state::AgentStatus) -> (&'static str, Color) {
+    use crate::state::AgentStatus;
+    match status {
+        AgentStatus::Working { .. } => ("⚙", Color::Yellow),
+        AgentStatus::WaitingEdit { .. } => ("✎", Color::Red),
+        AgentStatus::WaitingShell { .. } => (">", Color::Red),
+        AgentStatus::WaitingOther => ("?", Color::Magenta),
+        AgentStatus::Idle => ("•", Color::DarkGray),
+        AgentStatus::Success => ("✓", Color::Green),
+        AgentStatus::Error => ("✖", Color::Red),
+    }
 }
 
 fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -324,4 +373,134 @@ fn render_confirm_deletion_modal(frame: &mut Frame, area: Rect, branch_name: &st
             .style(Style::default().bg(Color::DarkGray)),
     );
     frame.render_widget(modal_widget, modal_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AgentStatus;
+
+    #[test]
+    fn test_get_status_icon_and_color_working() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::Working { detail: None });
+        assert_eq!(icon, "⚙");
+        assert_eq!(color, Color::Yellow);
+
+        // With detail - should be same icon and color
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::Working {
+            detail: Some("task".to_string()),
+        });
+        assert_eq!(icon, "⚙");
+        assert_eq!(color, Color::Yellow);
+    }
+
+    #[test]
+    fn test_get_status_icon_and_color_waiting_edit() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::WaitingEdit { path: None });
+        assert_eq!(icon, "✎");
+        assert_eq!(color, Color::Red);
+
+        // With path - same icon and color
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::WaitingEdit {
+            path: Some("file.rs".to_string()),
+        });
+        assert_eq!(icon, "✎");
+        assert_eq!(color, Color::Red);
+    }
+
+    #[test]
+    fn test_get_status_icon_and_color_waiting_shell() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::WaitingShell { command: None });
+        assert_eq!(icon, ">");
+        assert_eq!(color, Color::Red);
+
+        // With command - same icon and color
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::WaitingShell {
+            command: Some("cargo test".to_string()),
+        });
+        assert_eq!(icon, ">");
+        assert_eq!(color, Color::Red);
+    }
+
+    #[test]
+    fn test_get_status_icon_and_color_waiting_other() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::WaitingOther);
+        assert_eq!(icon, "?");
+        assert_eq!(color, Color::Magenta);
+    }
+
+    #[test]
+    fn test_get_status_icon_and_color_idle() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::Idle);
+        assert_eq!(icon, "•");
+        assert_eq!(color, Color::DarkGray);
+    }
+
+    #[test]
+    fn test_get_status_icon_and_color_success() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::Success);
+        assert_eq!(icon, "✓");
+        assert_eq!(color, Color::Green);
+    }
+
+    #[test]
+    fn test_get_status_icon_and_color_error() {
+        let (icon, color) = get_status_icon_and_color(&AgentStatus::Error);
+        assert_eq!(icon, "✖");
+        assert_eq!(color, Color::Red);
+    }
+
+    #[test]
+    fn test_all_statuses_have_distinct_icons() {
+        let statuses = vec![
+            AgentStatus::Working { detail: None },
+            AgentStatus::WaitingEdit { path: None },
+            AgentStatus::WaitingShell { command: None },
+            AgentStatus::WaitingOther,
+            AgentStatus::Idle,
+            AgentStatus::Success,
+            AgentStatus::Error,
+        ];
+
+        let icons: Vec<&str> = statuses
+            .iter()
+            .map(|s| get_status_icon_and_color(s).0)
+            .collect();
+
+        // Verify all icons are non-empty
+        for icon in &icons {
+            assert!(!icon.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_waiting_statuses_have_attention_colors() {
+        // WaitingEdit and WaitingShell should have red (attention) colors
+        let (_, edit_color) = get_status_icon_and_color(&AgentStatus::WaitingEdit { path: None });
+        let (_, shell_color) =
+            get_status_icon_and_color(&AgentStatus::WaitingShell { command: None });
+        let (_, error_color) = get_status_icon_and_color(&AgentStatus::Error);
+
+        assert_eq!(edit_color, Color::Red);
+        assert_eq!(shell_color, Color::Red);
+        assert_eq!(error_color, Color::Red);
+    }
+
+    #[test]
+    fn test_working_status_has_active_color() {
+        let (_, color) = get_status_icon_and_color(&AgentStatus::Working { detail: None });
+        assert_eq!(color, Color::Yellow);
+    }
+
+    #[test]
+    fn test_success_status_has_positive_color() {
+        let (_, color) = get_status_icon_and_color(&AgentStatus::Success);
+        assert_eq!(color, Color::Green);
+    }
+
+    #[test]
+    fn test_idle_status_has_muted_color() {
+        let (_, color) = get_status_icon_and_color(&AgentStatus::Idle);
+        assert_eq!(color, Color::DarkGray);
+    }
 }

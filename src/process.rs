@@ -110,13 +110,13 @@ pub fn determine_agent_state(process_info: Option<&ProcessInfo>) -> AgentStatus 
 
     // Check if process is running with high CPU (actively working)
     if info.stat.contains('R') || info.cpu > 5.0 {
-        return AgentStatus::Working;
+        return AgentStatus::Working { detail: None };
     }
 
     // Process is sleeping (S) - likely waiting for input or idle
     // If it's a foreground process (+), it's waiting for input
     if info.stat.contains('+') {
-        return AgentStatus::Waiting;
+        return AgentStatus::WaitingOther;
     }
 
     AgentStatus::Idle
@@ -178,10 +178,12 @@ mod tests {
 
     #[test]
     fn test_agent_status_icon() {
-        assert_eq!(AgentStatus::Working.icon(), "🟢");
-        assert_eq!(AgentStatus::Waiting.icon(), "🟡");
-        assert_eq!(AgentStatus::Error.icon(), "🔴");
-        assert_eq!(AgentStatus::Idle.icon(), "⚪");
+        assert_eq!(AgentStatus::Working { detail: None }.icon(), "⚙");
+        assert_eq!(AgentStatus::WaitingEdit { path: None }.icon(), "✎");
+        assert_eq!(AgentStatus::WaitingShell { command: None }.icon(), ">");
+        assert_eq!(AgentStatus::WaitingOther.icon(), "?");
+        assert_eq!(AgentStatus::Error.icon(), "✖");
+        assert_eq!(AgentStatus::Idle.icon(), "•");
     }
 
     #[test]
@@ -196,7 +198,10 @@ mod tests {
             stat: "R+".to_string(),
             cpu: 1.0,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Working);
+        assert_eq!(
+            determine_agent_state(Some(&info)),
+            AgentStatus::Working { detail: None }
+        );
     }
 
     #[test]
@@ -206,7 +211,10 @@ mod tests {
             stat: "S+".to_string(),
             cpu: 25.0,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Working);
+        assert_eq!(
+            determine_agent_state(Some(&info)),
+            AgentStatus::Working { detail: None }
+        );
     }
 
     #[test]
@@ -216,7 +224,10 @@ mod tests {
             stat: "S+".to_string(),
             cpu: 0.5,
         };
-        assert_eq!(determine_agent_state(Some(&info)), AgentStatus::Waiting);
+        assert_eq!(
+            determine_agent_state(Some(&info)),
+            AgentStatus::WaitingOther
+        );
     }
 
     #[test]
