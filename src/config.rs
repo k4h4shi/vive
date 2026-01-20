@@ -23,6 +23,53 @@ const FAVORITES_FILE_NAME: &str = "favorites.toml";
 /// Default directories to ignore when scanning for projects.
 const DEFAULT_IGNORED_DIRS: &[&str] = &[".git", "node_modules", ".worktrees", "target", "dist"];
 
+/// Launch strategy for terminal sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LaunchStrategy {
+    /// Inline mode: replace current process with tmux attach (default).
+    #[default]
+    Inline,
+    /// Spawn mode: launch external terminal without suspending TUI.
+    Spawn,
+}
+
+/// Terminal configuration for session launching.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TerminalConfig {
+    /// Launch strategy: "inline" (default) or "spawn".
+    pub strategy: LaunchStrategy,
+
+    /// Command to run for spawn strategy (e.g., "ghostty").
+    pub command: Option<String>,
+
+    /// Arguments for the spawn command.
+    /// Use `{session_id}` as placeholder for the target session name.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+impl TerminalConfig {
+    /// Check if the strategy is spawn mode.
+    pub fn is_spawn(&self) -> bool {
+        matches!(self.strategy, LaunchStrategy::Spawn)
+    }
+
+    /// Build the spawn command with session_id substituted.
+    ///
+    /// Returns `None` if no command is configured.
+    pub fn build_spawn_command(&self, session_id: &str) -> Option<(String, Vec<String>)> {
+        let command = self.command.as_ref()?;
+        let args: Vec<String> = self
+            .args
+            .iter()
+            .map(|arg| arg.replace("{session_id}", session_id))
+            .collect();
+        Some((command.clone(), args))
+    }
+}
+
 /// Application configuration loaded from `~/.vive/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -38,6 +85,10 @@ pub struct Config {
     /// Optional tmux prefix key override (e.g., "C-a" for Ctrl+a).
     /// If not set, uses the default tmux prefix.
     pub tmux_prefix: Option<String>,
+
+    /// Terminal configuration for session launching.
+    #[serde(default)]
+    pub terminal: TerminalConfig,
 }
 
 impl Default for Config {
@@ -46,6 +97,7 @@ impl Default for Config {
             projects_root: None,
             ignored_dirs: DEFAULT_IGNORED_DIRS.iter().map(|s| s.to_string()).collect(),
             tmux_prefix: None,
+            terminal: TerminalConfig::default(),
         }
     }
 }
@@ -115,6 +167,20 @@ ignored_dirs = [".git", "node_modules", ".worktrees", "target", "dist"]
 
 # Optional tmux prefix key override (e.g., "C-a" for Ctrl+a)
 # tmux_prefix = "C-a"
+
+# Terminal launch configuration
+[terminal]
+# Launch strategy: "inline" (default) or "spawn"
+# - inline: Replace current process with tmux attach
+# - spawn: Launch external terminal without suspending TUI
+# strategy = "spawn"
+
+# Command to run for spawn strategy (e.g., "ghostty", "wezterm", "alacritty")
+# command = "ghostty"
+
+# Arguments for the spawn command
+# Use {session_id} as placeholder for the target session name
+# args = ["+e", "tmux attach -t {session_id}"]
 "#;
             fs::write(&config_path, default_content).with_context(|| {
                 format!("Failed to write config file: {}", config_path.display())
@@ -261,6 +327,92 @@ mod tests {
         assert!(config.ignored_dirs.contains(&".git".to_string()));
         assert!(config.ignored_dirs.contains(&"node_modules".to_string()));
         assert!(config.tmux_prefix.is_none());
+        // Terminal config should default to inline strategy
+        assert_eq!(config.terminal.strategy, LaunchStrategy::Inline);
+    }
+
+    // ========================================================================
+    // TDD: Terminal configuration tests
+    // ========================================================================
+
+    #[test]
+    fn test_terminal_config_default() {
+        let terminal_config = TerminalConfig::default();
+        assert_eq!(terminal_config.strategy, LaunchStrategy::Inline);
+        assert!(terminal_config.command.is_none());
+        assert!(terminal_config.args.is_empty());
+    }
+
+    #[test]
+    fn test_launch_strategy_default() {
+        let strategy = LaunchStrategy::default();
+        assert_eq!(strategy, LaunchStrategy::Inline);
+    }
+
+    #[test]
+    fn test_parse_terminal_config_spawn_strategy() {
+        let toml_content = r#"
+[terminal]
+strategy = "spawn"
+command = "ghostty"
+args = ["+e", "tmux attach -t {session_id}"]
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.terminal.strategy, LaunchStrategy::Spawn);
+        assert_eq!(config.terminal.command, Some("ghostty".to_string()));
+        assert_eq!(
+            config.terminal.args,
+            vec!["+e", "tmux attach -t {session_id}"]
+        );
+    }
+
+    #[test]
+    fn test_parse_terminal_config_inline_strategy() {
+        let toml_content = r#"
+[terminal]
+strategy = "inline"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.terminal.strategy, LaunchStrategy::Inline);
+        assert!(config.terminal.command.is_none());
+    }
+
+    #[test]
+    fn test_terminal_config_build_spawn_command() {
+        let terminal_config = TerminalConfig {
+            strategy: LaunchStrategy::Spawn,
+            command: Some("ghostty".to_string()),
+            args: vec!["+e".to_string(), "tmux attach -t {session_id}".to_string()],
+        };
+        let (cmd, args) = terminal_config.build_spawn_command("my-session").unwrap();
+        assert_eq!(cmd, "ghostty");
+        assert_eq!(args, vec!["+e", "tmux attach -t my-session"]);
+    }
+
+    #[test]
+    fn test_terminal_config_build_spawn_command_no_command() {
+        let terminal_config = TerminalConfig {
+            strategy: LaunchStrategy::Spawn,
+            command: None,
+            args: vec![],
+        };
+        let result = terminal_config.build_spawn_command("my-session");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_terminal_config_is_spawn() {
+        let inline_config = TerminalConfig {
+            strategy: LaunchStrategy::Inline,
+            ..Default::default()
+        };
+        assert!(!inline_config.is_spawn());
+
+        let spawn_config = TerminalConfig {
+            strategy: LaunchStrategy::Spawn,
+            ..Default::default()
+        };
+        assert!(spawn_config.is_spawn());
     }
 
     #[test]
