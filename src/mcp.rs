@@ -174,103 +174,96 @@ impl ServerHandler for ViveMcpServer {
         }
     }
 
-    fn list_resources(
+    async fn list_resources(
         &self,
         _request: PaginatedRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
-        async move {
-            let resources = vec![
-                RawResource {
-                    uri: "vive://projects".to_string(),
-                    name: "Projects".to_string(),
-                    description: Some(
-                        "All projects and worktrees (tasks) discovered by Vive".to_string(),
-                    ),
-                    mime_type: Some("application/json".to_string()),
-                    size: None,
-                }
-                .no_annotation(),
-                RawResource {
-                    uri: "vive://status".to_string(),
-                    name: "Status".to_string(),
-                    description: Some(
-                        "Agent statuses for all sessions (project:branch)".to_string(),
-                    ),
-                    mime_type: Some("application/json".to_string()),
-                    size: None,
-                }
-                .no_annotation(),
-            ];
-
-            Ok(ListResourcesResult {
-                resources,
-                next_cursor: None,
-            })
-        }
-    }
-
-    fn list_resource_templates(
-        &self,
-        _request: PaginatedRequestParam,
-        _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListResourceTemplatesResult, McpError>> + Send + '_
-    {
-        async move {
-            let templates = vec![RawResourceTemplate {
-                uri_template: "vive://logs/{session_id}".to_string(),
-                name: "Session Logs".to_string(),
+    ) -> Result<ListResourcesResult, McpError> {
+        let resources = vec![
+            RawResource {
+                uri: "vive://projects".to_string(),
+                name: "Projects".to_string(),
                 description: Some(
-                    "Pane preview content for a specific session. Use session_id in format 'project__branch'".to_string(),
+                    "All projects and worktrees (tasks) discovered by Vive".to_string(),
                 ),
-                mime_type: Some("text/plain".to_string()),
+                mime_type: Some("application/json".to_string()),
+                size: None,
             }
-            .no_annotation()];
+            .no_annotation(),
+            RawResource {
+                uri: "vive://status".to_string(),
+                name: "Status".to_string(),
+                description: Some(
+                    "Agent statuses for all sessions (project:branch)".to_string(),
+                ),
+                mime_type: Some("application/json".to_string()),
+                size: None,
+            }
+            .no_annotation(),
+        ];
 
-            Ok(ListResourceTemplatesResult {
-                resource_templates: templates,
-                next_cursor: None,
-            })
-        }
+        Ok(ListResourcesResult {
+            resources,
+            next_cursor: None,
+        })
     }
 
-    fn read_resource(
+    async fn list_resource_templates(
+        &self,
+        _request: PaginatedRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        let templates = vec![RawResourceTemplate {
+            uri_template: "vive://logs/{session_id}".to_string(),
+            name: "Session Logs".to_string(),
+            description: Some(
+                "Pane preview content for a specific session. Use session_id in format 'project__branch'".to_string(),
+            ),
+            mime_type: Some("text/plain".to_string()),
+        }
+        .no_annotation()];
+
+        Ok(ListResourceTemplatesResult {
+            resource_templates: templates,
+            next_cursor: None,
+        })
+    }
+
+    async fn read_resource(
         &self,
         request: ReadResourceRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ReadResourceResult, McpError>> + Send + '_ {
-        async move {
-            let uri = &request.uri;
-            let state = self.get_state();
+    ) -> Result<ReadResourceResult, McpError> {
+        let uri = &request.uri;
+        let state = self.get_state();
 
-            let content = if uri == "vive://projects" {
-                // Return all projects and worktrees as JSON
-                serde_json::to_string_pretty(&state.projects).map_err(|e| {
-                    McpError::internal_error(format!("Failed to serialize projects: {e}"), None)
-                })?
-            } else if uri == "vive://status" {
-                // Return all agent statuses as JSON
-                serde_json::to_string_pretty(&state.statuses).map_err(|e| {
-                    McpError::internal_error(format!("Failed to serialize statuses: {e}"), None)
-                })?
-            } else if let Some(session_id) = uri.strip_prefix("vive://logs/") {
-                // Return pane preview for the specified session
-                state
-                    .pane_previews
-                    .get(session_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("No logs available for session: {session_id}"))
-            } else {
-                return Err(McpError::resource_not_found(
-                    format!("Unknown resource URI: {uri}"),
-                    None,
-                ));
-            };
+        let content = if uri == "vive://projects" {
+            // Return all projects and worktrees as JSON
+            serde_json::to_string_pretty(&state.projects).map_err(|e| {
+                McpError::internal_error(format!("Failed to serialize projects: {e}"), None)
+            })?
+        } else if uri == "vive://status" {
+            // Return all agent statuses as JSON
+            serde_json::to_string_pretty(&state.statuses).map_err(|e| {
+                McpError::internal_error(format!("Failed to serialize statuses: {e}"), None)
+            })?
+        } else if let Some(session_id) = uri.strip_prefix("vive://logs/") {
+            // Return pane preview for the specified session
+            state
+                .pane_previews
+                .get(session_id)
+                .cloned()
+                .unwrap_or_else(|| format!("No logs available for session: {session_id}"))
+        } else {
+            return Err(McpError::resource_not_found(
+                format!("Unknown resource URI: {uri}"),
+                None,
+            ));
+        };
 
-            Ok(ReadResourceResult {
-                contents: vec![ResourceContents::text(content, uri.clone())],
-            })
-        }
+        Ok(ReadResourceResult {
+            contents: vec![ResourceContents::text(content, uri.clone())],
+        })
     }
 }
 
