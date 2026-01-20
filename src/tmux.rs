@@ -1340,7 +1340,16 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args == to_strings(&["capture-pane", "-t", "my-session:main", "-p", "-S", "-50"])
+                *args
+                    == to_strings(&[
+                        "capture-pane",
+                        "-t",
+                        "my-session:main",
+                        "-p",
+                        "-e",
+                        "-S",
+                        "-50",
+                    ])
             })
             .returning(|_| {
                 Ok(mock_success(
@@ -1442,7 +1451,16 @@ mod tests {
         let mut mock = MockTmuxExecutor::new();
         mock.expect_execute()
             .withf(|args| {
-                *args == to_strings(&["capture-pane", "-t", "my-session:main", "-p", "-S", "-100"])
+                *args
+                    == to_strings(&[
+                        "capture-pane",
+                        "-t",
+                        "my-session:main",
+                        "-p",
+                        "-e",
+                        "-S",
+                        "-100",
+                    ])
             })
             .returning(|_| Ok(mock_success("Line 1\nLine 2\n")));
 

@@ -413,28 +413,28 @@ where
         }
 
         // Try dashboard session (when project header is selected, no worktree)
-        if let Some(project) = self.state.selected_project() {
-            if self.state.selected_worktree_idx().is_none() {
-                let dashboard_session =
-                    TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
-                if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
-                    // Capture individual panes for split preview
-                    if let Ok(panes) = self.tmux.list_panes(&dashboard_session) {
-                        let mut pane_contents: Vec<String> = Vec::new();
-                        for pane in panes.iter() {
-                            let pane_target = format!("{dashboard_session}.{}", pane.index);
-                            if let Ok(content) = self.tmux.capture_pane(&pane_target, 20) {
-                                pane_contents.push(content);
-                            }
+        if let Some(project) = self.state.selected_project()
+            && self.state.selected_worktree_idx().is_none()
+        {
+            let dashboard_session =
+                TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
+            if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
+                // Capture individual panes for split preview
+                if let Ok(panes) = self.tmux.list_panes(&dashboard_session) {
+                    let mut pane_contents: Vec<String> = Vec::new();
+                    for pane in panes.iter() {
+                        let pane_target = format!("{dashboard_session}.{}", pane.index);
+                        if let Ok(content) = self.tmux.capture_pane(&pane_target, 20) {
+                            pane_contents.push(content);
                         }
-                        self.state.set_dashboard_panes(pane_contents);
-
-                        // Also set combined preview for fallback
-                        if let Ok(content) = self.tmux.capture_all_panes(&dashboard_session, 15) {
-                            self.state.set_pane_preview(content);
-                        }
-                        return;
                     }
+                    self.state.set_dashboard_panes(pane_contents);
+
+                    // Also set combined preview for fallback
+                    if let Ok(content) = self.tmux.capture_all_panes(&dashboard_session, 15) {
+                        self.state.set_pane_preview(content);
+                    }
+                    return;
                 }
             }
         }

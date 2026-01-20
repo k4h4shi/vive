@@ -282,10 +282,8 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
     .split(area);
 
     // Render summary
-    let summary_content = format!(
-        "Active panes: {}  |  Press Enter to attach to dashboard",
-        pane_count
-    );
+    let summary_content =
+        format!("Active panes: {pane_count}  |  Press Enter to attach to dashboard");
     let summary = Paragraph::new(Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(
