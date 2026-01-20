@@ -1399,6 +1399,10 @@ fn test_favorite_shows_star_in_parentheses() {
 
     app.init().unwrap();
 
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
+
     // Toggle favorite
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
     let action = app.handle_key_event(key);

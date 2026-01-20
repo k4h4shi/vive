@@ -172,11 +172,14 @@ where
 
     /// Save the current favorites to disk.
     ///
-    /// This method is defensive: if favorites failed to load at startup,
-    /// we don't save (to avoid overwriting potentially valid data).
+    /// This method is defensive: if favorites failed to load at startup
+    /// AND the user hasn't modified favorites, we don't save (to avoid
+    /// overwriting potentially valid data). However, if the user has
+    /// explicitly modified favorites, we honor their intent and save.
     fn save_favorites(&self) {
-        // Don't save if loading failed - we might lose valid data
-        if self.state.favorites_load_failed() {
+        // Don't save if loading failed AND user hasn't modified favorites
+        // If user explicitly modified, honor their intent and save
+        if self.state.favorites_load_failed() && !self.state.favorites_modified() {
             eprintln!("Warning: Skipping favorites save because loading failed at startup");
             return;
         }

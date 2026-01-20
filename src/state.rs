@@ -204,6 +204,9 @@ pub struct AppState {
     /// Flag indicating whether favorites failed to load at startup.
     /// When true, we avoid saving favorites to prevent data loss.
     favorites_load_failed: bool,
+    /// Flag indicating whether favorites were modified by the user during this session.
+    /// When true, we allow saving even if loading failed (user intent is clear).
+    favorites_modified: bool,
 }
 
 impl Default for AppState {
@@ -224,6 +227,7 @@ impl Default for AppState {
             last_scroll_time: None,
             favorites: HashSet::new(),
             favorites_load_failed: false,
+            favorites_modified: false,
         }
     }
 }
@@ -597,6 +601,8 @@ impl AppState {
         } else {
             self.favorites.insert(project_name.to_string());
         }
+        // Mark that user has explicitly modified favorites
+        self.favorites_modified = true;
         // Update selection to first in sorted order
         self.select_first_in_sorted_order();
     }
@@ -645,6 +651,11 @@ impl AppState {
     /// Check if favorites failed to load at startup.
     pub fn favorites_load_failed(&self) -> bool {
         self.favorites_load_failed
+    }
+
+    /// Check if favorites were modified by the user during this session.
+    pub fn favorites_modified(&self) -> bool {
+        self.favorites_modified
     }
 
     /// Get projects sorted with favorites first, preserving original order within each group.
@@ -1564,7 +1575,7 @@ mod tests {
         //
         // With the fix:
         // - favorites_load_failed flag is set when loading fails
-        // - save_favorites() checks this flag and skips saving
+        // - save_favorites() checks this flag and skips saving (unless user modified)
         // - This prevents data loss
 
         let mut state = AppState::new();
@@ -1577,7 +1588,48 @@ mod tests {
         state.toggle_favorite("project-a");
         assert!(state.is_favorite("project-a"));
 
-        // The flag should still be set, indicating save should be skipped
+        // The flag should still be set, but favorites_modified should also be true
         assert!(state.favorites_load_failed());
+        assert!(state.favorites_modified());
+    }
+
+    #[test]
+    fn test_favorites_modified_default() {
+        let state = AppState::new();
+        assert!(!state.favorites_modified());
+    }
+
+    #[test]
+    fn test_toggle_favorite_sets_modified_flag() {
+        let mut state = AppState::new();
+        assert!(!state.favorites_modified());
+
+        state.toggle_favorite("project-a");
+        assert!(state.favorites_modified());
+    }
+
+    #[test]
+    fn test_favorites_modified_allows_save_after_load_failure() {
+        // This test documents the Codex feedback fix:
+        // If loading fails but user explicitly modifies favorites,
+        // we should save to honor user intent.
+
+        let mut state = AppState::new();
+
+        // Simulate loading failure
+        state.mark_favorites_load_failed();
+        assert!(state.favorites_load_failed());
+        assert!(!state.favorites_modified());
+
+        // At this point, save should be skipped (load failed, no modifications)
+        // This protects potentially valid data on disk
+
+        // User explicitly modifies favorites
+        state.toggle_favorite("project-a");
+        assert!(state.favorites_modified());
+
+        // Now save should be allowed (user intent is clear)
+        // The save_favorites() logic checks: favorites_load_failed && !favorites_modified
+        // With favorites_modified = true, this condition is false, so save proceeds
     }
 }
