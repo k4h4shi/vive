@@ -176,7 +176,6 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             // Fixed-width branch name (truncate if too long, pad if short)
             // Uses character count to handle UTF-8 safely
-            // Increased from 16 to 24 to accommodate longer branch names
             let max_branch_len = 24;
             let branch_char_count = branch_name.chars().count();
             let branch_display = if branch_char_count > max_branch_len {
@@ -238,7 +237,16 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
     let title = if let Some(project) = state.selected_project() {
         if let Some(worktree) = state.selected_worktree() {
             let branch = worktree.branch.as_deref().unwrap_or("(detached)");
-            format!("Preview - {}:{}", project.name, branch)
+            // Try to get Issue title if available
+            let issue_title = worktree.issue_number().and_then(|num| {
+                let repo_path = project.path.to_string_lossy();
+                state.get_cached_issue_title(&repo_path, num)
+            });
+            if let Some(title) = issue_title {
+                format!("{} - {} ({})", project.name, title, branch)
+            } else {
+                format!("{} - {}", project.name, branch)
+            }
         } else {
             format!("Dashboard - {}", project.name)
         }
@@ -318,6 +326,9 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
 
     let pane_chunks = Layout::horizontal(constraints).split(pane_area);
 
+    // Get project info for Issue title lookup
+    let project = state.selected_project();
+
     for ((branch_name, content), chunk) in state.dashboard_panes.iter().zip(pane_chunks.iter()) {
         // Parse ANSI escape sequences to preserve Claude Code colors
         let text = content
@@ -330,14 +341,31 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
         let visible_height = chunk.height.saturating_sub(2) as usize;
         let scroll_offset = line_count.saturating_sub(visible_height) as u16;
 
+        // Build pane title with Issue title if available
+        let pane_title = if let Some(proj) = project {
+            // Find worktree by branch name and get Issue title
+            let issue_title = proj
+                .worktrees
+                .iter()
+                .find(|wt| wt.branch.as_deref() == Some(branch_name.as_str()))
+                .and_then(|wt| wt.issue_number())
+                .and_then(|num| {
+                    let repo_path = proj.path.to_string_lossy();
+                    state.get_cached_issue_title(&repo_path, num)
+                });
+            if let Some(title) = issue_title {
+                format!("{title} ({branch_name})")
+            } else {
+                branch_name.clone()
+            }
+        } else {
+            branch_name.clone()
+        };
+
         let pane_widget = Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(branch_name.clone()),
-            );
+            .block(Block::default().borders(Borders::ALL).title(pane_title));
         frame.render_widget(pane_widget, *chunk);
     }
 }

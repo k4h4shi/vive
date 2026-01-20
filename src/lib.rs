@@ -6,6 +6,7 @@
 pub mod config;
 pub mod discovery;
 pub mod event;
+pub mod github;
 pub mod mcp;
 pub mod monitor;
 pub mod parser;
@@ -18,12 +19,18 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+
+/// Default number of lines to capture for pane preview.
+/// Issue #57: Increased from 50 to 200 to prevent command confirmation prompts
+/// from being cut off when there's a long output (like diffs or thought logs).
+pub const DEFAULT_PREVIEW_LINES: usize = 200;
 use crossterm::event::Event;
 use ratatui::{Terminal, backend::Backend};
 
 pub use crate::config::{Config, Favorites};
 pub use crate::discovery::{Project, discover_projects};
 pub use crate::event::Action;
+pub use crate::github::{GhIssueFetcher, IssueTitleFetcher, IssueTitleResult};
 pub use crate::state::AppState;
 pub use crate::tmux::{RealTmuxExecutor, TmuxExecutor, TmuxOrchestrator};
 
@@ -66,17 +73,20 @@ impl EventSource for RealEventSource {
 /// - `E`: The event source type (e.g., `RealEventSource`, mock)
 /// - `T`: The tmux executor type (e.g., `RealTmuxExecutor`, mock)
 /// - `D`: The project discovery type (e.g., `RealProjectDiscovery`, mock)
-pub struct App<B, E, T, D>
+/// - `I`: The Issue title fetcher type (e.g., `GhIssueFetcher`, mock)
+pub struct App<B, E, T, D, I = GhIssueFetcher>
 where
     B: Backend,
     E: EventSource,
     T: TmuxExecutor,
     D: ProjectDiscovery,
+    I: IssueTitleFetcher,
 {
     terminal: Terminal<B>,
     pub event_source: E,
     pub tmux: TmuxOrchestrator<T>,
     discovery: D,
+    issue_fetcher: I,
     state: AppState,
     config: Config,
     pub last_preview_update: Instant,
@@ -84,12 +94,13 @@ where
     status_monitor: monitor::StatusMonitor,
 }
 
-impl<B, E, T, D> App<B, E, T, D>
+impl<B, E, T, D, I> App<B, E, T, D, I>
 where
     B: Backend,
     E: EventSource,
     T: TmuxExecutor,
     D: ProjectDiscovery,
+    I: IssueTitleFetcher,
 {
     /// Create a new App with the given components.
     pub fn new(
@@ -97,6 +108,7 @@ where
         event_source: E,
         tmux: TmuxOrchestrator<T>,
         discovery: D,
+        issue_fetcher: I,
         config: Config,
     ) -> Self {
         let projects_root = config.effective_projects_root();
@@ -107,6 +119,7 @@ where
             event_source,
             tmux,
             discovery,
+            issue_fetcher,
             state,
             config,
             last_preview_update: Instant::now(),
@@ -169,6 +182,21 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Fetch Issue title for the currently selected worktree (if needed).
+    fn fetch_selected_issue_title(&mut self) {
+        if let (Some(project), Some(worktree)) = (
+            self.state.selected_project(),
+            self.state.selected_worktree(),
+        ) && let Some(issue_number) = worktree.issue_number()
+        {
+            let repo_path = project.path.to_string_lossy().to_string();
+            if self.state.needs_issue_title_fetch(&repo_path, issue_number) {
+                let result = self.issue_fetcher.fetch(&repo_path, issue_number);
+                self.state.set_issue_title(repo_path, issue_number, result);
+            }
+        }
     }
 
     /// Save the current favorites to disk.
@@ -418,13 +446,16 @@ where
 
     /// Update the pane preview from tmux and parse agent status.
     pub fn update_pane_preview(&mut self) {
+        // Fetch Issue title for selected worktree (lazy loading)
+        self.fetch_selected_issue_title();
+
         // Try worktree session first (when a worktree is selected)
         if let (Some(project), Some(worktree)) = (
             self.state.selected_project(),
             self.state.selected_worktree(),
         ) && let Some(session_id) = worktree.session_id(&project.name)
             && self.tmux.has_session(&session_id).unwrap_or(false)
-            && let Ok(content) = self.tmux.capture_pane(&session_id, 50)
+            && let Ok(content) = self.tmux.capture_pane(&session_id, DEFAULT_PREVIEW_LINES)
         {
             // Parse the content to detect agent status
             let parsed = parser::parse_status(&content);
@@ -493,4 +524,16 @@ pub type ProductionApp<W> = App<
     RealEventSource,
     RealTmuxExecutor,
     RealProjectDiscovery,
+    GhIssueFetcher,
 >;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #57: Verify preview lines constant is set to 200 (increased from 50)
+    #[test]
+    fn test_default_preview_lines_is_200() {
+        assert_eq!(DEFAULT_PREVIEW_LINES, 200);
+    }
+}

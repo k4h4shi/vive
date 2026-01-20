@@ -13,7 +13,7 @@ use crossterm::{
 use ratatui::Terminal;
 
 use vive::{
-    App, Config, EventSource, ProductionApp, RealEventSource, RealProjectDiscovery,
+    App, Config, EventSource, GhIssueFetcher, ProductionApp, RealEventSource, RealProjectDiscovery,
     event::Action,
     mcp::{ViveStateSnapshot, run_mcp_server},
     tmux::TmuxOrchestrator,
@@ -76,6 +76,7 @@ fn run_tui_mode() -> Result<()> {
         RealEventSource,
         TmuxOrchestrator::new(),
         RealProjectDiscovery,
+        GhIssueFetcher,
         config,
     );
 
