@@ -467,9 +467,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// # Returns
     /// The pane title if available, None if not found or on error.
     pub fn get_pane_title(&self, target: &str) -> Result<Option<String>> {
-        let result = self
-            .executor
-            .execute(args!["list-panes", "-t", target, "-F", "#{pane_title}"])?;
+        let result =
+            self.executor
+                .execute(args!["list-panes", "-t", target, "-F", "#{pane_title}"])?;
 
         if !result.success {
             return Ok(None);
@@ -605,6 +605,69 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             3 => CockpitLayout::MainLeft,
             _ => CockpitLayout::Grid,
         }
+    }
+
+    // ========================================================================
+    // Dashboard Session Operations
+    // ========================================================================
+
+    /// Create a dashboard session for a project.
+    ///
+    /// The dashboard session shows all worktree sessions in a tiled layout.
+    /// Each pane attaches to a worktree session using nested tmux.
+    ///
+    /// # Arguments
+    /// * `project_name` - Name of the project
+    /// * `worktree_sessions` - List of (session_id, worktree_path) for each worktree
+    ///
+    /// # Returns
+    /// `Ok(true)` if the dashboard session was created, `Ok(false)` if it already existed.
+    pub fn create_dashboard_session(
+        &self,
+        project_name: &str,
+        worktree_sessions: &[(String, String)],
+    ) -> Result<bool> {
+        let dashboard_session = format!("{project_name}:dashboard");
+
+        // Check if dashboard already exists
+        if self.has_session(&dashboard_session)? {
+            return Ok(false);
+        }
+
+        // Create the dashboard session (detached)
+        // Use the first worktree's path as the starting directory
+        let start_dir = worktree_sessions.first().map(|(_, path)| path.as_str());
+        self.new_session(&dashboard_session, start_dir, true)?;
+
+        // Set aggressive-resize for proper nested tmux behavior
+        let _ = self.set_option(&dashboard_session, "aggressive-resize", "on");
+
+        // Create panes for each worktree
+        let target = format!("{dashboard_session}:0");
+
+        for (idx, (session_id, _path)) in worktree_sessions.iter().enumerate() {
+            if idx > 0 {
+                // Split window for additional worktrees
+                self.split_window_horizontal(&target, None)?;
+            }
+
+            // Send command to attach to worktree session
+            let pane_target = format!("{target}.{idx}");
+            let attach_cmd = format!(
+                "unset TMUX; tmux attach -t {session_id} 2>/dev/null || echo 'Session not found: {session_id}'"
+            );
+            self.send_keys(&pane_target, &attach_cmd, true)?;
+        }
+
+        // Apply tiled layout for even distribution
+        self.select_layout(&target, "tiled")?;
+
+        Ok(true)
+    }
+
+    /// Get the dashboard session name for a project.
+    pub fn dashboard_session_name(project_name: &str) -> String {
+        format!("{project_name}:dashboard")
     }
 
     // ========================================================================
@@ -1060,8 +1123,7 @@ mod tests {
     #[test]
     fn test_get_pane_title_empty() {
         let mut mock = MockTmuxExecutor::new();
-        mock.expect_execute()
-            .returning(|_| Ok(mock_success("")));
+        mock.expect_execute().returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let title = orchestrator.get_pane_title("my-session:main").unwrap();

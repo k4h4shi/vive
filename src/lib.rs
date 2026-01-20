@@ -305,8 +305,9 @@ where
 
                             match branch_delete {
                                 Ok(output) if output.status.success() => {
-                                    self.state
-                                        .set_success_message(format!("Deleted task '{branch_name}'"));
+                                    self.state.set_success_message(format!(
+                                        "Deleted task '{branch_name}'"
+                                    ));
                                 }
                                 Ok(output) => {
                                     let stderr = String::from_utf8_lossy(&output.stderr);
