@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::discovery::Project;
-use crate::github::{IssueTitleCache, IssueTitleResult};
+use crate::github::{GitHubIssue, IssueTitleCache, IssueTitleResult};
 
 /// Debounce duration for mouse scroll events (in milliseconds).
 const SCROLL_DEBOUNCE_MS: u64 = 25;
@@ -142,11 +142,39 @@ pub enum FocusMode {
     Input,
 }
 
+/// Method for creating a new task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreateTaskMethod {
+    /// Enter branch name manually (default).
+    #[default]
+    Manual,
+    /// Pick from GitHub Issue list.
+    PickFromIssue,
+}
+
 /// Modal dialog type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalType {
-    /// Create a new task/worktree.
+    /// Choose creation method (Manual or Pick from Issue).
+    CreateTaskMethod {
+        /// Currently selected method.
+        selected: CreateTaskMethod,
+    },
+    /// Create a new task/worktree with manual input.
     CreateTask { input: String },
+    /// Pick from GitHub Issue list.
+    IssuePicker {
+        /// List of available issues.
+        issues: Vec<GitHubIssue>,
+        /// Currently selected issue index.
+        selected_idx: usize,
+        /// Filter text for incremental search.
+        filter: String,
+        /// Error message if fetch failed.
+        error: Option<String>,
+        /// Whether we're loading issues.
+        loading: bool,
+    },
     /// Confirm deletion of a task/worktree.
     ConfirmDeletion { branch_name: String },
 }
@@ -608,11 +636,173 @@ impl AppState {
         std::mem::take(&mut self.input_buffer)
     }
 
-    /// Open the create task modal.
+    /// Open the create task method selection modal.
     pub fn open_create_task_modal(&mut self) {
+        self.modal = Some(ModalType::CreateTaskMethod {
+            selected: CreateTaskMethod::Manual,
+        });
+    }
+
+    /// Open the manual input modal for creating a task.
+    pub fn open_manual_create_task_modal(&mut self) {
         self.modal = Some(ModalType::CreateTask {
             input: String::new(),
         });
+    }
+
+    /// Open the issue picker modal.
+    pub fn open_issue_picker_modal(&mut self) {
+        self.modal = Some(ModalType::IssuePicker {
+            issues: Vec::new(),
+            selected_idx: 0,
+            filter: String::new(),
+            error: None,
+            loading: true,
+        });
+    }
+
+    /// Set the issues for the issue picker modal.
+    pub fn set_issue_picker_issues(&mut self, new_issues: Vec<GitHubIssue>) {
+        if let Some(ModalType::IssuePicker {
+            ref mut issues,
+            ref mut loading,
+            ..
+        }) = self.modal
+        {
+            *issues = new_issues;
+            *loading = false;
+        }
+    }
+
+    /// Set the error for the issue picker modal.
+    pub fn set_issue_picker_error(&mut self, error_msg: String) {
+        if let Some(ModalType::IssuePicker {
+            ref mut error,
+            ref mut loading,
+            ..
+        }) = self.modal
+        {
+            *error = Some(error_msg);
+            *loading = false;
+        }
+    }
+
+    /// Get the currently selected issue from the issue picker modal.
+    pub fn selected_issue(&self) -> Option<&GitHubIssue> {
+        match &self.modal {
+            Some(ModalType::IssuePicker {
+                issues,
+                selected_idx,
+                filter,
+                ..
+            }) => {
+                let filtered = Self::filter_issues(issues, filter);
+                filtered.get(*selected_idx).copied()
+            }
+            _ => None,
+        }
+    }
+
+    /// Move selection up in the issue picker modal.
+    pub fn issue_picker_select_prev(&mut self) {
+        if let Some(ModalType::IssuePicker {
+            issues,
+            selected_idx,
+            filter,
+            ..
+        }) = &mut self.modal
+        {
+            let filtered_len = Self::filter_issues(issues, filter).len();
+            if filtered_len > 0 && *selected_idx > 0 {
+                *selected_idx -= 1;
+            }
+        }
+    }
+
+    /// Move selection down in the issue picker modal.
+    pub fn issue_picker_select_next(&mut self) {
+        if let Some(ModalType::IssuePicker {
+            issues,
+            selected_idx,
+            filter,
+            ..
+        }) = &mut self.modal
+        {
+            let filtered_len = Self::filter_issues(issues, filter).len();
+            if filtered_len > 0 && *selected_idx + 1 < filtered_len {
+                *selected_idx += 1;
+            }
+        }
+    }
+
+    /// Add a character to the issue picker filter.
+    pub fn issue_picker_filter_char(&mut self, c: char) {
+        if let Some(ModalType::IssuePicker {
+            filter,
+            selected_idx,
+            ..
+        }) = &mut self.modal
+        {
+            filter.push(c);
+            *selected_idx = 0; // Reset selection when filter changes
+        }
+    }
+
+    /// Remove a character from the issue picker filter.
+    pub fn issue_picker_filter_backspace(&mut self) {
+        if let Some(ModalType::IssuePicker {
+            filter,
+            selected_idx,
+            ..
+        }) = &mut self.modal
+        {
+            filter.pop();
+            *selected_idx = 0; // Reset selection when filter changes
+        }
+    }
+
+    /// Get the filtered issues for the issue picker.
+    pub fn filtered_issues(&self) -> Vec<&GitHubIssue> {
+        match &self.modal {
+            Some(ModalType::IssuePicker { issues, filter, .. }) => {
+                Self::filter_issues(issues, filter)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Filter issues by the filter string.
+    fn filter_issues<'a>(issues: &'a [GitHubIssue], filter: &str) -> Vec<&'a GitHubIssue> {
+        if filter.is_empty() {
+            issues.iter().collect()
+        } else {
+            let filter_lower = filter.to_lowercase();
+            issues
+                .iter()
+                .filter(|issue| {
+                    issue.title.to_lowercase().contains(&filter_lower)
+                        || issue.number.to_string().contains(&filter_lower)
+                })
+                .collect()
+        }
+    }
+
+    /// Toggle the selected method in the create task method modal.
+    pub fn toggle_create_task_method(&mut self) {
+        if let Some(ModalType::CreateTaskMethod { selected }) = &mut self.modal {
+            *selected = match selected {
+                CreateTaskMethod::Manual => CreateTaskMethod::PickFromIssue,
+                CreateTaskMethod::PickFromIssue => CreateTaskMethod::Manual,
+            };
+        }
+    }
+
+    /// Get the selected method from the create task method modal.
+    pub fn selected_create_task_method(&self) -> Option<CreateTaskMethod> {
+        match &self.modal {
+            Some(ModalType::CreateTaskMethod { selected }) => Some(*selected),
+            _ => None,
+        }
     }
 
     /// Open the confirm deletion modal.
@@ -651,8 +841,7 @@ impl AppState {
     pub fn modal_input(&self) -> Option<&str> {
         match &self.modal {
             Some(ModalType::CreateTask { input }) => Some(input),
-            Some(ModalType::ConfirmDeletion { .. }) => None,
-            None => None,
+            _ => None,
         }
     }
 
@@ -1199,12 +1388,13 @@ mod tests {
     }
 
     #[test]
-    fn test_create_task_modal() {
+    fn test_manual_create_task_modal() {
         let mut state = AppState::new();
 
         assert!(state.modal.is_none());
 
-        state.open_create_task_modal();
+        // Use open_manual_create_task_modal to test the old behavior
+        state.open_manual_create_task_modal();
         assert!(matches!(state.modal, Some(ModalType::CreateTask { .. })));
 
         state.modal_input_char('t');
@@ -1962,5 +2152,227 @@ mod tests {
         // Now save should be allowed (user intent is clear)
         // The save_favorites() logic checks: favorites_load_failed && !favorites_modified
         // With favorites_modified = true, this condition is false, so save proceeds
+    }
+
+    // ========== Issue Picker Modal Tests ==========
+
+    #[test]
+    fn test_create_task_method_modal() {
+        let mut state = AppState::new();
+
+        // Open the create task modal (now opens method selection)
+        state.open_create_task_modal();
+        assert!(matches!(
+            state.modal,
+            Some(ModalType::CreateTaskMethod { .. })
+        ));
+
+        // Default selection should be Manual
+        assert_eq!(
+            state.selected_create_task_method(),
+            Some(CreateTaskMethod::Manual)
+        );
+
+        // Toggle to PickFromIssue
+        state.toggle_create_task_method();
+        assert_eq!(
+            state.selected_create_task_method(),
+            Some(CreateTaskMethod::PickFromIssue)
+        );
+
+        // Toggle back to Manual
+        state.toggle_create_task_method();
+        assert_eq!(
+            state.selected_create_task_method(),
+            Some(CreateTaskMethod::Manual)
+        );
+    }
+
+    #[test]
+    fn test_open_manual_create_task_modal() {
+        let mut state = AppState::new();
+
+        state.open_manual_create_task_modal();
+        assert!(matches!(state.modal, Some(ModalType::CreateTask { .. })));
+        assert_eq!(state.modal_input(), Some(""));
+    }
+
+    #[test]
+    fn test_issue_picker_modal_initial_state() {
+        let mut state = AppState::new();
+
+        state.open_issue_picker_modal();
+        match &state.modal {
+            Some(ModalType::IssuePicker {
+                issues,
+                selected_idx,
+                filter,
+                error,
+                loading,
+            }) => {
+                assert!(issues.is_empty());
+                assert_eq!(*selected_idx, 0);
+                assert!(filter.is_empty());
+                assert!(error.is_none());
+                assert!(*loading);
+            }
+            _ => panic!("Expected IssuePicker modal"),
+        }
+    }
+
+    #[test]
+    fn test_issue_picker_set_issues() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        match &state.modal {
+            Some(ModalType::IssuePicker {
+                issues, loading, ..
+            }) => {
+                assert_eq!(issues.len(), 2);
+                assert!(!*loading);
+            }
+            _ => panic!("Expected IssuePicker modal"),
+        }
+    }
+
+    #[test]
+    fn test_issue_picker_set_error() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        state.set_issue_picker_error("Network error".to_string());
+
+        match &state.modal {
+            Some(ModalType::IssuePicker { error, loading, .. }) => {
+                assert_eq!(error.as_deref(), Some("Network error"));
+                assert!(!*loading);
+            }
+            _ => panic!("Expected IssuePicker modal"),
+        }
+    }
+
+    #[test]
+    fn test_issue_picker_navigation() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+            GitHubIssue::new(3, "Third issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // Initially at index 0
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
+
+        // Move down
+        state.issue_picker_select_next();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+
+        state.issue_picker_select_next();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(3));
+
+        // Cannot move past the end
+        state.issue_picker_select_next();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(3));
+
+        // Move up
+        state.issue_picker_select_prev();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+
+        // Move up to start
+        state.issue_picker_select_prev();
+        state.issue_picker_select_prev();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
+
+        // Cannot move past the start
+        state.issue_picker_select_prev();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
+    }
+
+    #[test]
+    fn test_issue_picker_filter() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "Add dark mode"),
+            GitHubIssue::new(2, "Fix login bug"),
+            GitHubIssue::new(3, "Add light mode"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // No filter - all issues visible
+        assert_eq!(state.filtered_issues().len(), 3);
+
+        // Filter by "dark"
+        state.issue_picker_filter_char('d');
+        state.issue_picker_filter_char('a');
+        state.issue_picker_filter_char('r');
+        state.issue_picker_filter_char('k');
+        assert_eq!(state.filtered_issues().len(), 1);
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
+
+        // Backspace to show more
+        state.issue_picker_filter_backspace();
+        state.issue_picker_filter_backspace();
+        state.issue_picker_filter_backspace();
+        state.issue_picker_filter_backspace();
+        assert_eq!(state.filtered_issues().len(), 3);
+
+        // Filter by number
+        state.issue_picker_filter_char('2');
+        assert_eq!(state.filtered_issues().len(), 1);
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+    }
+
+    #[test]
+    fn test_issue_picker_filter_resets_selection() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![GitHubIssue::new(1, "First"), GitHubIssue::new(2, "Second")];
+        state.set_issue_picker_issues(issues);
+
+        // Move to second item
+        state.issue_picker_select_next();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+
+        // Adding filter resets selection to 0
+        state.issue_picker_filter_char('f');
+        match &state.modal {
+            Some(ModalType::IssuePicker { selected_idx, .. }) => {
+                assert_eq!(*selected_idx, 0);
+            }
+            _ => panic!("Expected IssuePicker modal"),
+        }
+    }
+
+    #[test]
+    fn test_issue_picker_case_insensitive_filter() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "Add DARK mode"),
+            GitHubIssue::new(2, "Fix Bug"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // Filter with lowercase should match uppercase title
+        state.issue_picker_filter_char('d');
+        state.issue_picker_filter_char('a');
+        state.issue_picker_filter_char('r');
+        state.issue_picker_filter_char('k');
+        assert_eq!(state.filtered_issues().len(), 1);
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
     }
 }

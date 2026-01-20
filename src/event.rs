@@ -24,6 +24,10 @@ pub enum Action {
     ToggleFavorite,
     /// Delete a task/worktree with the given branch name.
     DeleteTask(String),
+    /// Fetch issues for the issue picker modal.
+    FetchIssues,
+    /// Create a task from the selected issue.
+    CreateTaskFromIssue(crate::github::GitHubIssue),
 }
 
 /// Poll for terminal events with a timeout.
@@ -195,9 +199,90 @@ fn handle_modal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
 
     // Check which modal is open and handle accordingly
     match &state.modal {
+        Some(ModalType::CreateTaskMethod { .. }) => handle_create_task_method_modal_key(key, state),
         Some(ModalType::CreateTask { .. }) => handle_create_task_modal_key(key, state),
+        Some(ModalType::IssuePicker { .. }) => handle_issue_picker_modal_key(key, state),
         Some(ModalType::ConfirmDeletion { .. }) => handle_confirm_deletion_modal_key(key, state),
         None => Action::None,
+    }
+}
+
+fn handle_create_task_method_modal_key(key: KeyEvent, state: &mut AppState) -> Action {
+    use crate::state::CreateTaskMethod;
+
+    match key.code {
+        KeyCode::Esc => {
+            state.close_modal();
+            Action::None
+        }
+        KeyCode::Enter => {
+            let method = state.selected_create_task_method();
+            state.close_modal();
+            match method {
+                Some(CreateTaskMethod::Manual) => {
+                    state.open_manual_create_task_modal();
+                    Action::None
+                }
+                Some(CreateTaskMethod::PickFromIssue) => {
+                    state.open_issue_picker_modal();
+                    Action::FetchIssues
+                }
+                None => Action::None,
+            }
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            state.toggle_create_task_method();
+            Action::None
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            state.toggle_create_task_method();
+            Action::None
+        }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            state.close_modal();
+            state.open_manual_create_task_modal();
+            Action::None
+        }
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            state.close_modal();
+            state.open_issue_picker_modal();
+            Action::FetchIssues
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_issue_picker_modal_key(key: KeyEvent, state: &mut AppState) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.close_modal();
+            Action::None
+        }
+        KeyCode::Enter => {
+            if let Some(issue) = state.selected_issue().cloned() {
+                state.close_modal();
+                Action::CreateTaskFromIssue(issue)
+            } else {
+                Action::None
+            }
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            state.issue_picker_select_next();
+            Action::None
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            state.issue_picker_select_prev();
+            Action::None
+        }
+        KeyCode::Backspace => {
+            state.issue_picker_filter_backspace();
+            Action::None
+        }
+        KeyCode::Char(c) => {
+            state.issue_picker_filter_char(c);
+            Action::None
+        }
+        _ => Action::None,
     }
 }
 
@@ -471,7 +556,8 @@ mod tests {
     #[test]
     fn test_modal_typing_and_submit() {
         let mut state = AppState::new();
-        state.open_create_task_modal();
+        // Use open_manual_create_task_modal for the direct input test
+        state.open_manual_create_task_modal();
 
         handle_key_event(key_event(KeyCode::Char('f')), &mut state);
         handle_key_event(key_event(KeyCode::Char('e')), &mut state);
@@ -486,7 +572,7 @@ mod tests {
     #[test]
     fn test_modal_cancel() {
         let mut state = AppState::new();
-        state.open_create_task_modal();
+        state.open_manual_create_task_modal();
 
         handle_key_event(key_event(KeyCode::Char('t')), &mut state);
         let action = handle_key_event(key_event(KeyCode::Esc), &mut state);
@@ -640,5 +726,196 @@ mod tests {
         let action = handle_key_event(key_event(KeyCode::Esc), &mut state);
         assert_eq!(action, Action::None);
         assert!(state.modal.is_none());
+    }
+
+    // ========== Create Task Method Modal Tests ==========
+
+    #[test]
+    fn test_create_task_method_modal_opens_on_n() {
+        let mut state = AppState::new();
+        let action = handle_key_event(key_event(KeyCode::Char('n')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(matches!(
+            state.modal,
+            Some(crate::state::ModalType::CreateTaskMethod { .. })
+        ));
+    }
+
+    #[test]
+    fn test_create_task_method_modal_toggle_with_j() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Initially Manual is selected
+        assert_eq!(
+            state.selected_create_task_method(),
+            Some(crate::state::CreateTaskMethod::Manual)
+        );
+
+        // Press j to toggle to PickFromIssue
+        let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(
+            state.selected_create_task_method(),
+            Some(crate::state::CreateTaskMethod::PickFromIssue)
+        );
+    }
+
+    #[test]
+    fn test_create_task_method_modal_select_manual_with_m() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Press m to select Manual directly
+        let action = handle_key_event(key_event(KeyCode::Char('m')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(matches!(
+            state.modal,
+            Some(crate::state::ModalType::CreateTask { .. })
+        ));
+    }
+
+    #[test]
+    fn test_create_task_method_modal_select_issue_with_i() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Press i to select PickFromIssue
+        let action = handle_key_event(key_event(KeyCode::Char('i')), &mut state);
+        assert_eq!(action, Action::FetchIssues);
+        assert!(matches!(
+            state.modal,
+            Some(crate::state::ModalType::IssuePicker { .. })
+        ));
+    }
+
+    #[test]
+    fn test_create_task_method_modal_confirm_manual_with_enter() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Manual is selected by default, press Enter
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(matches!(
+            state.modal,
+            Some(crate::state::ModalType::CreateTask { .. })
+        ));
+    }
+
+    #[test]
+    fn test_create_task_method_modal_confirm_issue_with_enter() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+        state.toggle_create_task_method(); // Select PickFromIssue
+
+        // Press Enter to confirm
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        assert_eq!(action, Action::FetchIssues);
+        assert!(matches!(
+            state.modal,
+            Some(crate::state::ModalType::IssuePicker { .. })
+        ));
+    }
+
+    #[test]
+    fn test_create_task_method_modal_cancel_with_esc() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        let action = handle_key_event(key_event(KeyCode::Esc), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_none());
+    }
+
+    // ========== Issue Picker Modal Tests ==========
+
+    #[test]
+    fn test_issue_picker_modal_cancel_with_esc() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let action = handle_key_event(key_event(KeyCode::Esc), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_issue_picker_modal_navigate_with_j_k() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First"),
+            GitHubIssue::new(2, "Second"),
+        ]);
+
+        // Navigate down
+        let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+
+        // Navigate up
+        let action = handle_key_event(key_event(KeyCode::Char('k')), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(1));
+    }
+
+    #[test]
+    fn test_issue_picker_modal_filter_with_typing() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "Add feature"),
+            GitHubIssue::new(2, "Fix bug"),
+        ]);
+
+        // Type filter characters
+        let action = handle_key_event(key_event(KeyCode::Char('b')), &mut state);
+        assert_eq!(action, Action::None);
+
+        let action = handle_key_event(key_event(KeyCode::Char('u')), &mut state);
+        assert_eq!(action, Action::None);
+
+        let action = handle_key_event(key_event(KeyCode::Char('g')), &mut state);
+        assert_eq!(action, Action::None);
+
+        // Should filter to just "Fix bug"
+        assert_eq!(state.filtered_issues().len(), 1);
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+    }
+
+    #[test]
+    fn test_issue_picker_modal_select_with_enter() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![GitHubIssue::new(42, "Test issue")]);
+
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        match action {
+            Action::CreateTaskFromIssue(issue) => {
+                assert_eq!(issue.number, 42);
+                assert_eq!(issue.title, "Test issue");
+            }
+            _ => panic!("Expected CreateTaskFromIssue action"),
+        }
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn test_issue_picker_modal_enter_with_no_issues() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        // Don't add any issues
+
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        assert_eq!(action, Action::None);
+        // Modal should still be open
+        assert!(state.modal.is_some());
     }
 }

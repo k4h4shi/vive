@@ -40,6 +40,13 @@
 - **Cockpit Layout**: Automatically splits windows based on active tasks when a project is opened.
 - **Session Management**: Ensures persistent sessions even when the TUI is closed.
 
+### 5. GitHub Integration (The "Bridge")
+- Provides integration with GitHub via the `gh` CLI.
+- **Issue Title Fetching**: Fetches Issue titles to display alongside worktree names (e.g., `#123 Fix login bug`).
+- **Issue List Fetching**: Fetches open issues from the repository for the Issue Picker.
+- **Caching**: Issue titles are cached to minimize API calls.
+- **Branch Name Generation**: Auto-generates branch names from issues (e.g., `feature/issue-123`).
+
 ## Data Flow
 
 ```mermaid
@@ -47,6 +54,7 @@ graph TD
     subgraph Core
         D[Discovery Module] -->|Projects & Worktrees| S[AppState]
         M[Monitor Module] -->|Statuses (Map)| S
+        GH[GitHub Module] -->|Issue Titles & Lists| S
     end
 
     subgraph TUI
@@ -58,12 +66,14 @@ graph TD
         A -->|Create/Switch| T[Tmux Orchestrator]
         A -->|Send Keys| T
         A -->|Create Worktree| G[Git Wrapper]
+        A -->|Fetch Issues| GH
     end
 
     V -->|Display| User
     User -->|Keyboard/Mouse| K
     T -->|Manage| Tmux[Tmux Process]
     G -->|Update| D
+    GH -->|gh CLI| GitHub[GitHub API]
 ```
 
 ## State Management Strategy
@@ -88,7 +98,7 @@ graph TD
     - When this flag is set, saving is skipped to prevent overwriting potentially valid data.
     - This prevents data loss in edge cases where the file cannot be read but may still contain valid favorites.
 
-### 5. MCP Server (Model Context Protocol)
+### 6. MCP Server (Model Context Protocol)
 
 The MCP server exposes Vive's internal state to external tools (like Claude Code) via the Model Context Protocol.
 
@@ -148,3 +158,34 @@ Configure in Claude Desktop's `claude_desktop_config.json`:
   }
 }
 ```
+
+## Configuration
+
+Configuration is stored in `~/.vive/config.toml`.
+
+### Terminal Launch Strategy
+
+The `[terminal]` section controls how Vive launches tmux sessions:
+
+```toml
+[terminal]
+# Launch strategy: "inline" (default) or "spawn"
+# - inline: Replace current process with tmux attach (default)
+# - spawn: Launch external terminal without suspending TUI
+strategy = "spawn"
+
+# Command to run for spawn strategy (e.g., "ghostty", "wezterm", "alacritty")
+command = "ghostty"
+
+# Arguments for the spawn command
+# Use {session_id} as placeholder for the target session name
+args = ["+e", "tmux attach -t {session_id}"]
+```
+
+**Strategies**:
+- **inline** (default): Traditional behavior. The TUI is suspended and the current process is replaced with `tmux attach`. This is seamless but leaves the TUI.
+- **spawn**: Launches a new terminal window without suspending the TUI. Vive remains open as a dashboard while the session runs in a separate window. Requires `command` to be configured.
+
+**Use Cases**:
+- Use `inline` for quick, focused work on a single task.
+- Use `spawn` when monitoring multiple sessions or using Vive as a persistent dashboard.
