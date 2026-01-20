@@ -421,11 +421,22 @@ where
             if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
                 // Capture individual panes for split preview
                 if let Ok(panes) = self.tmux.list_panes(&dashboard_session) {
-                    let mut pane_contents: Vec<String> = Vec::new();
-                    for pane in panes.iter() {
+                    // Get branch names from worktrees (panes are created in worktree order)
+                    let branch_names: Vec<String> = project
+                        .worktrees
+                        .iter()
+                        .filter_map(|wt| wt.branch.clone())
+                        .collect();
+
+                    let mut pane_contents: Vec<(String, String)> = Vec::new();
+                    for (idx, pane) in panes.iter().enumerate() {
                         let pane_target = format!("{dashboard_session}.{}", pane.index);
                         if let Ok(content) = self.tmux.capture_pane(&pane_target, 20) {
-                            pane_contents.push(content);
+                            let branch_name = branch_names
+                                .get(idx)
+                                .cloned()
+                                .unwrap_or_else(|| format!("Pane {}", idx + 1));
+                            pane_contents.push((branch_name, content));
                         }
                     }
                     self.state.set_dashboard_panes(pane_contents);
