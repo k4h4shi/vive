@@ -66,9 +66,10 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // Split content into sidebar and preview
+    // Use 40% for sidebar to accommodate longer branch names
     let content_chunks = Layout::horizontal([
-        Constraint::Percentage(30), // Sidebar
-        Constraint::Percentage(70), // Preview
+        Constraint::Percentage(40), // Sidebar
+        Constraint::Percentage(60), // Preview
     ])
     .split(area);
 
@@ -104,7 +105,7 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
         // Add separator between favorites and non-favorites
         if has_favorites && has_non_favorites && !is_favorite && !separator_added {
             items.push(ListItem::new(Line::from(Span::styled(
-                "────────────────────────────",
+                "────────────────────────────────────────",
                 Style::default().fg(Color::DarkGray),
             ))));
             separator_added = true;
@@ -173,7 +174,8 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             // Fixed-width branch name (truncate if too long, pad if short)
             // Uses character count to handle UTF-8 safely
-            let max_branch_len = 16;
+            // Increased from 16 to 24 to accommodate longer branch names
+            let max_branch_len = 24;
             let branch_char_count = branch_name.chars().count();
             let branch_display = if branch_char_count > max_branch_len {
                 let truncated: String = branch_name.chars().take(max_branch_len - 3).collect();
