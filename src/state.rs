@@ -996,12 +996,13 @@ impl AppState {
     pub fn toggle_expanded(&mut self, project_name: &str) {
         if self.expanded_projects.contains(project_name) {
             // Collapsing: clear worktree selection if on this project
-            if let Some(selected) = self.selected_project() {
-                if selected.name == project_name && self.selected_worktree_idx.is_some() {
-                    self.selected_worktree_idx = None;
-                    // Update sidebar list state to reflect new selection
-                    self.sidebar_list_state.select(self.flat_sidebar_index());
-                }
+            if let Some(selected) = self.selected_project()
+                && selected.name == project_name
+                && self.selected_worktree_idx.is_some()
+            {
+                self.selected_worktree_idx = None;
+                // Update sidebar list state to reflect new selection
+                self.sidebar_list_state.select(self.flat_sidebar_index());
             }
             self.expanded_projects.remove(project_name);
         } else {
