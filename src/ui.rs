@@ -297,11 +297,22 @@ fn render_confirm_deletion_modal(frame: &mut Frame, area: Rect, branch_name: &st
         Line::from("This will remove the worktree and branch."),
         Line::from(""),
         Line::from(vec![
-            Span::styled("y", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "y",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(": Yes  "),
-            Span::styled("n", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "n",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("/"),
-            Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw(": No"),
         ]),
     ];

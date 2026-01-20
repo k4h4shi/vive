@@ -483,9 +483,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// # Returns
     /// The pane title if available, None if not found or on error.
     pub fn get_pane_title(&self, target: &str) -> Result<Option<String>> {
-        let result = self
-            .executor
-            .execute(args!["list-panes", "-t", target, "-F", "#{pane_title}"])?;
+        let result =
+            self.executor
+                .execute(args!["list-panes", "-t", target, "-F", "#{pane_title}"])?;
 
         if !result.success {
             return Ok(None);
@@ -1088,8 +1088,7 @@ mod tests {
     #[test]
     fn test_get_pane_title_empty() {
         let mut mock = MockTmuxExecutor::new();
-        mock.expect_execute()
-            .returning(|_| Ok(mock_success("")));
+        mock.expect_execute().returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let title = orchestrator.get_pane_title("my-session:main").unwrap();
@@ -1190,16 +1189,12 @@ mod tests {
 
         // send_keys for initial command (input text)
         mock.expect_execute()
-            .withf(|args| {
-                *args == to_strings(&["send-keys", "-t", "my-session:task-1", "claude"])
-            })
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:task-1", "claude"]))
             .returning(|_| Ok(mock_success("")));
 
         // send_keys for Enter (sent separately as C-m)
         mock.expect_execute()
-            .withf(|args| {
-                *args == to_strings(&["send-keys", "-t", "my-session:task-1", "C-m"])
-            })
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:task-1", "C-m"]))
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
