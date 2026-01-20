@@ -6,6 +6,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
+use unicode_width::UnicodeWidthChar;
 
 use crate::state::{AppState, FocusMode, ModalType, StatusMessageType};
 
@@ -23,11 +24,16 @@ pub fn render(frame: &mut Frame, state: &mut AppState) {
 
     render_header(frame, main_chunks[0], state);
     render_content(frame, main_chunks[1], state);
-    render_footer(frame, main_chunks[2], state);
+    let cursor_position = render_footer(frame, main_chunks[2], state);
 
     // Render modal on top if present
     if let Some(modal) = &state.modal {
         render_modal(frame, area, modal);
+    }
+
+    // Set cursor position for IME input when in input mode
+    if let Some((x, y)) = cursor_position {
+        frame.set_cursor_position((x, y));
     }
 }
 
@@ -62,9 +68,10 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // Split content into sidebar and preview
+    // Use 40% for sidebar to accommodate longer branch names
     let content_chunks = Layout::horizontal([
-        Constraint::Percentage(30), // Sidebar
-        Constraint::Percentage(70), // Preview
+        Constraint::Percentage(40), // Sidebar
+        Constraint::Percentage(60), // Preview
     ])
     .split(area);
 
@@ -100,7 +107,7 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
         // Add separator between favorites and non-favorites
         if has_favorites && has_non_favorites && !is_favorite && !separator_added {
             items.push(ListItem::new(Line::from(Span::styled(
-                "────────────────────────────",
+                "────────────────────────────────────────",
                 Style::default().fg(Color::DarkGray),
             ))));
             separator_added = true;
@@ -169,7 +176,8 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             // Fixed-width branch name (truncate if too long, pad if short)
             // Uses character count to handle UTF-8 safely
-            let max_branch_len = 16;
+            // Increased from 16 to 24 to accommodate longer branch names
+            let max_branch_len = 24;
             let branch_char_count = branch_name.chars().count();
             let branch_display = if branch_char_count > max_branch_len {
                 let truncated: String = branch_name.chars().take(max_branch_len - 3).collect();
@@ -334,7 +342,10 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
     }
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
+/// Render the footer and return the cursor position if in input mode.
+fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) -> Option<(u16, u16)> {
+    let mut cursor_position = None;
+
     let content = match state.focus_mode {
         FocusMode::Normal => Line::from(vec![
             Span::styled("j/k", Style::default().fg(Color::Yellow)),
@@ -350,21 +361,48 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("q", Style::default().fg(Color::Yellow)),
             Span::raw(": Quit"),
         ]),
-        FocusMode::Input => Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::Green)),
-            Span::raw(&state.input_buffer),
-            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
-            Span::raw("  "),
-            Span::styled("Enter", Style::default().fg(Color::Yellow)),
-            Span::raw(": Send  "),
-            Span::styled("Esc", Style::default().fg(Color::Yellow)),
-            Span::raw(": Cancel"),
-        ]),
+        FocusMode::Input => {
+            // Split input_buffer at cursor position for display
+            let chars: Vec<char> = state.input_buffer.chars().collect();
+            let cursor_pos = state.input_cursor();
+            let (before, after) = chars.split_at(cursor_pos.min(chars.len()));
+            let before_str: String = before.iter().collect();
+            let after_str: String = after.iter().collect();
+
+            // Calculate display width of the text before cursor (for cursor positioning)
+            // Account for: border (1) + "> " prefix (2)
+            let prefix_width = 3u16; // border + "> "
+            let before_width: u16 = before_str.chars().map(unicode_display_width).sum();
+
+            // Cursor position: area.x + prefix_width + before_width
+            cursor_position = Some((area.x + prefix_width + before_width, area.y + 1));
+
+            Line::from(vec![
+                Span::styled("> ", Style::default().fg(Color::Green)),
+                Span::raw(before_str),
+                Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+                Span::raw(after_str),
+                Span::raw("  "),
+                Span::styled("Enter", Style::default().fg(Color::Yellow)),
+                Span::raw(": Send  "),
+                Span::styled("Esc", Style::default().fg(Color::Yellow)),
+                Span::raw(": Cancel  "),
+                Span::styled("</>", Style::default().fg(Color::Yellow)),
+                Span::raw(": Move"),
+            ])
+        }
     };
 
     let footer =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Commands"));
     frame.render_widget(footer, area);
+
+    cursor_position
+}
+
+/// Calculate the display width of a character using unicode-width crate.
+fn unicode_display_width(c: char) -> u16 {
+    c.width().unwrap_or(0) as u16
 }
 
 fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
