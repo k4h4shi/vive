@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::discovery::Project;
+use crate::github::{IssueTitleCache, IssueTitleResult};
 
 /// Debounce duration for mouse scroll events (in milliseconds).
 const SCROLL_DEBOUNCE_MS: u64 = 25;
@@ -211,6 +212,8 @@ pub struct AppState {
     /// Flag indicating whether favorites were modified by the user during this session.
     /// When true, we allow saving even if loading failed (user intent is clear).
     favorites_modified: bool,
+    /// Cache for Issue titles fetched from GitHub.
+    issue_title_cache: IssueTitleCache,
 }
 
 impl Default for AppState {
@@ -234,6 +237,7 @@ impl Default for AppState {
             favorites: HashSet::new(),
             favorites_load_failed: false,
             favorites_modified: false,
+            issue_title_cache: IssueTitleCache::new(),
         }
     }
 }
@@ -770,6 +774,31 @@ impl AppState {
     /// Check if favorites were modified by the user during this session.
     pub fn favorites_modified(&self) -> bool {
         self.favorites_modified
+    }
+
+    /// Get a cached Issue title for a worktree.
+    ///
+    /// Returns `Some(title)` if the title is cached, `None` otherwise.
+    pub fn get_cached_issue_title(&self, repo_path: &str, issue_number: u32) -> Option<&str> {
+        match self.issue_title_cache.get(repo_path, issue_number) {
+            Some(IssueTitleResult::Found(title)) => Some(title),
+            _ => None,
+        }
+    }
+
+    /// Check if an Issue title fetch is needed (not cached yet).
+    pub fn needs_issue_title_fetch(&self, repo_path: &str, issue_number: u32) -> bool {
+        !self.issue_title_cache.contains(repo_path, issue_number)
+    }
+
+    /// Set a cached Issue title.
+    pub fn set_issue_title(
+        &mut self,
+        repo_path: String,
+        issue_number: u32,
+        result: IssueTitleResult,
+    ) {
+        self.issue_title_cache.set(repo_path, issue_number, result);
     }
 
     /// Get projects sorted with favorites first, preserving original order within each group.

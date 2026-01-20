@@ -79,6 +79,43 @@ impl Project {
     }
 }
 
+/// Extracts the Issue number from a branch name.
+///
+/// Supported formats:
+/// - `feature/issue-123` -> Some(123)
+/// - `fix/issue-456` -> Some(456)
+/// - `feature/issue-42-add-dark-mode` -> Some(42)
+/// - `issue-789` -> Some(789)
+/// - `feature/123` -> Some(123)
+/// - `main` / `master` / `develop` -> None
+pub fn extract_issue_number(branch_name: &str) -> Option<u32> {
+    // Pattern 1: issue-NUM (e.g., "feature/issue-123" or "issue-42-suffix")
+    if let Some(issue_pos) = branch_name.find("issue-") {
+        let after_issue = &branch_name[issue_pos + 6..];
+        let num_str: String = after_issue
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if !num_str.is_empty() {
+            return num_str.parse().ok();
+        }
+    }
+
+    // Pattern 2: feature/NUM or fix/NUM (number after last slash)
+    if let Some(last_slash_pos) = branch_name.rfind('/') {
+        let after_slash = &branch_name[last_slash_pos + 1..];
+        let num_str: String = after_slash
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if !num_str.is_empty() {
+            return num_str.parse().ok();
+        }
+    }
+
+    None
+}
+
 impl Worktree {
     /// Creates a new Worktree with the given path, commit, and optional branch.
     pub fn new(
@@ -91,6 +128,15 @@ impl Worktree {
             commit: commit.into(),
             branch,
         }
+    }
+
+    /// Extracts the Issue number from the branch name, if present.
+    ///
+    /// Returns `None` if:
+    /// - The worktree has no branch (detached HEAD)
+    /// - The branch name doesn't contain an Issue number
+    pub fn issue_number(&self) -> Option<u32> {
+        self.branch.as_ref().and_then(|b| extract_issue_number(b))
     }
 
     /// Generates a unique Tmux session ID for this worktree.
@@ -498,5 +544,56 @@ branch refs/heads/main"#;
     fn test_default_worktree_none_when_empty() {
         let project = Project::new("test", "/path");
         assert!(project.default_worktree().is_none());
+    }
+
+    // ========== Tests for Issue number extraction ==========
+
+    #[test]
+    fn test_extract_issue_number_feature_branch() {
+        assert_eq!(extract_issue_number("feature/issue-123"), Some(123));
+    }
+
+    #[test]
+    fn test_extract_issue_number_fix_branch() {
+        assert_eq!(extract_issue_number("fix/issue-456"), Some(456));
+    }
+
+    #[test]
+    fn test_extract_issue_number_with_suffix() {
+        assert_eq!(
+            extract_issue_number("feature/issue-42-add-dark-mode"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn test_extract_issue_number_no_issue() {
+        assert_eq!(extract_issue_number("main"), None);
+        assert_eq!(extract_issue_number("master"), None);
+        assert_eq!(extract_issue_number("develop"), None);
+    }
+
+    #[test]
+    fn test_extract_issue_number_alternative_formats() {
+        // issue-NUM format
+        assert_eq!(extract_issue_number("issue-789"), Some(789));
+        // NUM only (less common)
+        assert_eq!(extract_issue_number("feature/123"), Some(123));
+    }
+
+    #[test]
+    fn test_worktree_issue_number() {
+        let wt = Worktree::new(
+            "/path/to/worktree",
+            "abc123",
+            Some("feature/issue-54".to_string()),
+        );
+        assert_eq!(wt.issue_number(), Some(54));
+
+        let wt_main = Worktree::new("/path/to/main", "def456", Some("main".to_string()));
+        assert_eq!(wt_main.issue_number(), None);
+
+        let wt_detached = Worktree::new("/path/to/detached", "ghi789", None);
+        assert_eq!(wt_detached.issue_number(), None);
     }
 }

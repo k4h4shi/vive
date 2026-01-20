@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use crate::state::AgentStatus;
 
 /// Default hysteresis duration in milliseconds.
-const DEFAULT_HYSTERESIS_MS: u64 = 2000;
+/// Issue #57: Reduced from 2000ms to 500ms to improve UI responsiveness.
+const DEFAULT_HYSTERESIS_MS: u64 = 500;
 
 /// Spinner characters used by Claude Code.
 const SPINNER_CHARS: &[char] = &[
@@ -33,7 +34,7 @@ impl Default for StatusMonitor {
 }
 
 impl StatusMonitor {
-    /// Create a new StatusMonitor with default hysteresis (2000ms).
+    /// Create a new StatusMonitor with default hysteresis (500ms).
     pub fn new() -> Self {
         Self {
             last_active: HashMap::new(),
@@ -104,8 +105,11 @@ pub fn title_has_spinner(title: &str) -> bool {
 
 /// Determine final status by combining parsed status with title spinner check.
 ///
-/// Note: Error and Success states are preserved regardless of spinner presence,
-/// as these represent definitive terminal states that shouldn't be overridden.
+/// Priority order (Issue #57):
+/// 1. Error and Success states are preserved (terminal states)
+/// 2. Waiting states (WaitingEdit, WaitingShell, WaitingOther) are preserved
+///    even when spinner is present - this fixes the "input waiting but shows Working" bug
+/// 3. For other states (Idle, Working), spinner presence forces Working status
 pub fn combine_status_with_title(
     parsed_status: AgentStatus,
     pane_title: Option<&str>,
@@ -115,7 +119,18 @@ pub fn combine_status_with_title(
         return parsed_status;
     }
 
-    // If title has spinner, force Working status for non-terminal states
+    // Preserve Waiting states - these indicate user action is needed
+    // and should not be overridden by spinner (Issue #57)
+    if matches!(
+        parsed_status,
+        AgentStatus::WaitingEdit { .. }
+            | AgentStatus::WaitingShell { .. }
+            | AgentStatus::WaitingOther
+    ) {
+        return parsed_status;
+    }
+
+    // If title has spinner, force Working status for non-terminal, non-waiting states
     if let Some(title) = pane_title
         && title_has_spinner(title)
     {
@@ -341,12 +356,12 @@ mod tests {
 
     #[test]
     fn test_combine_status_with_title_waiting_with_spinner() {
-        // WaitingEdit with spinner should become Working
+        // Issue #57: WaitingEdit with spinner should stay WaitingEdit (Waiting has priority)
         let status = combine_status_with_title(
             AgentStatus::WaitingEdit { path: None },
             Some("⠋ Waiting for input..."),
         );
-        assert_eq!(status, AgentStatus::Working { detail: None });
+        assert_eq!(status, AgentStatus::WaitingEdit { path: None });
     }
 
     #[test]
@@ -370,5 +385,61 @@ mod tests {
         // Error should pass through even during cooldown
         let status = monitor.apply_hysteresis(session, AgentStatus::Error);
         assert_eq!(status, AgentStatus::Error);
+    }
+
+    // Issue #57: Waiting status should be prioritized over spinner
+    #[test]
+    fn test_combine_status_waiting_edit_prioritized_over_spinner() {
+        // WaitingEdit should NOT be overridden by spinner - it should stay WaitingEdit
+        let status = combine_status_with_title(
+            AgentStatus::WaitingEdit {
+                path: Some("/path/to/file".to_string()),
+            },
+            Some("⠋ Waiting for input..."),
+        );
+        assert_eq!(
+            status,
+            AgentStatus::WaitingEdit {
+                path: Some("/path/to/file".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn test_combine_status_waiting_shell_prioritized_over_spinner() {
+        // WaitingShell should NOT be overridden by spinner - it should stay WaitingShell
+        let status = combine_status_with_title(
+            AgentStatus::WaitingShell {
+                command: Some("npm install".to_string()),
+            },
+            Some("⠿ Processing..."),
+        );
+        assert_eq!(
+            status,
+            AgentStatus::WaitingShell {
+                command: Some("npm install".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn test_combine_status_waiting_other_prioritized_over_spinner() {
+        // WaitingOther should NOT be overridden by spinner - it should stay WaitingOther
+        let status = combine_status_with_title(AgentStatus::WaitingOther, Some("⏺ Task running"));
+        assert_eq!(status, AgentStatus::WaitingOther);
+    }
+
+    #[test]
+    fn test_combine_status_idle_still_becomes_working_with_spinner() {
+        // Idle with spinner should still become Working (only Waiting types are prioritized)
+        let status = combine_status_with_title(AgentStatus::Idle, Some("⠋ Loading..."));
+        assert_eq!(status, AgentStatus::Working { detail: None });
+    }
+
+    /// Issue #57: Verify default hysteresis is 500ms (reduced from 2000ms)
+    #[test]
+    fn test_default_hysteresis_is_500ms() {
+        let monitor = StatusMonitor::new();
+        assert_eq!(monitor.hysteresis, Duration::from_millis(500));
     }
 }
