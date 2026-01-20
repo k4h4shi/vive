@@ -71,24 +71,44 @@ static SUBAGENT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?m)[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏]\s*(?:Task|Agent)\s*(?:\([^)]*subagent_type\s*[:=]\s*["']?(\w[\w-]*)["']?\)|(\w+))"#).unwrap()
 });
 
+/// Number of lines from the end to check for approval prompts.
+/// Issue #57: Limit approval detection to recent output to prevent
+/// stale prompts from causing incorrect Waiting status.
+const APPROVAL_DETECTION_LINES: usize = 30;
+
+/// Number of lines from the end to check for spinner/working state.
+const WORKING_DETECTION_LINES: usize = 20;
+
+/// Extract the last N lines from content.
+fn get_tail_lines(content: &str, n: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
+}
+
 /// Parse terminal content and return the detected status.
 pub fn parse_status(content: &str) -> ParsedStatus {
+    // Issue #57: Only check the last N lines for approval prompts
+    // to prevent stale prompts from causing incorrect Waiting status
+    let tail_for_approval = get_tail_lines(content, APPROVAL_DETECTION_LINES);
+
     // Check for approval prompts first (highest priority)
-    if let Some(approval) = detect_approval(content) {
+    if let Some(approval) = detect_approval(&tail_for_approval) {
         return ParsedStatus::WaitingApproval {
             approval_type: approval,
         };
     }
 
-    // Check for button UI
+    // Check for button UI (already limited to last 10 lines internally)
     if detect_button_ui(content) {
         return ParsedStatus::WaitingApproval {
             approval_type: ApprovalType::General,
         };
     }
 
-    // Check for spinner/working state
-    if let Some(task) = detect_working(content) {
+    // Check for spinner/working state in recent output
+    let tail_for_working = get_tail_lines(content, WORKING_DETECTION_LINES);
+    if let Some(task) = detect_working(&tail_for_working) {
         return ParsedStatus::Working { task: Some(task) };
     }
 
@@ -522,6 +542,63 @@ mod tests {
                 ParsedStatus::Idle,
                 "Expected Idle for '{content}'"
             );
+        }
+    }
+
+    // Issue #57: Old approval prompts in buffer should not trigger Waiting status
+    #[test]
+    fn test_old_approval_not_detected_when_far_from_end() {
+        // Simulate: approval prompt at line 10, but 50 lines of new output after it
+        let mut content = String::from("Do you want to edit this file?\n");
+        for i in 0..50 {
+            content.push_str(&format!(
+                "Line {i} of new output after approval was handled\n"
+            ));
+        }
+        // Old approval prompt is now far from the end, should be Idle
+        assert_eq!(parse_status(&content), ParsedStatus::Idle);
+    }
+
+    #[test]
+    fn test_recent_approval_still_detected() {
+        // Approval prompt within the last few lines should still be detected
+        let mut content = String::new();
+        for i in 0..10 {
+            content.push_str(&format!("Line {i} of output\n"));
+        }
+        content.push_str("Do you want to edit this file?\n");
+        // Approval is at the end, should be detected
+        match parse_status(&content) {
+            ParsedStatus::WaitingApproval {
+                approval_type: ApprovalType::FileEdit { .. },
+            } => {}
+            other => panic!("Expected FileEdit approval for recent prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_old_shell_command_not_detected() {
+        // Shell command approval at the beginning, lots of output after
+        let mut content =
+            String::from("Do you want to run this command?\n```bash\ncargo test\n```\n");
+        for i in 0..50 {
+            content.push_str(&format!("Test output line {i}\n"));
+        }
+        // Old shell command prompt should not be detected
+        assert_eq!(parse_status(&content), ParsedStatus::Idle);
+    }
+
+    #[test]
+    fn test_spinner_still_detected_with_old_approval() {
+        // Old approval at the top, but spinner at the end = should be Working
+        let mut content = String::from("Do you want to edit this file?\n");
+        for i in 0..50 {
+            content.push_str(&format!("Output line {i}\n"));
+        }
+        content.push_str("⠋ Now working on something new...\n");
+        match parse_status(&content) {
+            ParsedStatus::Working { .. } => {}
+            other => panic!("Expected Working status with spinner, got {other:?}"),
         }
     }
 }
