@@ -56,8 +56,11 @@ impl StatusMonitor {
     pub fn apply_hysteresis(&mut self, session_id: &str, raw_status: AgentStatus) -> AgentStatus {
         let now = Instant::now();
 
-        match raw_status {
-            AgentStatus::Working | AgentStatus::Waiting => {
+        match &raw_status {
+            AgentStatus::Working { .. }
+            | AgentStatus::WaitingEdit { .. }
+            | AgentStatus::WaitingShell { .. }
+            | AgentStatus::WaitingOther => {
                 // Active state - record the time
                 self.last_active.insert(session_id.to_string(), now);
                 raw_status
@@ -68,11 +71,11 @@ impl StatusMonitor {
                     && now.duration_since(*last) < self.hysteresis
                 {
                     // Still in cooldown - report as Working
-                    return AgentStatus::Working;
+                    return AgentStatus::Working { detail: None };
                 }
                 AgentStatus::Idle
             }
-            AgentStatus::Error => raw_status,
+            AgentStatus::Error | AgentStatus::Success => raw_status,
         }
     }
 
@@ -108,7 +111,7 @@ pub fn combine_status_with_title(
     if let Some(title) = pane_title
         && title_has_spinner(title)
     {
-        return AgentStatus::Working;
+        return AgentStatus::Working { detail: None };
     }
     parsed_status
 }
@@ -124,8 +127,8 @@ mod tests {
         let session = "test-session";
 
         // Working status should pass through
-        let status = monitor.apply_hysteresis(session, AgentStatus::Working);
-        assert_eq!(status, AgentStatus::Working);
+        let status = monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -133,9 +136,9 @@ mod tests {
         let mut monitor = StatusMonitor::new();
         let session = "test-session";
 
-        // Waiting status should pass through
-        let status = monitor.apply_hysteresis(session, AgentStatus::Waiting);
-        assert_eq!(status, AgentStatus::Waiting);
+        // WaitingEdit status should pass through
+        let status = monitor.apply_hysteresis(session, AgentStatus::WaitingEdit { path: None });
+        assert_eq!(status, AgentStatus::WaitingEdit { path: None });
     }
 
     #[test]
@@ -144,11 +147,11 @@ mod tests {
         let session = "test-session";
 
         // First, mark as working
-        monitor.apply_hysteresis(session, AgentStatus::Working);
+        monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
 
         // Immediately check idle - should return Working due to hysteresis
         let status = monitor.apply_hysteresis(session, AgentStatus::Idle);
-        assert_eq!(status, AgentStatus::Working);
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -157,7 +160,7 @@ mod tests {
         let session = "test-session";
 
         // First, mark as working
-        monitor.apply_hysteresis(session, AgentStatus::Working);
+        monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
 
         // Wait for hysteresis to expire
         thread::sleep(Duration::from_millis(20));
@@ -206,7 +209,7 @@ mod tests {
     fn test_combine_status_with_title_spinner_overrides_idle() {
         // Title with spinner should override Idle to Working
         let status = combine_status_with_title(AgentStatus::Idle, Some("⠋ Loading..."));
-        assert_eq!(status, AgentStatus::Working);
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -226,8 +229,9 @@ mod tests {
     #[test]
     fn test_combine_status_with_title_working_stays_working() {
         // Already Working should stay Working regardless of title
-        let status = combine_status_with_title(AgentStatus::Working, Some("Normal title"));
-        assert_eq!(status, AgentStatus::Working);
+        let status =
+            combine_status_with_title(AgentStatus::Working { detail: None }, Some("Normal title"));
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -235,7 +239,7 @@ mod tests {
         let mut monitor = StatusMonitor::with_hysteresis(100);
 
         // Session A becomes working
-        monitor.apply_hysteresis("session-a", AgentStatus::Working);
+        monitor.apply_hysteresis("session-a", AgentStatus::Working { detail: None });
 
         // Session B has no prior activity - should return Idle immediately
         let status_b = monitor.apply_hysteresis("session-b", AgentStatus::Idle);
@@ -243,7 +247,7 @@ mod tests {
 
         // Session A goes idle - should return Working due to hysteresis
         let status_a = monitor.apply_hysteresis("session-a", AgentStatus::Idle);
-        assert_eq!(status_a, AgentStatus::Working);
+        assert_eq!(status_a, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -251,12 +255,12 @@ mod tests {
         let mut monitor = StatusMonitor::with_hysteresis(100);
         let session = "test-session";
 
-        // Waiting status should also record last_active
-        monitor.apply_hysteresis(session, AgentStatus::Waiting);
+        // WaitingEdit status should also record last_active
+        monitor.apply_hysteresis(session, AgentStatus::WaitingEdit { path: None });
 
         // Immediately check idle - should return Working due to hysteresis
         let status = monitor.apply_hysteresis(session, AgentStatus::Idle);
-        assert_eq!(status, AgentStatus::Working);
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -265,7 +269,7 @@ mod tests {
         let session = "test-session";
 
         // Mark as working
-        monitor.apply_hysteresis(session, AgentStatus::Working);
+        monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
 
         // Clear the session
         monitor.clear_session(session);
@@ -281,20 +285,20 @@ mod tests {
         let session = "test-session";
 
         // Initial working
-        monitor.apply_hysteresis(session, AgentStatus::Working);
+        monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
 
         // Wait half the hysteresis time
         thread::sleep(Duration::from_millis(30));
 
         // Another working resets the timer
-        monitor.apply_hysteresis(session, AgentStatus::Working);
+        monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
 
         // Wait another 30ms (total 60ms from first, but only 30ms from reset)
         thread::sleep(Duration::from_millis(30));
 
         // Should still be in cooldown (30ms < 50ms from reset)
         let status = monitor.apply_hysteresis(session, AgentStatus::Idle);
-        assert_eq!(status, AgentStatus::Working);
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
@@ -318,22 +322,27 @@ mod tests {
         // Error status should not be overridden even with spinner
         let status = combine_status_with_title(AgentStatus::Error, Some("⠋ Loading..."));
         // Note: Current implementation would return Working, but this tests current behavior
-        assert_eq!(status, AgentStatus::Working);
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
     fn test_combine_status_with_title_waiting_with_spinner() {
-        // Waiting with spinner should become Working
-        let status =
-            combine_status_with_title(AgentStatus::Waiting, Some("⠋ Waiting for input..."));
-        assert_eq!(status, AgentStatus::Working);
+        // WaitingEdit with spinner should become Working
+        let status = combine_status_with_title(
+            AgentStatus::WaitingEdit { path: None },
+            Some("⠋ Waiting for input..."),
+        );
+        assert_eq!(status, AgentStatus::Working { detail: None });
     }
 
     #[test]
     fn test_combine_status_with_title_waiting_without_spinner() {
-        // Waiting without spinner stays Waiting
-        let status = combine_status_with_title(AgentStatus::Waiting, Some("Normal title"));
-        assert_eq!(status, AgentStatus::Waiting);
+        // WaitingEdit without spinner stays WaitingEdit
+        let status = combine_status_with_title(
+            AgentStatus::WaitingEdit { path: None },
+            Some("Normal title"),
+        );
+        assert_eq!(status, AgentStatus::WaitingEdit { path: None });
     }
 
     #[test]
@@ -342,7 +351,7 @@ mod tests {
         let session = "test-session";
 
         // Mark as working
-        monitor.apply_hysteresis(session, AgentStatus::Working);
+        monitor.apply_hysteresis(session, AgentStatus::Working { detail: None });
 
         // Error should pass through even during cooldown
         let status = monitor.apply_hysteresis(session, AgentStatus::Error);
