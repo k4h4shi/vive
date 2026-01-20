@@ -290,24 +290,31 @@ mod tests {
     #[test]
     fn test_navigate_next_on_j() {
         let mut state = create_test_state_with_projects();
-        assert_eq!(state.selected_worktree_idx(), Some(0));
+        // Starts at project header (worktree_idx = None)
+        assert_eq!(state.selected_worktree_idx(), None);
 
         let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(1));
+        // Now at worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(action, Action::RefreshPreview);
     }
 
     #[test]
     fn test_navigate_next_on_down() {
         let mut state = create_test_state_with_projects();
+        // Starts at project header
+        assert_eq!(state.selected_worktree_idx(), None);
+
         let action = handle_key_event(key_event(KeyCode::Down), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(1));
+        // Now at worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(action, Action::RefreshPreview);
     }
 
     #[test]
     fn test_navigate_prev_on_k() {
         let mut state = create_test_state_with_projects();
+        state.select_next(); // Move to worktree 0
         state.select_next(); // Move to worktree 1
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
@@ -319,7 +326,8 @@ mod tests {
     #[test]
     fn test_navigate_prev_on_up() {
         let mut state = create_test_state_with_projects();
-        state.select_next();
+        state.select_next(); // worktree 0
+        state.select_next(); // worktree 1
         let action = handle_key_event(key_event(KeyCode::Up), &mut state);
         assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(action, Action::RefreshPreview);
@@ -456,52 +464,56 @@ mod tests {
     #[test]
     fn test_mouse_scroll_down_moves_one_item() {
         let mut state = create_test_state_with_projects();
-        assert_eq!(state.selected_worktree_idx(), Some(0));
+        // Starts at project header
+        assert_eq!(state.selected_worktree_idx(), None);
 
-        // Scroll down should move exactly one item
+        // Scroll down should move exactly one item (to worktree 0)
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(action, Action::RefreshPreview);
 
         // Reset debounce for next scroll test
         state.reset_scroll_debounce();
 
-        // Scroll down again
+        // Scroll down again (to worktree 1)
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(state.selected_project_idx(), Some(1));
-        assert_eq!(state.selected_worktree_idx(), Some(0));
-        assert_eq!(action, Action::RefreshPreview);
-    }
-
-    #[test]
-    fn test_mouse_scroll_up_moves_one_item() {
-        let mut state = create_test_state_with_projects();
-        // Move to second project first
-        state.select_next();
-        state.select_next();
-        assert_eq!(state.selected_project_idx(), Some(1));
-        assert_eq!(state.selected_worktree_idx(), Some(0));
-
-        // Scroll up should move exactly one item
-        let action = handle_mouse_event(mouse_scroll_up(), &mut state);
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), Some(1));
         assert_eq!(action, Action::RefreshPreview);
     }
 
     #[test]
-    fn test_mouse_scroll_debounce_blocks_rapid_scrolls() {
+    fn test_mouse_scroll_up_moves_one_item() {
         let mut state = create_test_state_with_projects();
+        // Move to project-b worktree
+        state.select_next(); // worktree 0
+        state.select_next(); // worktree 1
+        state.select_next(); // project-b header
+        state.select_next(); // project-b worktree 0
+        assert_eq!(state.selected_project_idx(), Some(1));
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        // First scroll should work
+        // Scroll up should move exactly one item (to project-b header)
+        let action = handle_mouse_event(mouse_scroll_up(), &mut state);
+        assert_eq!(state.selected_project_idx(), Some(1));
+        assert_eq!(state.selected_worktree_idx(), None); // Project header
+        assert_eq!(action, Action::RefreshPreview);
+    }
+
+    #[test]
+    fn test_mouse_scroll_debounce_blocks_rapid_scrolls() {
+        let mut state = create_test_state_with_projects();
+        // Starts at project header
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        // First scroll should work (to worktree 0)
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(action, Action::RefreshPreview);
 
         // Immediate second scroll should be blocked by debounce
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(1)); // Still at 1, not moved
+        assert_eq!(state.selected_worktree_idx(), Some(0)); // Still at 0, not moved
         assert_eq!(action, Action::None);
     }
 
@@ -515,8 +527,9 @@ mod tests {
     #[test]
     fn test_d_key_opens_deletion_modal_for_worktree() {
         let mut state = create_test_state_with_projects();
-        // Select a worktree (not main/master)
-        state.select_next(); // Move to feature worktree
+        // Select a worktree (not main/master) - navigate: header -> wt0 -> wt1(feature)
+        state.select_next(); // worktree 0 (main)
+        state.select_next(); // worktree 1 (feature)
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
         let action = handle_key_event(key_event(KeyCode::Char('d')), &mut state);
@@ -527,7 +540,8 @@ mod tests {
     #[test]
     fn test_d_key_does_not_delete_main_branch() {
         let mut state = create_test_state_with_projects();
-        // Select main worktree
+        // Navigate to main worktree (header -> wt0)
+        state.select_next(); // worktree 0 (main)
         assert_eq!(state.selected_worktree_idx(), Some(0));
         let worktree = state.selected_worktree().unwrap();
         assert_eq!(worktree.branch.as_deref(), Some("main"));

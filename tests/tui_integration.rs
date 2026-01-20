@@ -316,16 +316,16 @@ fn test_navigation_j_moves_down() {
 
     app.init().unwrap();
 
-    // Initially at worktree index 0
-    assert_eq!(app.state().selected_worktree_idx(), Some(0));
+    // Initially at project header (worktree_idx = None)
+    assert_eq!(app.state().selected_worktree_idx(), None);
 
     // Simulate pressing 'j'
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // Now at worktree index 1
-    assert_eq!(app.state().selected_worktree_idx(), Some(1));
+    // Now at worktree index 0
+    assert_eq!(app.state().selected_worktree_idx(), Some(0));
 }
 
 /// Test: Navigation - Press 'k' to move selection up.
@@ -336,7 +336,10 @@ fn test_navigation_k_moves_up() {
 
     app.init().unwrap();
 
-    // Move down first
+    // Move down twice to get to worktree 1
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
@@ -359,11 +362,15 @@ fn test_navigation_down_arrow() {
 
     app.init().unwrap();
 
+    // Initially at project header
+    assert_eq!(app.state().selected_worktree_idx(), None);
+
     let key = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    assert_eq!(app.state().selected_worktree_idx(), Some(1));
+    // Now at worktree 0
+    assert_eq!(app.state().selected_worktree_idx(), Some(0));
 }
 
 /// Test: Navigation - Navigation crosses project boundaries.
@@ -375,7 +382,14 @@ fn test_navigation_crosses_projects() {
     app.init().unwrap();
 
     // project-alpha has 2 worktrees, project-beta has 1
-    // Start: project 0, worktree 0
+    // Start: project 0, header (worktree_idx = None)
+    assert_eq!(app.state().selected_project_idx(), Some(0));
+    assert_eq!(app.state().selected_worktree_idx(), None);
+
+    // j -> project 0, worktree 0
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
     assert_eq!(app.state().selected_project_idx(), Some(0));
     assert_eq!(app.state().selected_worktree_idx(), Some(0));
 
@@ -386,12 +400,12 @@ fn test_navigation_crosses_projects() {
     assert_eq!(app.state().selected_project_idx(), Some(0));
     assert_eq!(app.state().selected_worktree_idx(), Some(1));
 
-    // j -> project 1, worktree 0
+    // j -> project 1, header (worktree_idx = None)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
     assert_eq!(app.state().selected_project_idx(), Some(1));
-    assert_eq!(app.state().selected_worktree_idx(), Some(0));
+    assert_eq!(app.state().selected_worktree_idx(), None);
 }
 
 /// Test: Modal - Press 'n' to open create task modal.
@@ -614,6 +628,11 @@ fn test_preview_updates_from_tmux() {
 
     app.init().unwrap();
 
+    // Navigate to worktree 0 (main) to get session ID
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
     // Update preview
     app.update_pane_preview();
 
@@ -722,19 +741,25 @@ fn test_navigation_clears_status_message() {
 fn test_tick_cycle() {
     let projects = create_test_projects();
     let events = vec![
-        MockEventSource::key(KeyCode::Char('j')),
+        MockEventSource::key(KeyCode::Char('j')), // header -> worktree 0
+        MockEventSource::key(KeyCode::Char('j')), // worktree 0 -> worktree 1
         MockEventSource::key(KeyCode::Char('q')),
     ];
     let mut app = create_test_app(projects, events);
 
     app.init().unwrap();
 
-    // First tick: process 'j'
+    // First tick: process first 'j' (header -> worktree 0)
+    let should_continue = app.tick(Duration::from_millis(0)).unwrap();
+    assert!(should_continue);
+    assert_eq!(app.state().selected_worktree_idx(), Some(0));
+
+    // Second tick: process second 'j' (worktree 0 -> worktree 1)
     let should_continue = app.tick(Duration::from_millis(0)).unwrap();
     assert!(should_continue);
     assert_eq!(app.state().selected_worktree_idx(), Some(1));
 
-    // Second tick: process 'q'
+    // Third tick: process 'q'
     let should_continue = app.tick(Duration::from_millis(0)).unwrap();
     assert!(!should_continue);
     assert!(app.state().should_quit());
@@ -765,8 +790,17 @@ fn test_favorites_toggle_on_f() {
 
     app.init().unwrap();
 
-    // No favorites initially
+    // Clear any favorites that might have been loaded from disk
+    for name in app.state().favorites().clone() {
+        app.state_mut().toggle_favorite(&name);
+    }
+
+    // No favorites now - starts at project-alpha header
     assert!(!app.state().favorites().contains("project-alpha"));
+    assert_eq!(
+        app.state().selected_project().unwrap().name,
+        "project-alpha"
+    );
 
     // Press 'f' to toggle favorite
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
@@ -775,12 +809,18 @@ fn test_favorites_toggle_on_f() {
 
     // Now project-alpha should be a favorite
     assert!(app.state().favorites().contains("project-alpha"));
+    // Selection should still be on project-alpha (first in sorted order as favorite)
+    assert_eq!(
+        app.state().selected_project().unwrap().name,
+        "project-alpha"
+    );
 
     // Toggle again to remove
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
+    // project-alpha should no longer be a favorite
     assert!(!app.state().favorites().contains("project-alpha"));
 }
 
@@ -791,6 +831,11 @@ fn test_favorites_show_star_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+
+    // Clear any favorites that might have been loaded from disk
+    for name in app.state().favorites().clone() {
+        app.state_mut().toggle_favorite(&name);
+    }
 
     // Toggle favorite
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
@@ -806,22 +851,28 @@ fn test_favorites_show_star_icon() {
 /// Test: Deletion modal - Press 'd' on non-main branch opens modal.
 #[test]
 fn test_deletion_modal_opens_on_d() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/feature-x",
-            "def456",
-            Some("feature-x".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature-x",
+                "def456",
+                Some("feature-x".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
 
-    // Navigate to feature-x worktree
+    // Navigate: header -> worktree 0 (main) -> worktree 1 (feature-x)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+    assert_eq!(app.state().selected_worktree_idx(), Some(1));
 
     // Now on feature-x, press 'd'
     let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
@@ -840,7 +891,12 @@ fn test_deletion_on_main_shows_error() {
 
     app.init().unwrap();
 
-    // Currently on main branch (default selection)
+    // Navigate to main branch: header -> worktree 0 (main)
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+    assert_eq!(app.state().selected_worktree_idx(), Some(0));
+
     // Press 'd'
     let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
@@ -858,22 +914,28 @@ fn test_deletion_on_main_shows_error() {
 /// Test: Deletion modal renders with branch name.
 #[test]
 fn test_deletion_modal_renders_branch_name() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/my-feature",
-            "def456",
-            Some("my-feature".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/my-feature",
+                "def456",
+                Some("my-feature".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
 
-    // Navigate to my-feature
+    // Navigate: header -> worktree 0 (main) -> worktree 1 (my-feature)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+    assert_eq!(app.state().selected_worktree_idx(), Some(1));
 
     // Press 'd' to open deletion modal
     let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
@@ -890,23 +952,30 @@ fn test_deletion_modal_renders_branch_name() {
 /// Test: Deletion modal - 'n' cancels deletion.
 #[test]
 fn test_deletion_modal_n_cancels() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/feature-1",
-            "def456",
-            Some("feature-1".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature-1",
+                "def456",
+                Some("feature-1".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
 
-    // Navigate and open deletion modal
+    // Navigate: header -> worktree 0 (main) -> worktree 1 (feature-1)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+    assert_eq!(app.state().selected_worktree_idx(), Some(1));
 
+    // Press 'd' to open deletion modal
     let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
@@ -963,19 +1032,35 @@ fn test_multiple_project_statuses() {
 /// Test: Navigation at boundary doesn't crash.
 #[test]
 fn test_navigation_at_boundary() {
-    let projects = vec![Project::new("single-project", "/path/to/single").with_worktrees(vec![
-        Worktree::new("/path/to/single", "abc123", Some("main".to_string())),
-    ])];
+    let projects = vec![
+        Project::new("single-project", "/path/to/single").with_worktrees(vec![Worktree::new(
+            "/path/to/single",
+            "abc123",
+            Some("main".to_string()),
+        )]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+
+    // Initially at project header
+    assert_eq!(app.state().selected_project_idx(), Some(0));
+    assert_eq!(app.state().selected_worktree_idx(), None);
 
     // Try to move up when already at top
     let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // Should still be at first position
+    // Should still be at first position (project header)
+    assert_eq!(app.state().selected_project_idx(), Some(0));
+    assert_eq!(app.state().selected_worktree_idx(), None);
+
+    // Move down to worktree 0
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
     assert_eq!(app.state().selected_project_idx(), Some(0));
     assert_eq!(app.state().selected_worktree_idx(), Some(0));
 
@@ -1003,6 +1088,12 @@ fn test_preview_shows_spinner_content() {
     );
 
     app.init().unwrap();
+
+    // Navigate to worktree 0 (main) to get session ID
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
     app.update_pane_preview();
     app.render().unwrap();
 

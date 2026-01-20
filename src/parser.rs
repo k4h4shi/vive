@@ -47,9 +47,8 @@ static FILE_EDIT_PATTERN: Lazy<Regex> = Lazy::new(|| {
         .unwrap()
 });
 
-static FILE_CREATE_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)Create\s+.*?\?|Do you want to create|Allow.*?create").unwrap()
-});
+static FILE_CREATE_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)Create\s+.*?\?|Do you want to create|Allow.*?create").unwrap());
 
 static SHELL_COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(Run|Execute)\s+(command|bash|shell)|Do you want to run|Allow.*?(command|bash)|run this command").unwrap()
@@ -59,17 +58,14 @@ static GENERAL_YESNO_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)\[y/n\]|\[Y/n\]|\[yes/no\]|\(Y\)es\s*/\s*\(N\)o|Yes\s*/\s*No").unwrap()
 });
 
-static FILE_PATH_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)(?:file|path)[:\s]+([^\s\n]+)|([./][\w/.-]+\.\w+)").unwrap()
-});
+static FILE_PATH_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)(?:file|path)[:\s]+([^\s\n]+)|([./][\w/.-]+\.\w+)").unwrap());
 
 static COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)(?:command|run)[:\s]+`([^`]+)`|```(?:bash|sh)?\n([^`]+)```").unwrap()
 });
 
-static SPINNER_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏▶►]").unwrap()
-});
+static SPINNER_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏▶►]").unwrap());
 
 static SUBAGENT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?m)[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏]\s*(?:Task|Agent)\s*(?:\([^)]*subagent_type\s*[:=]\s*["']?(\w[\w-]*)["']?\)|(\w+))"#).unwrap()
@@ -409,12 +405,17 @@ mod tests {
 
     #[test]
     fn test_detect_all_spinner_characters() {
-        let spinners = ['⏺', '⠿', '⠇', '⠋', '⠙', '⠸', '⠴', '⠦', '⠧', '⠖', '⠏', '▶', '►'];
+        let spinners = [
+            '⏺', '⠿', '⠇', '⠋', '⠙', '⠸', '⠴', '⠦', '⠧', '⠖', '⠏', '▶', '►',
+        ];
         for spinner in spinners {
             let content = format!("{spinner} Processing...");
             match parse_status(&content) {
                 ParsedStatus::Working { .. } => {}
-                other => panic!("Expected Working for spinner '{}', got {:?}", spinner, other),
+                other => panic!(
+                    "Expected Working for spinner '{}', got {:?}",
+                    spinner, other
+                ),
             }
         }
     }
