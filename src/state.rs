@@ -955,7 +955,12 @@ impl AppState {
     }
 
     /// Set favorites from a HashSet (used for loading from persistence).
+    /// Also expands favorites by default so they show their worktrees.
     pub fn set_favorites(&mut self, favorites: HashSet<String>) {
+        // Expand all favorites by default
+        for name in &favorites {
+            self.expanded_projects.insert(name.clone());
+        }
         self.favorites = favorites;
     }
 
@@ -987,8 +992,17 @@ impl AppState {
     }
 
     /// Toggle the expanded state of a project by name.
+    /// When collapsing a project, clears the worktree selection if it's on that project.
     pub fn toggle_expanded(&mut self, project_name: &str) {
         if self.expanded_projects.contains(project_name) {
+            // Collapsing: clear worktree selection if on this project
+            if let Some(selected) = self.selected_project() {
+                if selected.name == project_name && self.selected_worktree_idx.is_some() {
+                    self.selected_worktree_idx = None;
+                    // Update sidebar list state to reflect new selection
+                    self.sidebar_list_state.select(self.flat_sidebar_index());
+                }
+            }
             self.expanded_projects.remove(project_name);
         } else {
             self.expanded_projects.insert(project_name.to_string());
@@ -2546,6 +2560,48 @@ mod tests {
         // Actually, per requirements: "non-favorite default collapsed"
         // This means toggling favorite off should collapse unless user explicitly expanded
         // For simplicity, we'll have toggle_favorite reset to default behavior
+    }
+
+    #[test]
+    fn test_set_favorites_expands_persisted_favorites() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Initially neither project is expanded (no favorites)
+        assert!(!state.is_expanded("project-a"));
+        assert!(!state.is_expanded("project-b"));
+
+        // Simulate loading favorites from disk (like at app startup)
+        let mut favorites = HashSet::new();
+        favorites.insert("project-a".to_string());
+        state.set_favorites(favorites);
+
+        // project-a should now be expanded (loaded as favorite)
+        assert!(state.is_expanded("project-a"));
+        // project-b should still be collapsed
+        assert!(!state.is_expanded("project-b"));
+    }
+
+    #[test]
+    fn test_collapse_project_clears_worktree_selection() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Expand project-a
+        state.toggle_expanded("project-a");
+        assert!(state.is_expanded("project-a"));
+
+        // Navigate to project-a's worktree 0
+        assert_eq!(state.selected_worktree_idx(), None); // Start at header
+        state.select_next(); // Move to worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Collapse project-a while on its worktree
+        state.toggle_expanded("project-a");
+
+        // Selection should be cleared (back to project header)
+        assert_eq!(state.selected_worktree_idx(), None);
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
     }
 
     #[test]
