@@ -103,11 +103,19 @@ pub fn title_has_spinner(title: &str) -> bool {
 }
 
 /// Determine final status by combining parsed status with title spinner check.
+///
+/// Note: Error and Success states are preserved regardless of spinner presence,
+/// as these represent definitive terminal states that shouldn't be overridden.
 pub fn combine_status_with_title(
     parsed_status: AgentStatus,
     pane_title: Option<&str>,
 ) -> AgentStatus {
-    // If title has spinner, force Working status
+    // Preserve Error and Success states - these are terminal states
+    if matches!(parsed_status, AgentStatus::Error | AgentStatus::Success) {
+        return parsed_status;
+    }
+
+    // If title has spinner, force Working status for non-terminal states
     if let Some(title) = pane_title
         && title_has_spinner(title)
     {
@@ -321,8 +329,14 @@ mod tests {
     fn test_combine_status_with_title_error_not_overridden() {
         // Error status should not be overridden even with spinner
         let status = combine_status_with_title(AgentStatus::Error, Some("⠋ Loading..."));
-        // Note: Current implementation would return Working, but this tests current behavior
-        assert_eq!(status, AgentStatus::Working { detail: None });
+        assert_eq!(status, AgentStatus::Error);
+    }
+
+    #[test]
+    fn test_combine_status_with_title_success_not_overridden() {
+        // Success status should not be overridden even with spinner
+        let status = combine_status_with_title(AgentStatus::Success, Some("⠋ Loading..."));
+        assert_eq!(status, AgentStatus::Success);
     }
 
     #[test]
