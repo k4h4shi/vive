@@ -1142,6 +1142,34 @@ fn test_preview_hides_input_box_frame() {
     assert!(!preview.contains("╰"), "Should not contain bottom border");
 }
 
+/// Test: Preview hides horizontal line separators and alternate prompts.
+#[test]
+fn test_preview_hides_horizontal_lines_and_prompts() {
+    let projects = create_test_projects();
+
+    // Content with horizontal line separators and ❯ prompt (actual Claude Code format)
+    let content = "Analyzing code...\nDone!\n────────────────────────────────────────\n❯ \n────────────────────────────────────────";
+
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![("project-alpha__main", content)],
+    );
+
+    app.init().unwrap();
+    app.update_pane_preview();
+
+    let preview = &app.state().pane_preview;
+
+    // The actual content should be present
+    assert!(preview.contains("Analyzing code"), "Should contain main content");
+    assert!(preview.contains("Done!"), "Should contain main content");
+
+    // The horizontal lines and prompt should be removed
+    assert!(!preview.contains("────"), "Should not contain horizontal lines");
+    assert!(!preview.contains("❯"), "Should not contain ❯ prompt");
+}
+
 /// Test: Input mode typing updates input buffer.
 #[test]
 fn test_input_mode_typing_updates_buffer() {
