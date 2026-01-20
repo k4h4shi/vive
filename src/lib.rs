@@ -388,9 +388,10 @@ where
 /// Strip trailing lines that are input prompts, input box frames, or empty.
 ///
 /// This removes lines like:
-/// - "> ", ">" (input prompts)
+/// - "> ", ">", "❯ ", "❯" (input prompts)
 /// - Empty/whitespace-only lines
-/// - Input box frame characters (╭, ╰, │, ┌, └, etc.)
+/// - Input box frame characters (╭, ╰, │, ┌, └, ─, etc.)
+/// - Lines consisting only of horizontal line characters (────)
 ///
 /// from the end of the content so they don't clutter the preview.
 fn strip_trailing_prompt_lines(content: &str) -> String {
@@ -401,8 +402,7 @@ fn strip_trailing_prompt_lines(content: &str) -> String {
         let trimmed = line.trim();
         // Keep lines that are not empty and not just a prompt or input box frame
         !trimmed.is_empty()
-            && trimmed != ">"
-            && trimmed != "> "
+            && !is_prompt_line(trimmed)
             && !is_input_box_line(trimmed)
     });
 
@@ -412,18 +412,37 @@ fn strip_trailing_prompt_lines(content: &str) -> String {
     }
 }
 
-/// Check if a line is part of an input box frame.
+/// Check if a line is a prompt line.
+fn is_prompt_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed == ">"
+        || trimmed == "> "
+        || trimmed == "❯"
+        || trimmed == "❯ "
+        || trimmed.starts_with("❯ ")
+}
+
+/// Check if a line is part of an input box frame or separator.
 ///
 /// Input boxes typically use box-drawing characters like:
 /// - ╭, ╮, ╰, ╯ (rounded corners)
 /// - ┌, ┐, └, ┘ (square corners)
 /// - │, ─ (sides)
+/// - Lines consisting only of ─ characters (horizontal separators)
 fn is_input_box_line(line: &str) -> bool {
     let first_char = line.chars().next();
-    matches!(
+
+    // Check if line starts with box-drawing character
+    if matches!(
         first_char,
-        Some('╭' | '╰' | '╮' | '╯' | '┌' | '└' | '┐' | '┘' | '│' | '─')
-    )
+        Some('╭' | '╰' | '╮' | '╯' | '┌' | '└' | '┐' | '┘' | '│')
+    ) {
+        return true;
+    }
+
+    // Check if line consists only of horizontal line characters (separator)
+    let trimmed = line.trim();
+    !trimmed.is_empty() && trimmed.chars().all(|c| c == '─' || c == '━' || c == '-')
 }
 
 /// Type alias for the standard production App.
