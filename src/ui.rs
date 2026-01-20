@@ -5,6 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
+use unicode_width::UnicodeWidthChar;
 
 use crate::state::{AppState, FocusMode, ModalType, StatusMessageType};
 
@@ -322,16 +323,9 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) -> Option<(u16
     cursor_position
 }
 
-/// Calculate the display width of a character.
+/// Calculate the display width of a character using unicode-width crate.
 fn unicode_display_width(c: char) -> u16 {
-    // Simple heuristic: CJK and full-width chars are 2 columns, others are 1
-    // For more accuracy, consider using unicode-width crate
-    if c.is_ascii() {
-        1
-    } else {
-        // Most CJK characters and full-width symbols are 2 columns wide
-        2
-    }
+    c.width().unwrap_or(0) as u16
 }
 
 fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
