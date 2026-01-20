@@ -205,12 +205,12 @@ impl Favorites {
             Self::favorites_file_path().context("Could not determine favorites file path")?;
 
         // Ensure config directory exists
-        if let Some(parent) = favorites_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create config directory: {}", parent.display())
-                })?;
-            }
+        if let Some(parent) = favorites_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
         let content = toml::to_string_pretty(self).context("Failed to serialize favorites")?;
