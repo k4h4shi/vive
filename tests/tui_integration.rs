@@ -536,8 +536,13 @@ fn test_modal_typing() {
 
     app.init().unwrap();
 
-    // Open modal
+    // Open modal (now opens method selection modal)
     let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Select "Manual" to go to text input modal
+    let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
@@ -1268,8 +1273,13 @@ fn test_modal_backspace() {
 
     app.init().unwrap();
 
-    // Open modal
+    // Open modal (now opens method selection modal)
     let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Select "Manual" to go to text input modal
+    let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
