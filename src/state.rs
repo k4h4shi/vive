@@ -577,10 +577,10 @@ impl AppState {
         let now = Instant::now();
         let debounce_duration = Duration::from_millis(SCROLL_DEBOUNCE_MS);
 
-        if let Some(last_time) = self.last_scroll_time {
-            if now.duration_since(last_time) < debounce_duration {
-                return false;
-            }
+        if let Some(last_time) = self.last_scroll_time
+            && now.duration_since(last_time) < debounce_duration
+        {
+            return false;
         }
 
         self.last_scroll_time = Some(now);
