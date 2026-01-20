@@ -1010,6 +1010,44 @@ fn test_preview_shows_spinner_content() {
     assert_buffer_contains(buffer, "Working on task");
 }
 
+/// Test: Preview area scrolls to show the latest (bottom) content.
+/// When the preview content is longer than the display area, the most recent
+/// lines at the bottom should be visible, not the older lines at the top.
+#[test]
+fn test_preview_scrolls_to_bottom() {
+    let projects = create_test_projects();
+
+    // Create content with many lines - old content at top, latest at bottom
+    // Use "FIRST_LINE_MARKER" to avoid substring matching issues
+    let mut lines = Vec::new();
+    lines.push("FIRST_LINE_MARKER_OLD".to_string());
+    for i in 2..=30 {
+        lines.push(format!("Old line {}", i));
+    }
+    lines.push(">>> LATEST MESSAGE <<<".to_string());
+    lines.push("This is the most recent output".to_string());
+    let content = lines.join("\n");
+
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![("project-alpha__main", &content)],
+    );
+
+    app.init().unwrap();
+    app.update_pane_preview();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+
+    // The latest content at the bottom should be visible
+    assert_buffer_contains(buffer, "LATEST MESSAGE");
+    assert_buffer_contains(buffer, "most recent output");
+
+    // The old content at the top should NOT be visible (scrolled out)
+    assert_buffer_not_contains(buffer, "FIRST_LINE_MARKER_OLD");
+}
+
 /// Test: Input mode typing updates input buffer.
 #[test]
 fn test_input_mode_typing_updates_buffer() {
