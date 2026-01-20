@@ -18,39 +18,117 @@ use crate::discovery::Project;
 const SCROLL_DEBOUNCE_MS: u64 = 25;
 
 /// Agent status for a worktree/session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentStatus {
     /// Agent is actively working (process running with recent output).
-    Working,
-    /// Agent is waiting for user input.
-    Waiting,
+    Working {
+        /// Optional task description (e.g., "Fixing button...")
+        detail: Option<String>,
+    },
+    /// Agent is waiting for file edit approval.
+    WaitingEdit {
+        /// Optional file path being edited.
+        path: Option<String>,
+    },
+    /// Agent is waiting for shell command approval.
+    WaitingShell {
+        /// Optional command being run.
+        command: Option<String>,
+    },
+    /// Agent is waiting for other input/answer.
+    WaitingOther,
     /// Agent has completed or session is idle.
     #[default]
     Idle,
+    /// Agent completed successfully.
+    Success,
     /// Agent encountered an error.
     Error,
 }
 
 impl AgentStatus {
-    /// Get the status icon for display.
+    /// Get the status icon for display (shape-based for better visibility).
     pub fn icon(&self) -> &'static str {
         match self {
-            AgentStatus::Working => "🟢",
-            AgentStatus::Waiting => "🟡",
-            AgentStatus::Idle => "⚪",
-            AgentStatus::Error => "🔴",
+            AgentStatus::Working { .. } => "⚙",      // Gear - processing
+            AgentStatus::WaitingEdit { .. } => "✎",  // Pencil - file edit
+            AgentStatus::WaitingShell { .. } => ">", // Prompt - shell command
+            AgentStatus::WaitingOther => "?",        // Question - general input
+            AgentStatus::Idle => "•",                // Bullet - idle
+            AgentStatus::Success => "✓",             // Check - completed
+            AgentStatus::Error => "✖",               // Cross - error
+        }
+    }
+
+    /// Get the status text for inline display.
+    pub fn status_text(&self) -> String {
+        match self {
+            AgentStatus::Working { detail } => {
+                if let Some(d) = detail {
+                    format!("Working ({})", truncate_detail(d, 20))
+                } else {
+                    "Working".to_string()
+                }
+            }
+            AgentStatus::WaitingEdit { path } => {
+                if let Some(p) = path {
+                    format!("Wait: Edit {}", truncate_path(p))
+                } else {
+                    "Wait: Edit".to_string()
+                }
+            }
+            AgentStatus::WaitingShell { command } => {
+                if let Some(c) = command {
+                    format!("Wait: {}", truncate_detail(c, 15))
+                } else {
+                    "Wait: Shell".to_string()
+                }
+            }
+            AgentStatus::WaitingOther => "Wait: Input".to_string(),
+            AgentStatus::Idle => "Idle".to_string(),
+            AgentStatus::Success => "Done".to_string(),
+            AgentStatus::Error => "Error".to_string(),
         }
     }
 
     /// Create AgentStatus from parsed terminal content.
     pub fn from_parsed(parsed: &crate::parser::ParsedStatus) -> Self {
-        use crate::parser::ParsedStatus;
+        use crate::parser::{ApprovalType, ParsedStatus};
         match parsed {
             ParsedStatus::Idle => AgentStatus::Idle,
-            ParsedStatus::Working { .. } => AgentStatus::Working,
-            ParsedStatus::WaitingApproval { .. } => AgentStatus::Waiting,
+            ParsedStatus::Working { task } => AgentStatus::Working {
+                detail: task.clone(),
+            },
+            ParsedStatus::WaitingApproval { approval_type } => match approval_type {
+                ApprovalType::FileEdit { path } | ApprovalType::FileCreate { path } => {
+                    AgentStatus::WaitingEdit { path: path.clone() }
+                }
+                ApprovalType::ShellCommand { command } => AgentStatus::WaitingShell {
+                    command: command.clone(),
+                },
+                ApprovalType::General => AgentStatus::WaitingOther,
+            },
         }
     }
+}
+
+/// Truncate a detail string to fit in the sidebar.
+///
+/// Uses character-based truncation to avoid panics on UTF-8 boundaries.
+fn truncate_detail(s: &str, max_len: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
+        s.to_string()
+    } else {
+        let truncate_at = max_len.saturating_sub(3);
+        let truncated: String = s.chars().take(truncate_at).collect();
+        format!("{truncated}...")
+    }
+}
+
+/// Truncate a file path to show just the filename or last component.
+fn truncate_path(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
 /// Focus mode for the UI.
@@ -430,7 +508,7 @@ impl AppState {
     pub fn get_status(&self, session_id: &str) -> AgentStatus {
         self.statuses
             .get(session_id)
-            .copied()
+            .cloned()
             .unwrap_or(AgentStatus::Idle)
     }
 
@@ -801,16 +879,55 @@ mod tests {
 
         assert_eq!(state.get_status("test:main"), AgentStatus::Idle);
 
-        state.set_status("test:main".to_string(), AgentStatus::Working);
-        assert_eq!(state.get_status("test:main"), AgentStatus::Working);
+        state.set_status(
+            "test:main".to_string(),
+            AgentStatus::Working { detail: None },
+        );
+        assert_eq!(
+            state.get_status("test:main"),
+            AgentStatus::Working { detail: None }
+        );
     }
 
     #[test]
     fn test_agent_status_icon() {
-        assert_eq!(AgentStatus::Working.icon(), "🟢");
-        assert_eq!(AgentStatus::Waiting.icon(), "🟡");
-        assert_eq!(AgentStatus::Idle.icon(), "⚪");
-        assert_eq!(AgentStatus::Error.icon(), "🔴");
+        assert_eq!(AgentStatus::Working { detail: None }.icon(), "⚙");
+        assert_eq!(AgentStatus::WaitingEdit { path: None }.icon(), "✎");
+        assert_eq!(AgentStatus::WaitingShell { command: None }.icon(), ">");
+        assert_eq!(AgentStatus::WaitingOther.icon(), "?");
+        assert_eq!(AgentStatus::Idle.icon(), "•");
+        assert_eq!(AgentStatus::Success.icon(), "✓");
+        assert_eq!(AgentStatus::Error.icon(), "✖");
+    }
+
+    #[test]
+    fn test_agent_status_text() {
+        assert_eq!(
+            AgentStatus::Working {
+                detail: Some("Fixing bug".to_string())
+            }
+            .status_text(),
+            "Working (Fixing bug)"
+        );
+        assert_eq!(
+            AgentStatus::Working { detail: None }.status_text(),
+            "Working"
+        );
+        assert_eq!(
+            AgentStatus::WaitingEdit {
+                path: Some("/path/to/file.rs".to_string())
+            }
+            .status_text(),
+            "Wait: Edit file.rs"
+        );
+        assert_eq!(
+            AgentStatus::WaitingShell {
+                command: Some("cargo test".to_string())
+            }
+            .status_text(),
+            "Wait: cargo test"
+        );
+        assert_eq!(AgentStatus::Idle.status_text(), "Idle");
     }
 
     #[test]
@@ -1133,5 +1250,363 @@ mod tests {
         // Selection should be first in sorted order (project-b header)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), None); // Project header
+    }
+
+    // ========== Additional tests for rich UI tree feature ==========
+
+    #[test]
+    fn test_agent_status_text_all_variants() {
+        // Working with detail
+        assert_eq!(
+            AgentStatus::Working {
+                detail: Some("Analyzing code".to_string())
+            }
+            .status_text(),
+            "Working (Analyzing code)"
+        );
+
+        // Working without detail
+        assert_eq!(
+            AgentStatus::Working { detail: None }.status_text(),
+            "Working"
+        );
+
+        // WaitingEdit with path
+        assert_eq!(
+            AgentStatus::WaitingEdit {
+                path: Some("src/main.rs".to_string())
+            }
+            .status_text(),
+            "Wait: Edit main.rs"
+        );
+
+        // WaitingEdit without path
+        assert_eq!(
+            AgentStatus::WaitingEdit { path: None }.status_text(),
+            "Wait: Edit"
+        );
+
+        // WaitingShell with command
+        assert_eq!(
+            AgentStatus::WaitingShell {
+                command: Some("npm test".to_string())
+            }
+            .status_text(),
+            "Wait: npm test"
+        );
+
+        // WaitingShell without command
+        assert_eq!(
+            AgentStatus::WaitingShell { command: None }.status_text(),
+            "Wait: Shell"
+        );
+
+        // WaitingOther
+        assert_eq!(AgentStatus::WaitingOther.status_text(), "Wait: Input");
+
+        // Idle
+        assert_eq!(AgentStatus::Idle.status_text(), "Idle");
+
+        // Success
+        assert_eq!(AgentStatus::Success.status_text(), "Done");
+
+        // Error
+        assert_eq!(AgentStatus::Error.status_text(), "Error");
+    }
+
+    #[test]
+    fn test_agent_status_text_truncates_long_detail() {
+        // Long detail should be truncated with "..."
+        let long_detail = "This is a very long detail that exceeds the maximum length";
+        let status = AgentStatus::Working {
+            detail: Some(long_detail.to_string()),
+        };
+        let text = status.status_text();
+
+        // Should be truncated to max 20 chars + "..."
+        assert!(text.len() < format!("Working ({})", long_detail).len());
+        assert!(text.contains("..."));
+        assert!(text.starts_with("Working ("));
+        assert!(text.ends_with(")"));
+    }
+
+    #[test]
+    fn test_agent_status_text_truncates_long_command() {
+        // Long command should be truncated
+        let long_command = "npm run very-long-script-name --with-options";
+        let status = AgentStatus::WaitingShell {
+            command: Some(long_command.to_string()),
+        };
+        let text = status.status_text();
+
+        // Should be truncated
+        assert!(text.len() < format!("Wait: {}", long_command).len());
+        assert!(text.contains("..."));
+    }
+
+    #[test]
+    fn test_agent_status_text_truncates_utf8_safely() {
+        // Test with Japanese characters - should not panic on UTF-8 boundaries
+        let japanese_detail = "日本語のタスク説明文字列テスト";
+        let status = AgentStatus::Working {
+            detail: Some(japanese_detail.to_string()),
+        };
+        let text = status.status_text();
+        // Should not panic and should contain "..."
+        assert!(text.contains("...") || text.contains(japanese_detail));
+
+        // Test with emoji - should not panic
+        let emoji_detail = "🚀🎉✨ Working on feature 🔥💪";
+        let status = AgentStatus::Working {
+            detail: Some(emoji_detail.to_string()),
+        };
+        let text = status.status_text();
+        // Should not panic
+        assert!(text.starts_with("Working"));
+
+        // Test with mixed content
+        let mixed_detail = "Fix バグ in 機能 with emoji 🐛";
+        let status = AgentStatus::Working {
+            detail: Some(mixed_detail.to_string()),
+        };
+        let text = status.status_text();
+        assert!(text.starts_with("Working"));
+    }
+
+    #[test]
+    fn test_agent_status_text_extracts_filename_from_path() {
+        // Should extract just the filename from a full path
+        let status = AgentStatus::WaitingEdit {
+            path: Some("/home/user/projects/vive/src/lib.rs".to_string()),
+        };
+        assert_eq!(status.status_text(), "Wait: Edit lib.rs");
+
+        // Relative path
+        let status = AgentStatus::WaitingEdit {
+            path: Some("./src/main.rs".to_string()),
+        };
+        assert_eq!(status.status_text(), "Wait: Edit main.rs");
+
+        // Just filename
+        let status = AgentStatus::WaitingEdit {
+            path: Some("config.toml".to_string()),
+        };
+        assert_eq!(status.status_text(), "Wait: Edit config.toml");
+    }
+
+    #[test]
+    fn test_agent_status_from_parsed_idle() {
+        use crate::parser::ParsedStatus;
+
+        let parsed = ParsedStatus::Idle;
+        let status = AgentStatus::from_parsed(&parsed);
+        assert_eq!(status, AgentStatus::Idle);
+    }
+
+    #[test]
+    fn test_agent_status_from_parsed_working() {
+        use crate::parser::ParsedStatus;
+
+        // Working with task
+        let parsed = ParsedStatus::Working {
+            task: Some("Explore".to_string()),
+        };
+        let status = AgentStatus::from_parsed(&parsed);
+        assert_eq!(
+            status,
+            AgentStatus::Working {
+                detail: Some("Explore".to_string())
+            }
+        );
+
+        // Working without task
+        let parsed = ParsedStatus::Working { task: None };
+        let status = AgentStatus::from_parsed(&parsed);
+        assert_eq!(status, AgentStatus::Working { detail: None });
+    }
+
+    #[test]
+    fn test_agent_status_from_parsed_file_edit() {
+        use crate::parser::{ApprovalType, ParsedStatus};
+
+        let parsed = ParsedStatus::WaitingApproval {
+            approval_type: ApprovalType::FileEdit {
+                path: Some("src/main.rs".to_string()),
+            },
+        };
+        let status = AgentStatus::from_parsed(&parsed);
+        assert_eq!(
+            status,
+            AgentStatus::WaitingEdit {
+                path: Some("src/main.rs".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn test_agent_status_from_parsed_file_create() {
+        use crate::parser::{ApprovalType, ParsedStatus};
+
+        let parsed = ParsedStatus::WaitingApproval {
+            approval_type: ApprovalType::FileCreate {
+                path: Some("new_file.rs".to_string()),
+            },
+        };
+        let status = AgentStatus::from_parsed(&parsed);
+        // FileCreate is treated as WaitingEdit
+        assert_eq!(
+            status,
+            AgentStatus::WaitingEdit {
+                path: Some("new_file.rs".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn test_agent_status_from_parsed_shell_command() {
+        use crate::parser::{ApprovalType, ParsedStatus};
+
+        let parsed = ParsedStatus::WaitingApproval {
+            approval_type: ApprovalType::ShellCommand {
+                command: Some("cargo build".to_string()),
+            },
+        };
+        let status = AgentStatus::from_parsed(&parsed);
+        assert_eq!(
+            status,
+            AgentStatus::WaitingShell {
+                command: Some("cargo build".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn test_agent_status_from_parsed_general() {
+        use crate::parser::{ApprovalType, ParsedStatus};
+
+        let parsed = ParsedStatus::WaitingApproval {
+            approval_type: ApprovalType::General,
+        };
+        let status = AgentStatus::from_parsed(&parsed);
+        assert_eq!(status, AgentStatus::WaitingOther);
+    }
+
+    #[test]
+    fn test_agent_status_default() {
+        let status = AgentStatus::default();
+        assert_eq!(status, AgentStatus::Idle);
+    }
+
+    #[test]
+    fn test_agent_status_clone() {
+        let original = AgentStatus::Working {
+            detail: Some("test".to_string()),
+        };
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn test_agent_status_equality() {
+        // Same variants with same data should be equal
+        assert_eq!(
+            AgentStatus::Working {
+                detail: Some("test".to_string())
+            },
+            AgentStatus::Working {
+                detail: Some("test".to_string())
+            }
+        );
+
+        // Different detail should not be equal
+        assert_ne!(
+            AgentStatus::Working {
+                detail: Some("test1".to_string())
+            },
+            AgentStatus::Working {
+                detail: Some("test2".to_string())
+            }
+        );
+
+        // Different variants should not be equal
+        assert_ne!(AgentStatus::Idle, AgentStatus::Error);
+        assert_ne!(
+            AgentStatus::Working { detail: None },
+            AgentStatus::WaitingOther
+        );
+    }
+
+    #[test]
+    fn test_agent_status_icon_all_variants() {
+        // Ensure all variants have distinct icons
+        let icons: Vec<&str> = vec![
+            AgentStatus::Working { detail: None }.icon(),
+            AgentStatus::WaitingEdit { path: None }.icon(),
+            AgentStatus::WaitingShell { command: None }.icon(),
+            AgentStatus::WaitingOther.icon(),
+            AgentStatus::Idle.icon(),
+            AgentStatus::Success.icon(),
+            AgentStatus::Error.icon(),
+        ];
+
+        // Check that icons are non-empty
+        for icon in &icons {
+            assert!(!icon.is_empty(), "Icon should not be empty");
+        }
+
+        // Check specific icons match design spec
+        assert_eq!(AgentStatus::Working { detail: None }.icon(), "⚙");
+        assert_eq!(AgentStatus::WaitingEdit { path: None }.icon(), "✎");
+        assert_eq!(AgentStatus::WaitingShell { command: None }.icon(), ">");
+        assert_eq!(AgentStatus::WaitingOther.icon(), "?");
+        assert_eq!(AgentStatus::Idle.icon(), "•");
+        assert_eq!(AgentStatus::Success.icon(), "✓");
+        assert_eq!(AgentStatus::Error.icon(), "✖");
+    }
+
+    #[test]
+    fn test_agent_status_with_working_detail_variations() {
+        // Detail with working variants are preserved in icon
+        let status1 = AgentStatus::Working { detail: None };
+        let status2 = AgentStatus::Working {
+            detail: Some("task".to_string()),
+        };
+
+        // Both should have the same icon
+        assert_eq!(status1.icon(), status2.icon());
+
+        // But different status_text
+        assert_ne!(status1.status_text(), status2.status_text());
+    }
+
+    #[test]
+    fn test_status_message_types() {
+        let mut state = AppState::new();
+
+        // Test info message
+        state.set_info_message("Info message");
+        assert!(state.status_message.is_some());
+        assert_eq!(
+            state.status_message.as_ref().unwrap().message_type,
+            StatusMessageType::Info
+        );
+
+        // Test success message
+        state.set_success_message("Success message");
+        assert_eq!(
+            state.status_message.as_ref().unwrap().message_type,
+            StatusMessageType::Success
+        );
+
+        // Test error message
+        state.set_error_message("Error message");
+        assert_eq!(
+            state.status_message.as_ref().unwrap().message_type,
+            StatusMessageType::Error
+        );
+
+        // Test clear
+        state.clear_status_message();
+        assert!(state.status_message.is_none());
     }
 }
