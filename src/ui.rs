@@ -286,12 +286,13 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
         format!("Active panes: {pane_count}  |  Press Enter to attach to dashboard");
     let summary = Paragraph::new(Line::from(vec![
         Span::styled("  ", Style::default()),
-        Span::styled(
-            summary_content,
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled(summary_content, Style::default().fg(Color::Cyan)),
     ]))
-    .block(Block::default().borders(Borders::ALL).title(title.to_string()));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title.to_string()),
+    );
     frame.render_widget(summary, chunks[0]);
 
     // Render panes in a grid layout
@@ -324,7 +325,11 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
         let pane_widget = Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0))
-            .block(Block::default().borders(Borders::ALL).title(branch_name.clone()));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(branch_name.clone()),
+            );
         frame.render_widget(pane_widget, *chunk);
     }
 }
