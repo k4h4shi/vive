@@ -193,9 +193,7 @@ impl ServerHandler for ViveMcpServer {
             RawResource {
                 uri: "vive://status".to_string(),
                 name: "Status".to_string(),
-                description: Some(
-                    "Agent statuses for all sessions (project:branch)".to_string(),
-                ),
+                description: Some("Agent statuses for all sessions (project:branch)".to_string()),
                 mime_type: Some("application/json".to_string()),
                 size: None,
             }
