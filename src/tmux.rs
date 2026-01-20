@@ -458,8 +458,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
         // Then, send Enter as a separate command if requested
         // This separation ensures reliable prompt delivery to Claude Code
+        // Using C-m (Ctrl+M) which is the control sequence for carriage return
         if enter {
-            let enter_args = args!["send-keys", "-t", target, "Enter"];
+            let enter_args = args!["send-keys", "-t", target, "C-m"];
             let enter_result = self.executor.execute(enter_args)?;
 
             if !enter_result.success {
@@ -859,9 +860,9 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_| Ok(mock_success("")));
 
-        // Second call: send Enter separately
+        // Second call: send Enter separately (C-m = Ctrl+M)
         mock.expect_execute()
-            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:main", "Enter"]))
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:main", "C-m"]))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(mock_success("")));
@@ -1194,10 +1195,10 @@ mod tests {
             })
             .returning(|_| Ok(mock_success("")));
 
-        // send_keys for Enter (sent separately)
+        // send_keys for Enter (sent separately as C-m)
         mock.expect_execute()
             .withf(|args| {
-                *args == to_strings(&["send-keys", "-t", "my-session:task-1", "Enter"])
+                *args == to_strings(&["send-keys", "-t", "my-session:task-1", "C-m"])
             })
             .returning(|_| Ok(mock_success("")));
 
