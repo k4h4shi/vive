@@ -240,6 +240,9 @@ fn handle_worktree_attach<W: Write>(
 ///
 /// This function launches a new terminal process without suspending the TUI.
 /// The terminal command is configured via `[terminal]` section in config.toml.
+///
+/// A background thread is spawned to reap the child process when it exits,
+/// preventing zombie processes from accumulating in long-running TUI sessions.
 fn spawn_terminal_session<W: Write>(
     terminal_config: &vive::TerminalConfig,
     session_id: &str,
@@ -247,7 +250,13 @@ fn spawn_terminal_session<W: Write>(
 ) -> Result<()> {
     if let Some((cmd, args)) = terminal_config.build_spawn_command(session_id) {
         match Command::new(&cmd).args(&args).spawn() {
-            Ok(_) => {
+            Ok(mut child) => {
+                // Spawn a background thread to reap the child process when it exits.
+                // This prevents zombie processes from accumulating when users open/close
+                // many external terminals in a long-running TUI session.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
                 app.state_mut()
                     .set_success_message(format!("Launched terminal for session '{session_id}'"));
             }
