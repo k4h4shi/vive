@@ -15,7 +15,8 @@ use ratatui::Terminal;
 
 use vive::{
     App, Config, EventSource, GhIssueFetcher, LaunchStrategy, ProductionApp, RealEventSource,
-    RealProjectDiscovery, event::Action,
+    RealProjectDiscovery,
+    event::Action,
     mcp::{ViveStateSnapshot, run_mcp_server},
     tmux::TmuxOrchestrator,
 };
