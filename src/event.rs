@@ -22,6 +22,8 @@ pub enum Action {
     RefreshPreview,
     /// Toggle favorite status of the selected project.
     ToggleFavorite,
+    /// Toggle expanded state of the selected project.
+    ToggleExpanded,
     /// Delete a task/worktree with the given branch name.
     DeleteTask(String),
     /// Fetch issues for the issue picker modal.
@@ -126,6 +128,12 @@ fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         KeyCode::Char('f') => {
             state.clear_status_message();
             Action::ToggleFavorite
+        }
+
+        // Toggle expand/collapse (Space key)
+        KeyCode::Char(' ') => {
+            state.clear_status_message();
+            Action::ToggleExpanded
         }
 
         // New task modal - clear status message when opening modal
@@ -358,6 +366,9 @@ mod tests {
                 Some("main".to_string()),
             )]),
         ]);
+        // Expand both projects for tests that expect worktree navigation
+        state.toggle_expanded("project-a");
+        state.toggle_expanded("project-b");
         state
     }
 
@@ -917,5 +928,33 @@ mod tests {
         assert_eq!(action, Action::None);
         // Modal should still be open
         assert!(state.modal.is_some());
+    }
+
+    #[test]
+    fn test_toggle_expanded_on_space() {
+        let mut state = create_test_state_with_projects();
+        let action = handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
+        assert_eq!(action, Action::ToggleExpanded);
+    }
+
+    #[test]
+    fn test_space_key_toggles_project_expansion() {
+        // Use fresh state (not the helper that expands projects)
+        let mut state = AppState::new();
+        state.set_projects(vec![
+            Project::new("project-a", "/path/to/a").with_worktrees(vec![Worktree::new(
+                "/path/to/a",
+                "abc",
+                Some("main".to_string()),
+            )]),
+        ]);
+
+        // Initially project-a is collapsed (non-favorite)
+        assert!(!state.is_expanded("project-a"));
+
+        // Press space returns ToggleExpanded action
+        let action = handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
+        assert_eq!(action, Action::ToggleExpanded);
+        // Note: The actual toggle happens in lib.rs handle_action, not here
     }
 }

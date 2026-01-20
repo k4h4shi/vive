@@ -195,6 +195,7 @@ fn test_preview_title_shows_issue_title_and_branch() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app);
 
     // Navigate to the worktree
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -287,6 +288,25 @@ pub fn create_test_projects() -> Vec<Project> {
     ]
 }
 
+/// Helper to expand all projects in an App (for tests expecting worktree navigation).
+/// Only expands projects that are not already expanded (to handle cases where
+/// favorites loaded from disk may already be expanded).
+pub fn expand_all_projects(app: &mut TestApp) {
+    // Get all project names
+    let project_names: Vec<String> = app
+        .state()
+        .projects
+        .iter()
+        .map(|p| p.name.clone())
+        .collect();
+    for name in project_names {
+        // Only expand if not already expanded
+        if !app.state().is_expanded(&name) {
+            app.state_mut().toggle_expanded(&name);
+        }
+    }
+}
+
 /// Assert that the terminal buffer contains the expected text somewhere.
 pub fn assert_buffer_contains(buffer: &Buffer, expected: &str) {
     let content = buffer_to_string(buffer);
@@ -330,6 +350,7 @@ fn test_startup_renders_project_list() {
 
     // Initialize and render
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     // Check the buffer contains project names
@@ -374,6 +395,7 @@ fn test_navigation_j_moves_down() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Initially at project header (worktree_idx = None)
     assert_eq!(app.state().selected_worktree_idx(), None);
@@ -394,6 +416,7 @@ fn test_navigation_k_moves_up() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Move down twice to get to worktree 1
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -420,6 +443,7 @@ fn test_navigation_down_arrow() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Initially at project header
     assert_eq!(app.state().selected_worktree_idx(), None);
@@ -439,6 +463,7 @@ fn test_navigation_crosses_projects() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // project-alpha has 2 worktrees, project-beta has 1
     // Start: project 0, header (worktree_idx = None)
@@ -634,6 +659,7 @@ fn test_status_icon_idle() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -648,6 +674,7 @@ fn test_status_update_changes_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     // Set a session status to Working
     app.state_mut().set_status(
@@ -669,6 +696,7 @@ fn test_status_waiting_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut().set_status(
         "project-alpha__main".to_string(),
@@ -695,6 +723,7 @@ fn test_preview_updates_from_tmux() {
     );
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate to worktree 0 (main) to get session ID
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -816,6 +845,7 @@ fn test_tick_cycle() {
     let mut app = create_test_app(projects, events);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // First tick: process first 'j' (header -> worktree 0)
     let should_continue = app.tick(Duration::from_millis(0)).unwrap();
@@ -930,6 +960,7 @@ fn test_deletion_modal_opens_on_d() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate: header -> worktree 0 (main) -> worktree 1 (feature-x)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -956,6 +987,7 @@ fn test_deletion_on_main_shows_error() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate to main branch: header -> worktree 0 (main)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -993,6 +1025,7 @@ fn test_deletion_modal_renders_branch_name() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate: header -> worktree 0 (main) -> worktree 1 (my-feature)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1031,6 +1064,7 @@ fn test_deletion_modal_n_cancels() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate: header -> worktree 0 (main) -> worktree 1 (feature-1)
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1063,6 +1097,7 @@ fn test_status_error_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut()
         .set_status("project-alpha__main".to_string(), AgentStatus::Error);
@@ -1080,6 +1115,7 @@ fn test_multiple_project_statuses() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     // Set different statuses for different sessions
     app.state_mut().set_status(
@@ -1112,6 +1148,7 @@ fn test_navigation_at_boundary() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Initially at project header
     assert_eq!(app.state().selected_project_idx(), Some(0));
@@ -1158,6 +1195,7 @@ fn test_preview_shows_spinner_content() {
     );
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate to worktree 0 (main) to get session ID
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1193,6 +1231,7 @@ fn test_preview_scrolls_to_bottom() {
         create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", &content)]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate to worktree 0 (main) to get session ID for preview
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1328,13 +1367,14 @@ fn test_footer_shows_favorite_hint() {
 
 // ========== Additional tests for rich UI tree feature ==========
 
-/// Test: Tree structure shows project collapse indicator (▼).
+/// Test: Tree structure shows project collapse indicator (▼ for expanded, ▶ for collapsed).
 #[test]
 fn test_tree_shows_collapse_indicator() {
     let projects = create_test_projects();
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show ▼
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -1357,6 +1397,7 @@ fn test_tree_shows_branch_prefixes() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -1379,6 +1420,7 @@ fn test_tree_single_worktree_shows_end_prefix() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -1392,6 +1434,7 @@ fn test_status_text_inline_display() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     // Set a working status with detail
     app.state_mut().set_status(
@@ -1416,6 +1459,7 @@ fn test_status_success_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut()
         .set_status("project-alpha__main".to_string(), AgentStatus::Success);
@@ -1434,6 +1478,7 @@ fn test_status_waiting_shell_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut().set_status(
         "project-alpha__main".to_string(),
@@ -1455,6 +1500,7 @@ fn test_status_waiting_other_icon() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut()
         .set_status("project-alpha__main".to_string(), AgentStatus::WaitingOther);
@@ -1478,6 +1524,7 @@ fn test_long_branch_name_truncated() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -1492,6 +1539,7 @@ fn test_padding_dots_between_branch_and_status() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -1520,6 +1568,7 @@ fn test_multiple_status_types() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
 
     // Set different statuses
     app.state_mut().set_status(
@@ -1579,6 +1628,7 @@ fn test_tree_proper_indentation() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
@@ -1603,6 +1653,7 @@ fn test_utf8_branch_name_truncation() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to show worktrees
     // Should not panic when rendering UTF-8 branch names
     app.render().unwrap();
 
@@ -1654,6 +1705,7 @@ fn test_navigate_from_header_to_worktree() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Start at project header
     assert_eq!(app.state().selected_worktree_idx(), None);
@@ -1675,6 +1727,7 @@ fn test_navigate_from_worktree_to_header() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Move to worktree 0
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1699,6 +1752,7 @@ fn test_navigate_to_next_project_header() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // project-alpha: header -> worktree 0 -> worktree 1 -> project-beta header
     // Navigate: header -> w0 -> w1
@@ -1729,6 +1783,7 @@ fn test_navigate_to_prev_project_worktree() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Navigate to project-beta header
     for _ in 0..3 {
@@ -1771,6 +1826,7 @@ fn test_session_id_present_at_worktree() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app); // Expand to allow worktree navigation
 
     // Move to worktree 0
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1832,6 +1888,7 @@ fn test_full_navigation_cycle() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app);
 
     // Track the navigation path
     let mut path: Vec<(Option<usize>, Option<usize>)> = vec![];
@@ -1875,6 +1932,7 @@ fn test_single_project_navigation() {
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
+    expand_all_projects(&mut app);
 
     // Start at header
     assert_eq!(app.state().selected_project_idx(), Some(0));
