@@ -15,8 +15,10 @@ GitHub イシューの作成・確認を行います。
 
 1. **下書き作成**
 
+   簡潔なタイトル形式を使用してください。
+
    ```bash
-   cd /Users/takahashikotaro/src/github/k4h4shi/shohei-system
+   cd /Users/takahashikotaro/src/github/k4h4shi/vive
    cat > /tmp/issue.md << 'EOF'
    ## 概要
    <!-- 何を実現したいか -->
@@ -32,6 +34,8 @@ GitHub イシューの作成・確認を行います。
 2. **ユーザーと内容確認・修正**
 
 3. **イシュー作成**
+
+   タイトルは簡潔に記述してください（例: `自動補完機能の追加`）。
 
    ```bash
    gh issue create --title "タイトル" --body-file /tmp/issue.md
