@@ -14,6 +14,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 regex = "1"
 once_cell = "1"
+ansi-to-tui = "7"
 
 [dev-dependencies]
 mockall = "0.13"

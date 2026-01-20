@@ -1,8 +1,9 @@
+use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
@@ -231,30 +232,106 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
             let branch = worktree.branch.as_deref().unwrap_or("(detached)");
             format!("Preview - {}:{}", project.name, branch)
         } else {
-            format!("Preview - {}", project.name)
+            format!("Dashboard - {}", project.name)
         }
     } else {
         "Preview".to_string()
     };
 
-    let content = if state.pane_preview.is_empty() {
-        "No active session. Press Enter to attach.\n\nSelect a worktree and press Enter/o to switch to that tmux session."
-            .to_string()
+    // Dashboard mode: show split view with summary and panes
+    if state.is_dashboard_mode() && !state.dashboard_panes.is_empty() {
+        render_dashboard_preview(frame, area, state, &title);
+        return;
+    }
+
+    let (text, line_count) = if state.pane_preview.is_empty() {
+        let msg = "No active session. Press Enter to attach.\n\nSelect a worktree and press Enter/o to switch to that tmux session.";
+        (Text::raw(msg), msg.lines().count())
     } else {
-        state.pane_preview.clone()
+        // Parse ANSI escape sequences to preserve Claude Code colors
+        let text = state
+            .pane_preview
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::raw(&state.pane_preview));
+        let line_count = text.lines.len();
+        (text, line_count)
     };
 
     // Calculate scroll to show the bottom (most recent) content
     // Account for borders (2 lines) when calculating visible height
     let visible_height = area.height.saturating_sub(2) as usize;
-    let content_lines = content.lines().count();
-    let scroll_offset = content_lines.saturating_sub(visible_height) as u16;
+    let scroll_offset = line_count.saturating_sub(visible_height) as u16;
 
-    let preview = Paragraph::new(content)
+    let preview = Paragraph::new(text)
         .wrap(Wrap { trim: false })
         .scroll((scroll_offset, 0))
         .block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(preview, area);
+}
+
+/// Render split dashboard preview with summary and pane contents.
+fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, title: &str) {
+    let pane_count = state.dashboard_panes.len();
+
+    // Split into summary area (3 lines) and panes area
+    let chunks = Layout::vertical([
+        Constraint::Length(4), // Summary (with border)
+        Constraint::Min(0),    // Panes
+    ])
+    .split(area);
+
+    // Render summary
+    let summary_content = format!(
+        "Active panes: {}  |  Press Enter to attach to dashboard",
+        pane_count
+    );
+    let summary = Paragraph::new(Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            summary_content,
+            Style::default().fg(Color::Cyan),
+        ),
+    ]))
+    .block(Block::default().borders(Borders::ALL).title(title.to_string()));
+    frame.render_widget(summary, chunks[0]);
+
+    // Render panes in a grid layout
+    if pane_count == 0 {
+        return;
+    }
+
+    // Determine layout: horizontal split for 2-4 panes
+    let pane_area = chunks[1];
+    let constraints: Vec<Constraint> = state
+        .dashboard_panes
+        .iter()
+        .map(|_| Constraint::Ratio(1, pane_count as u32))
+        .collect();
+
+    let pane_chunks = Layout::horizontal(constraints).split(pane_area);
+
+    for (idx, (content, chunk)) in state.dashboard_panes.iter().zip(pane_chunks.iter()).enumerate()
+    {
+        let pane_title = format!("Pane {}", idx + 1);
+
+        // Parse ANSI escape sequences to preserve Claude Code colors
+        let text = content
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::raw(content));
+        let line_count = text.lines.len();
+
+        // Calculate scroll to show bottom content
+        let visible_height = chunk.height.saturating_sub(2) as usize;
+        let scroll_offset = line_count.saturating_sub(visible_height) as u16;
+
+        let pane_widget = Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_offset, 0))
+            .block(Block::default().borders(Borders::ALL).title(pane_title));
+        frame.render_widget(pane_widget, *chunk);
+    }
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) {

@@ -193,6 +193,8 @@ pub struct AppState {
     pub input_buffer: String,
     /// Captured pane content for preview.
     pub pane_preview: String,
+    /// Dashboard pane contents (for multi-pane preview).
+    pub dashboard_panes: Vec<String>,
     /// Status message for user feedback.
     pub status_message: Option<StatusMessage>,
     /// ListState for sidebar scrolling support.
@@ -216,6 +218,7 @@ impl Default for AppState {
             modal: None,
             input_buffer: String::new(),
             pane_preview: String::new(),
+            dashboard_panes: Vec::new(),
             status_message: None,
             sidebar_list_state: ListState::default(),
             last_scroll_time: None,
@@ -594,6 +597,21 @@ impl AppState {
     /// Update the pane preview content.
     pub fn set_pane_preview(&mut self, content: String) {
         self.pane_preview = content;
+    }
+
+    /// Update the dashboard pane contents for multi-pane preview.
+    pub fn set_dashboard_panes(&mut self, panes: Vec<String>) {
+        self.dashboard_panes = panes;
+    }
+
+    /// Clear the dashboard pane contents.
+    pub fn clear_dashboard_panes(&mut self) {
+        self.dashboard_panes.clear();
+    }
+
+    /// Check if we're in dashboard mode (project header selected, no worktree).
+    pub fn is_dashboard_mode(&self) -> bool {
+        self.selected_project_idx.is_some() && self.selected_worktree_idx.is_none()
     }
 
     /// Set an info status message.
