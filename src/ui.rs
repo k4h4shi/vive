@@ -8,7 +8,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthChar;
 
-use crate::state::{AppState, FocusMode, ModalType, StatusMessageType};
+use crate::state::{AppState, CreateTaskMethod, FocusMode, ModalType, StatusMessageType};
 
 /// Render the UI based on the current application state.
 pub fn render(frame: &mut Frame, state: &mut AppState) {
@@ -435,11 +435,241 @@ fn unicode_display_width(c: char) -> u16 {
 
 fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
     match modal {
+        ModalType::CreateTaskMethod { selected } => {
+            render_create_task_method_modal(frame, area, *selected)
+        }
         ModalType::CreateTask { input } => render_create_task_modal(frame, area, input),
+        ModalType::IssuePicker {
+            issues,
+            selected_idx,
+            filter,
+            error,
+            loading,
+        } => render_issue_picker_modal(frame, area, issues, *selected_idx, filter, error, *loading),
         ModalType::ConfirmDeletion { branch_name } => {
             render_confirm_deletion_modal(frame, area, branch_name)
         }
     }
+}
+
+fn render_create_task_method_modal(frame: &mut Frame, area: Rect, selected: CreateTaskMethod) {
+    // Center the modal
+    let modal_width = 50.min(area.width.saturating_sub(4));
+    let modal_height = 10;
+    let modal_x = (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = (area.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    // Clear the area behind the modal
+    frame.render_widget(Clear, modal_area);
+
+    let manual_style = if selected == CreateTaskMethod::Manual {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let issue_style = if selected == CreateTaskMethod::PickFromIssue {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let content = vec![
+        Line::from(""),
+        Line::from("How would you like to create a task?"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled("[M] Manual - Enter branch name", manual_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled("[I] Pick from Issue", issue_style),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("j/k", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Confirm  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    let modal_widget = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Create Task")
+            .style(Style::default().bg(Color::DarkGray)),
+    );
+    frame.render_widget(modal_widget, modal_area);
+}
+
+fn render_issue_picker_modal(
+    frame: &mut Frame,
+    area: Rect,
+    issues: &[crate::github::GitHubIssue],
+    selected_idx: usize,
+    filter: &str,
+    error: &Option<String>,
+    loading: bool,
+) {
+    // Center the modal
+    let modal_width = 70.min(area.width.saturating_sub(4));
+    let modal_height = 20.min(area.height.saturating_sub(4));
+    let modal_x = (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = (area.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    // Clear the area behind the modal
+    frame.render_widget(Clear, modal_area);
+
+    let mut content: Vec<Line> = Vec::new();
+
+    // Filter input line
+    content.push(Line::from(vec![
+        Span::styled("Filter: ", Style::default().fg(Color::Cyan)),
+        Span::raw(filter),
+        Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+    ]));
+    content.push(Line::from(""));
+
+    if loading {
+        content.push(Line::from(Span::styled(
+            "Loading issues...",
+            Style::default().fg(Color::Yellow),
+        )));
+    } else if let Some(err) = error {
+        content.push(Line::from(Span::styled(
+            format!("Error: {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        // Filter issues
+        let filter_lower = filter.to_lowercase();
+        let filtered_issues: Vec<_> = if filter.is_empty() {
+            issues.iter().collect()
+        } else {
+            issues
+                .iter()
+                .filter(|issue| {
+                    issue.title.to_lowercase().contains(&filter_lower)
+                        || issue.number.to_string().contains(&filter_lower)
+                })
+                .collect()
+        };
+
+        if filtered_issues.is_empty() {
+            content.push(Line::from(Span::styled(
+                "No issues found",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            // Calculate visible window (max ~12 items)
+            let max_visible = (modal_height as usize).saturating_sub(6);
+            let total = filtered_issues.len();
+
+            let (start, end) = if total <= max_visible {
+                (0, total)
+            } else {
+                // Center the selected item in the visible window
+                let half_visible = max_visible / 2;
+                let start = selected_idx.saturating_sub(half_visible);
+                let end = (start + max_visible).min(total);
+                let start = if end == total {
+                    total.saturating_sub(max_visible)
+                } else {
+                    start
+                };
+                (start, end)
+            };
+
+            // Show scroll indicator if needed
+            if start > 0 {
+                content.push(Line::from(Span::styled(
+                    "  ↑ more issues above",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+
+            for (display_idx, issue) in filtered_issues[start..end].iter().enumerate() {
+                let actual_idx = start + display_idx;
+                let is_selected = actual_idx == selected_idx;
+
+                let style = if is_selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+
+                // Truncate title if too long
+                // Use saturating_sub to prevent underflow on narrow terminals
+                let max_title_len = (modal_width as usize).saturating_sub(12);
+                let title = if max_title_len <= 3 {
+                    // Too narrow to show any title, just show ellipsis
+                    "...".to_string()
+                } else if issue.title.chars().count() > max_title_len {
+                    let truncated: String = issue
+                        .title
+                        .chars()
+                        .take(max_title_len.saturating_sub(3))
+                        .collect();
+                    format!("{truncated}...")
+                } else {
+                    issue.title.clone()
+                };
+
+                content.push(Line::from(vec![
+                    Span::styled(
+                        if is_selected { "> " } else { "  " },
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::styled(
+                        format!("#{:<4} ", issue.number),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(title, style),
+                ]));
+            }
+
+            // Show scroll indicator if needed
+            if end < total {
+                content.push(Line::from(Span::styled(
+                    "  ↓ more issues below",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+    }
+
+    // Help line at the bottom
+    content.push(Line::from(""));
+    content.push(Line::from(vec![
+        Span::styled("j/k", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
+    ]));
+
+    let modal_widget = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Pick from Issue")
+            .style(Style::default().bg(Color::DarkGray)),
+    );
+    frame.render_widget(modal_widget, modal_area);
 }
 
 fn render_create_task_modal(frame: &mut Frame, area: Rect, input: &str) {
@@ -649,5 +879,98 @@ mod tests {
     fn test_idle_status_has_muted_color() {
         let (_, color) = get_status_icon_and_color(&AgentStatus::Idle);
         assert_eq!(color, Color::DarkGray);
+    }
+
+    // ========== Title Truncation Tests (Issue #55 / Codex P2 Fix) ==========
+
+    /// Helper function to truncate issue title (mirrors logic in render_issue_picker_modal)
+    fn truncate_issue_title(title: &str, modal_width: u16) -> String {
+        let max_title_len = (modal_width as usize).saturating_sub(12);
+        if max_title_len <= 3 {
+            "...".to_string()
+        } else if title.chars().count() > max_title_len {
+            let truncated: String = title
+                .chars()
+                .take(max_title_len.saturating_sub(3))
+                .collect();
+            format!("{truncated}...")
+        } else {
+            title.to_string()
+        }
+    }
+
+    #[test]
+    fn test_title_truncation_normal_width() {
+        // Normal width (70 chars) - title fits
+        let title = "Short title";
+        let result = truncate_issue_title(title, 70);
+        assert_eq!(result, "Short title");
+    }
+
+    #[test]
+    fn test_title_truncation_long_title() {
+        // Normal width but long title - should truncate
+        let title = "This is a very long issue title that exceeds the maximum length allowed";
+        let result = truncate_issue_title(title, 50);
+        // max_title_len = 50 - 12 = 38, truncate at 38 - 3 = 35
+        assert!(result.ends_with("..."));
+        assert!(result.len() < title.len());
+    }
+
+    #[test]
+    fn test_title_truncation_narrow_width() {
+        // Very narrow width (15 chars) - should not underflow
+        let title = "Some title";
+        let result = truncate_issue_title(title, 15);
+        // max_title_len = 15 - 12 = 3, which is <= 3, so returns "..."
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_title_truncation_minimal_width() {
+        // Minimal width (10 chars) - should not underflow
+        let title = "Test";
+        let result = truncate_issue_title(title, 10);
+        // max_title_len = 10 - 12 = 0 (saturating), which is <= 3
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_title_truncation_zero_width() {
+        // Zero width - should not panic
+        let title = "Test";
+        let result = truncate_issue_title(title, 0);
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_title_truncation_exact_boundary() {
+        // Width where max_title_len is exactly 4 (just above the guard)
+        // modal_width = 16, max_title_len = 16 - 12 = 4
+        let title = "ABCD"; // 4 chars, exactly max_title_len
+        let result = truncate_issue_title(title, 16);
+        assert_eq!(result, "ABCD"); // No truncation needed
+
+        // 5 chars with max_title_len = 4 should truncate
+        let title = "ABCDE";
+        let result = truncate_issue_title(title, 16);
+        // truncate at 4 - 3 = 1, so "A..."
+        assert_eq!(result, "A...");
+    }
+
+    #[test]
+    fn test_title_truncation_utf8() {
+        // UTF-8 characters (Japanese)
+        let title = "日本語のイシュータイトル";
+        let result = truncate_issue_title(title, 50);
+        // max_title_len = 38, title is 12 chars, no truncation
+        assert_eq!(result, "日本語のイシュータイトル");
+
+        // With narrow width forcing truncation (width = 22 -> max_title_len = 10)
+        // Title has 12 chars, which exceeds 10, so truncation happens
+        let result = truncate_issue_title(title, 22);
+        // max_title_len = 10, truncate at 10 - 3 = 7, so "日本語のイシュ..."
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 10); // 7 chars + "..."
     }
 }

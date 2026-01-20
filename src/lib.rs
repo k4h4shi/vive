@@ -27,10 +27,13 @@ pub const DEFAULT_PREVIEW_LINES: usize = 200;
 use crossterm::event::Event;
 use ratatui::{Terminal, backend::Backend};
 
-pub use crate::config::{Config, Favorites};
+pub use crate::config::{Config, Favorites, LaunchStrategy, TerminalConfig};
 pub use crate::discovery::{Project, discover_projects};
 pub use crate::event::Action;
-pub use crate::github::{GhIssueFetcher, IssueTitleFetcher, IssueTitleResult};
+pub use crate::github::{
+    GhIssueFetcher, GitHubIssue, IssueListFetcher, IssueListResult, IssueTitleFetcher,
+    IssueTitleResult, fetch_issue_list_sync,
+};
 pub use crate::state::AppState;
 pub use crate::tmux::{RealTmuxExecutor, TmuxExecutor, TmuxOrchestrator};
 
@@ -342,6 +345,89 @@ where
             Action::ToggleFavorite => {
                 self.state.toggle_favorite_selected();
                 self.save_favorites();
+            }
+
+            Action::FetchIssues => {
+                if let Some(project) = self.state.selected_project() {
+                    let repo_path = project.path.to_string_lossy().to_string();
+                    match fetch_issue_list_sync(&repo_path) {
+                        IssueListResult::Found(issues) => {
+                            self.state.set_issue_picker_issues(issues);
+                        }
+                        IssueListResult::Empty => {
+                            self.state
+                                .set_issue_picker_error("No open issues found".to_string());
+                        }
+                        IssueListResult::Error(err) => {
+                            self.state.set_issue_picker_error(err);
+                        }
+                    }
+                } else {
+                    self.state.close_modal();
+                    self.state.set_error_message("No project selected");
+                }
+            }
+
+            Action::CreateTaskFromIssue(issue) => {
+                let branch_name = issue.branch_name();
+                // Reuse the CreateTask logic
+                if let Some(project) = self.state.selected_project().cloned() {
+                    let worktree_path = project.path.join(".worktrees").join(&branch_name);
+                    let output = std::process::Command::new("git")
+                        .args([
+                            "worktree",
+                            "add",
+                            "-b",
+                            &branch_name,
+                            &worktree_path.to_string_lossy(),
+                        ])
+                        .current_dir(&project.path)
+                        .output();
+
+                    match output {
+                        Ok(output) if output.status.success() => {
+                            // Refresh project list
+                            if let Ok(projects) = self
+                                .discovery
+                                .discover(&self.state.projects_root, &self.config.ignored_dirs)
+                            {
+                                self.state.set_projects(projects);
+                            }
+
+                            // Add pane to dashboard if it exists
+                            let session_id = format!("{}__{}", project.name, branch_name);
+                            let worktree_path_str = worktree_path.to_string_lossy();
+                            let _ = self
+                                .tmux
+                                .ensure_session(&session_id, Some(&worktree_path_str));
+                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
+                            self.state.set_success_message(format!(
+                                "Created worktree '{}' for Issue #{}",
+                                branch_name, issue.number
+                            ));
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            let error_msg = stderr.trim();
+                            if error_msg.is_empty() {
+                                self.state.set_error_message(format!(
+                                    "Failed to create worktree '{branch_name}': unknown error"
+                                ));
+                            } else {
+                                self.state.set_error_message(format!(
+                                    "Failed to create worktree: {error_msg}"
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            self.state
+                                .set_error_message(format!("Failed to run git command: {e}"));
+                        }
+                    }
+                } else {
+                    self.state.set_error_message("No project selected");
+                }
             }
 
             Action::DeleteTask(branch_name) => {

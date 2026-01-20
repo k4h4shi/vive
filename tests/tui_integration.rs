@@ -11,11 +11,11 @@ use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 use vive::{
-    App, EventSource, IssueTitleFetcher, IssueTitleResult, ProjectDiscovery,
+    App, EventSource, GitHubIssue, IssueTitleFetcher, IssueTitleResult, ProjectDiscovery,
     config::Config,
     discovery::{Project, Worktree},
     event::Action,
-    state::{AgentStatus, FocusMode},
+    state::{AgentStatus, CreateTaskMethod, FocusMode, ModalType},
     tmux::{TmuxCommandResult, TmuxExecutor, TmuxOrchestrator},
 };
 
@@ -536,8 +536,13 @@ fn test_modal_typing() {
 
     app.init().unwrap();
 
-    // Open modal
+    // Open modal (now opens method selection modal)
     let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Select "Manual" to go to text input modal
+    let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
@@ -1268,8 +1273,13 @@ fn test_modal_backspace() {
 
     app.init().unwrap();
 
-    // Open modal
+    // Open modal (now opens method selection modal)
     let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Select "Manual" to go to text input modal
+    let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
@@ -2013,4 +2023,373 @@ fn test_delete_at_project_header_shows_error() {
     // Should have an error message (no worktree selected or it's the main branch logic)
     // The behavior depends on implementation, but no crash should occur
     app.render().unwrap();
+}
+
+// ========== Issue Picker Integration Tests (Issue #55) ==========
+
+/// Test: 'n' key opens create task method selection modal.
+#[test]
+fn test_n_key_opens_method_selection_modal() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Press 'n' to open create task modal
+    let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Should open CreateTaskMethod modal
+    assert!(matches!(
+        app.state().modal,
+        Some(ModalType::CreateTaskMethod { .. })
+    ));
+
+    // Render and check the modal is displayed
+    app.render().unwrap();
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Create Task");
+    assert_buffer_contains(buffer, "Manual");
+    assert_buffer_contains(buffer, "Pick from Issue");
+}
+
+/// Test: Method selection modal navigation with j/k.
+#[test]
+fn test_method_selection_modal_navigation() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open method selection modal
+    let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Default selection should be Manual
+    assert_eq!(
+        app.state().selected_create_task_method(),
+        Some(CreateTaskMethod::Manual)
+    );
+
+    // Press 'j' to move to PickFromIssue
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(
+        app.state().selected_create_task_method(),
+        Some(CreateTaskMethod::PickFromIssue)
+    );
+
+    // Press 'k' to move back to Manual
+    let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(
+        app.state().selected_create_task_method(),
+        Some(CreateTaskMethod::Manual)
+    );
+}
+
+/// Test: Selecting 'i' in method selection opens Issue Picker.
+#[test]
+fn test_i_key_opens_issue_picker() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open method selection modal
+    let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Press 'i' to select Pick from Issue
+    let key = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    // Note: FetchIssues action would try to call gh CLI in real scenario
+    // For this test, we just verify the modal transition
+    app.handle_action(action).unwrap();
+
+    // Should open IssuePicker modal
+    assert!(matches!(
+        app.state().modal,
+        Some(ModalType::IssuePicker { .. })
+    ));
+}
+
+/// Test: Issue Picker displays issues and allows navigation.
+#[test]
+fn test_issue_picker_navigation() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal directly
+    app.state_mut().open_issue_picker_modal();
+
+    // Set mock issues
+    let issues = vec![
+        GitHubIssue::new(42, "Fix authentication bug"),
+        GitHubIssue::new(55, "Add Issue Picker to New Task flow"),
+        GitHubIssue::new(60, "Improve error handling"),
+    ];
+    app.state_mut().set_issue_picker_issues(issues);
+
+    // Render the modal
+    app.render().unwrap();
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Pick from Issue");
+    assert_buffer_contains(buffer, "#42");
+    assert_buffer_contains(buffer, "Fix authentication bug");
+
+    // Initially first issue is selected
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(42));
+
+    // Navigate down with 'j'
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(55));
+
+    // Navigate down again
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(60));
+
+    // Navigate up with 'k'
+    let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(55));
+}
+
+/// Test: Issue Picker filter functionality.
+#[test]
+fn test_issue_picker_filter() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal directly
+    app.state_mut().open_issue_picker_modal();
+
+    // Set mock issues
+    let issues = vec![
+        GitHubIssue::new(42, "Fix authentication bug"),
+        GitHubIssue::new(55, "Add dark mode feature"),
+        GitHubIssue::new(60, "Fix login error"),
+    ];
+    app.state_mut().set_issue_picker_issues(issues);
+
+    // All 3 issues should be visible
+    assert_eq!(app.state().filtered_issues().len(), 3);
+
+    // Type "Fix" to filter
+    for c in "Fix".chars() {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        let action = app.handle_key_event(key);
+        app.handle_action(action).unwrap();
+    }
+
+    // Only 2 issues should match (42 and 60)
+    assert_eq!(app.state().filtered_issues().len(), 2);
+
+    // First filtered issue should be selected
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(42));
+
+    // Render and verify filter is displayed
+    app.render().unwrap();
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Filter: Fix");
+}
+
+/// Test: Issue Picker filter by issue number.
+#[test]
+fn test_issue_picker_filter_by_number() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal directly
+    app.state_mut().open_issue_picker_modal();
+
+    // Set mock issues
+    let issues = vec![
+        GitHubIssue::new(42, "First issue"),
+        GitHubIssue::new(55, "Second issue"),
+        GitHubIssue::new(123, "Third issue"),
+    ];
+    app.state_mut().set_issue_picker_issues(issues);
+
+    // Type "55" to filter by number
+    for c in "55".chars() {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        let action = app.handle_key_event(key);
+        app.handle_action(action).unwrap();
+    }
+
+    // Only issue #55 should match
+    assert_eq!(app.state().filtered_issues().len(), 1);
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(55));
+}
+
+/// Test: Selecting an issue with Enter creates task.
+#[test]
+fn test_issue_picker_select_creates_task() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal directly
+    app.state_mut().open_issue_picker_modal();
+
+    // Set mock issues
+    let issues = vec![GitHubIssue::new(42, "Fix authentication bug")];
+    app.state_mut().set_issue_picker_issues(issues);
+
+    // Press Enter to select the issue
+    let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+
+    // Should return CreateTaskFromIssue action
+    match action {
+        Action::CreateTaskFromIssue(issue) => {
+            assert_eq!(issue.number, 42);
+            assert_eq!(issue.branch_name(), "feature/issue-42");
+        }
+        _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
+    }
+
+    // Modal should be closed
+    assert!(app.state().modal.is_none());
+}
+
+/// Test: Issue Picker Escape cancels without action.
+#[test]
+fn test_issue_picker_escape_cancels() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal
+    app.state_mut().open_issue_picker_modal();
+    app.state_mut()
+        .set_issue_picker_issues(vec![GitHubIssue::new(1, "Test")]);
+
+    // Press Escape
+    let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+
+    // No task created (Action::None)
+    assert_eq!(action, Action::None);
+
+    app.handle_action(action).unwrap();
+
+    // Modal should be closed
+    assert!(app.state().modal.is_none());
+}
+
+/// Test: Full flow from 'n' -> 'i' -> filter -> Enter.
+#[test]
+fn test_full_issue_picker_flow() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Step 1: Press 'n' to open method selection
+    let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    assert!(matches!(
+        app.state().modal,
+        Some(ModalType::CreateTaskMethod { .. })
+    ));
+
+    // Step 2: Press 'i' to select Issue Picker
+    let key = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    // FetchIssues action is returned but we skip actual fetch
+    assert_eq!(action, Action::FetchIssues);
+
+    // Manually set issues (simulating fetch completion)
+    app.state_mut().set_issue_picker_issues(vec![
+        GitHubIssue::new(100, "Feature A"),
+        GitHubIssue::new(200, "Feature B"),
+    ]);
+
+    // Step 3: Filter by typing "B"
+    let key = KeyEvent::new(KeyCode::Char('B'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Only "Feature B" should match
+    assert_eq!(app.state().filtered_issues().len(), 1);
+    assert_eq!(app.state().selected_issue().map(|i| i.number), Some(200));
+
+    // Step 4: Press Enter to create task
+    let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+
+    match action {
+        Action::CreateTaskFromIssue(issue) => {
+            assert_eq!(issue.number, 200);
+            assert_eq!(issue.branch_name(), "feature/issue-200");
+        }
+        _ => panic!("Expected CreateTaskFromIssue action"),
+    }
+
+    // Modal should be closed
+    assert!(app.state().modal.is_none());
+}
+
+/// Test: Issue Picker renders loading state.
+#[test]
+fn test_issue_picker_loading_state() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal (will be in loading state)
+    app.state_mut().open_issue_picker_modal();
+
+    // Render the loading state
+    app.render().unwrap();
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Loading issues...");
+}
+
+/// Test: Issue Picker renders error state.
+#[test]
+fn test_issue_picker_error_state() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Open Issue Picker modal and set error
+    app.state_mut().open_issue_picker_modal();
+    app.state_mut()
+        .set_issue_picker_error("gh CLI not installed".to_string());
+
+    // Render the error state
+    app.render().unwrap();
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Error:");
+    assert_buffer_contains(buffer, "gh CLI not installed");
 }

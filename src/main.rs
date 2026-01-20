@@ -1,6 +1,7 @@
 //! Vive - Entry point for the TUI application.
 
 use std::io::{self, Write};
+use std::process::Command;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -13,8 +14,8 @@ use crossterm::{
 use ratatui::Terminal;
 
 use vive::{
-    App, Config, EventSource, GhIssueFetcher, ProductionApp, RealEventSource, RealProjectDiscovery,
-    event::Action,
+    App, Config, EventSource, GhIssueFetcher, LaunchStrategy, ProductionApp, RealEventSource,
+    RealProjectDiscovery, event::Action,
     mcp::{ViveStateSnapshot, run_mcp_server},
     tmux::TmuxOrchestrator,
 };
@@ -77,11 +78,11 @@ fn run_tui_mode() -> Result<()> {
         TmuxOrchestrator::new(),
         RealProjectDiscovery,
         GhIssueFetcher,
-        config,
+        config.clone(),
     );
 
     // Run the application
-    let result = run_with_terminal_control(&mut app);
+    let result = run_with_terminal_control(&mut app, &config);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -96,7 +97,7 @@ fn run_tui_mode() -> Result<()> {
 }
 
 /// Run the app with special handling for AttachSession which needs terminal control.
-fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>) -> Result<()> {
+fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>, config: &Config) -> Result<()> {
     app.init()?;
 
     loop {
@@ -112,7 +113,7 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>) -> Result<()>
 
             // Handle AttachSession specially since it requires terminal control
             if action == Action::AttachSession {
-                handle_attach_session(app)?;
+                handle_attach_session(app, config)?;
             } else {
                 app.handle_action(action)?;
             }
@@ -133,17 +134,17 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>) -> Result<()>
 }
 
 /// Handle the AttachSession action which requires special terminal handling.
-fn handle_attach_session<W: Write>(app: &mut ProductionApp<W>) -> Result<()> {
+fn handle_attach_session<W: Write>(app: &mut ProductionApp<W>, config: &Config) -> Result<()> {
     if let Some(project) = app.state().selected_project() {
         let project_name = project.name.clone();
 
         // Check if we're on project header (no worktree selected) -> dashboard mode
         if app.state().selected_worktree_idx().is_none() {
             // Project-level selection: create/attach to dashboard session
-            handle_dashboard_attach(app, &project_name)?;
+            handle_dashboard_attach(app, &project_name, config)?;
         } else {
             // Worktree-level selection: attach to specific worktree session
-            handle_worktree_attach(app, &project_name)?;
+            handle_worktree_attach(app, &project_name, config)?;
         }
     } else {
         app.state_mut().set_error_message("No project selected");
@@ -153,7 +154,11 @@ fn handle_attach_session<W: Write>(app: &mut ProductionApp<W>) -> Result<()> {
 }
 
 /// Handle attaching to a dashboard session for project-level selection.
-fn handle_dashboard_attach<W: Write>(app: &mut ProductionApp<W>, project_name: &str) -> Result<()> {
+fn handle_dashboard_attach<W: Write>(
+    app: &mut ProductionApp<W>,
+    project_name: &str,
+    config: &Config,
+) -> Result<()> {
     use vive::tmux::TmuxOrchestrator;
 
     let project = app
@@ -189,23 +194,17 @@ fn handle_dashboard_attach<W: Write>(app: &mut ProductionApp<W>, project_name: &
         .tmux
         .ensure_dashboard_session(project_name, &worktree_sessions);
 
-    // Restore terminal before exec
-    disable_raw_mode()?;
-    execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
-    app.terminal_mut().show_cursor()?;
-
-    // This will replace the current process
-    let _ = app.tmux.exec_into_session(&dashboard_session);
-
-    // If we get here, exec failed - restore terminal state
-    enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen)?;
+    execute_launch(app, config, &dashboard_session)?;
 
     Ok(())
 }
 
 /// Handle attaching to a specific worktree session.
-fn handle_worktree_attach<W: Write>(app: &mut ProductionApp<W>, project_name: &str) -> Result<()> {
+fn handle_worktree_attach<W: Write>(
+    app: &mut ProductionApp<W>,
+    project_name: &str,
+    config: &Config,
+) -> Result<()> {
     let project = app
         .state()
         .selected_project()
@@ -236,18 +235,75 @@ fn handle_worktree_attach<W: Write>(app: &mut ProductionApp<W>, project_name: &s
             .tmux
             .ensure_session(&session_id, Some(&worktree_path_str));
 
-        // Restore terminal before exec
-        disable_raw_mode()?;
-        execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
-        app.terminal_mut().show_cursor()?;
-
-        // This will replace the current process
-        let _ = app.tmux.exec_into_session(&session_id);
-
-        // If we get here, exec failed - restore terminal state
-        enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen)?;
+        execute_launch(app, config, &session_id)?;
     }
 
+    Ok(())
+}
+
+/// Execute the launch strategy for attaching to a tmux session.
+///
+/// This helper function handles both inline and spawn strategies:
+/// - **Inline**: Suspends TUI and replaces the process with tmux attach
+/// - **Spawn**: Launches external terminal without suspending TUI
+fn execute_launch<W: Write>(
+    app: &mut ProductionApp<W>,
+    config: &Config,
+    session_id: &str,
+) -> Result<()> {
+    match config.terminal.strategy {
+        LaunchStrategy::Spawn => {
+            spawn_terminal_session(&config.terminal, session_id, app)?;
+        }
+        LaunchStrategy::Inline => {
+            // Restore terminal before exec (inline mode replaces the process)
+            disable_raw_mode()?;
+            execute!(app.terminal_mut().backend_mut(), LeaveAlternateScreen)?;
+            app.terminal_mut().show_cursor()?;
+
+            // This will replace the current process
+            let _ = app.tmux.exec_into_session(session_id);
+
+            // If we get here, exec failed - restore terminal state
+            enable_raw_mode()?;
+            execute!(io::stdout(), EnterAlternateScreen)?;
+        }
+    }
+    Ok(())
+}
+
+/// Spawn an external terminal attached to the given session.
+///
+/// This function launches a new terminal process without suspending the TUI.
+/// The terminal command is configured via `[terminal]` section in config.toml.
+///
+/// A background thread is spawned to reap the child process when it exits,
+/// preventing zombie processes from accumulating in long-running TUI sessions.
+fn spawn_terminal_session<W: Write>(
+    terminal_config: &vive::TerminalConfig,
+    session_id: &str,
+    app: &mut ProductionApp<W>,
+) -> Result<()> {
+    if let Some((cmd, args)) = terminal_config.build_spawn_command(session_id) {
+        match Command::new(&cmd).args(&args).spawn() {
+            Ok(mut child) => {
+                // Spawn a background thread to reap the child process when it exits.
+                // This prevents zombie processes from accumulating when users open/close
+                // many external terminals in a long-running TUI session.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                app.state_mut()
+                    .set_success_message(format!("Launched terminal for session '{session_id}'"));
+            }
+            Err(e) => {
+                app.state_mut()
+                    .set_error_message(format!("Failed to spawn terminal '{cmd}': {e}"));
+            }
+        }
+    } else {
+        app.state_mut()
+            .set_error_message("Spawn strategy requires terminal.command to be set in config");
+    }
     Ok(())
 }
