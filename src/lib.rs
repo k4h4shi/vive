@@ -428,21 +428,29 @@ fn is_prompt_line(line: &str) -> bool {
 /// - ╭, ╮, ╰, ╯ (rounded corners)
 /// - ┌, ┐, └, ┘ (square corners)
 /// - │, ─ (sides)
-/// - Lines consisting only of ─ characters (horizontal separators)
+/// - Lines that are mostly horizontal line characters (separators)
 fn is_input_box_line(line: &str) -> bool {
-    let first_char = line.chars().next();
+    // Check first non-whitespace character
+    let first_non_ws = line.chars().find(|c| !c.is_whitespace());
 
     // Check if line starts with box-drawing character
     if matches!(
-        first_char,
-        Some('╭' | '╰' | '╮' | '╯' | '┌' | '└' | '┐' | '┘' | '│')
+        first_non_ws,
+        Some('╭' | '╰' | '╮' | '╯' | '┌' | '└' | '┐' | '┘' | '│' | '─' | '━')
     ) {
         return true;
     }
 
-    // Check if line consists only of horizontal line characters (separator)
-    let trimmed = line.trim();
-    !trimmed.is_empty() && trimmed.chars().all(|c| c == '─' || c == '━' || c == '-')
+    // Check if line is mostly horizontal line characters (separator)
+    // This catches lines like "────────────" even with some spaces
+    let horizontal_chars: usize = line
+        .chars()
+        .filter(|c| *c == '─' || *c == '━' || *c == '-' || *c == '═')
+        .count();
+
+    // If more than 10 horizontal characters and they make up most of the non-whitespace content
+    let non_ws_chars: usize = line.chars().filter(|c| !c.is_whitespace()).count();
+    horizontal_chars >= 10 && non_ws_chars > 0 && horizontal_chars * 100 / non_ws_chars >= 80
 }
 
 /// Type alias for the standard production App.
