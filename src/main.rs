@@ -138,12 +138,12 @@ fn handle_dashboard_attach<W: Write>(app: &mut ProductionApp<W>, project_name: &
         let _ = app.tmux.ensure_session(session_id, Some(worktree_path));
     }
 
-    // Create or get dashboard session
+    // Create or refresh dashboard session (ensures panes are properly attached)
     let dashboard_session =
         TmuxOrchestrator::<vive::tmux::RealTmuxExecutor>::dashboard_session_name(project_name);
     let _ = app
         .tmux
-        .create_dashboard_session(project_name, &worktree_sessions);
+        .ensure_dashboard_session(project_name, &worktree_sessions);
 
     // Restore terminal before exec
     disable_raw_mode()?;
