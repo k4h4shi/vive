@@ -195,6 +195,8 @@ pub struct AppState {
     input_cursor: usize,
     /// Captured pane content for preview.
     pub pane_preview: String,
+    /// Dashboard pane contents (for multi-pane preview): (branch_name, content).
+    pub dashboard_panes: Vec<(String, String)>,
     /// Status message for user feedback.
     pub status_message: Option<StatusMessage>,
     /// ListState for sidebar scrolling support.
@@ -225,6 +227,7 @@ impl Default for AppState {
             input_buffer: String::new(),
             input_cursor: 0,
             pane_preview: String::new(),
+            dashboard_panes: Vec::new(),
             status_message: None,
             sidebar_list_state: ListState::default(),
             last_scroll_time: None,
@@ -373,6 +376,12 @@ impl AppState {
     }
 
     /// Navigate to the next item in the sidebar (following sorted order).
+    ///
+    /// Navigation order:
+    /// - Project header (worktree_idx = None)
+    /// - First worktree (worktree_idx = Some(0))
+    /// - ... more worktrees ...
+    /// - Next project header
     pub fn select_next(&mut self) {
         if self.projects.is_empty() {
             return;
@@ -390,30 +399,50 @@ impl AppState {
         };
 
         let Some(sorted_idx) = current_sorted_idx else {
-            // No current selection, select first in sorted order
+            // No current selection, select first project header in sorted order
             let first_name = sorted_names[0].to_string();
             drop(sorted);
-            self.select_project_by_name(&first_name);
+            self.select_project_header_by_name(&first_name);
             self.sync_sidebar_list_state();
             return;
         };
 
         let current_project = sorted[sorted_idx];
-        let wt_idx = self.selected_worktree_idx.unwrap_or(0);
 
-        // Try to move to next worktree in current project
-        if wt_idx + 1 < current_project.worktrees.len() {
-            self.selected_worktree_idx = Some(wt_idx + 1);
-        } else if sorted_idx + 1 < sorted.len() {
-            // Move to next project in sorted order
-            let next_name = sorted_names[sorted_idx + 1].to_string();
-            self.select_project_by_name(&next_name);
+        match self.selected_worktree_idx {
+            None => {
+                // Currently on project header, move to first worktree if any
+                if !current_project.worktrees.is_empty() {
+                    self.selected_worktree_idx = Some(0);
+                } else if sorted_idx + 1 < sorted.len() {
+                    // No worktrees, move to next project header
+                    let next_name = sorted_names[sorted_idx + 1].to_string();
+                    drop(sorted);
+                    self.select_project_header_by_name(&next_name);
+                }
+            }
+            Some(wt_idx) => {
+                // Currently on a worktree
+                if wt_idx + 1 < current_project.worktrees.len() {
+                    // Move to next worktree in current project
+                    self.selected_worktree_idx = Some(wt_idx + 1);
+                } else if sorted_idx + 1 < sorted.len() {
+                    // Move to next project header
+                    let next_name = sorted_names[sorted_idx + 1].to_string();
+                    drop(sorted);
+                    self.select_project_header_by_name(&next_name);
+                }
+                // Otherwise, stay at current position (at the end)
+            }
         }
-        // Otherwise, stay at current position (at the end)
         self.sync_sidebar_list_state();
     }
 
     /// Navigate to the previous item in the sidebar (following sorted order).
+    ///
+    /// Navigation order (reverse):
+    /// - From first worktree (worktree_idx = Some(0)) -> project header (worktree_idx = None)
+    /// - From project header -> previous project's last worktree
     pub fn select_prev(&mut self) {
         if self.projects.is_empty() {
             return;
@@ -439,26 +468,36 @@ impl AppState {
             return;
         };
 
-        let wt_idx = self.selected_worktree_idx.unwrap_or(0);
-
-        // Try to move to previous worktree in current project
-        if wt_idx > 0 {
-            self.selected_worktree_idx = Some(wt_idx - 1);
-        } else if sorted_idx > 0 {
-            // Move to previous project's last worktree in sorted order
-            let (prev_name, prev_worktrees_len) = &sorted_info[sorted_idx - 1];
-            self.select_project_by_name(prev_name);
-            self.selected_worktree_idx = if *prev_worktrees_len == 0 {
-                None
-            } else {
-                Some(*prev_worktrees_len - 1)
-            };
+        match self.selected_worktree_idx {
+            None => {
+                // Currently on project header, move to previous project's last worktree
+                if sorted_idx > 0 {
+                    let (prev_name, prev_worktrees_len) = &sorted_info[sorted_idx - 1];
+                    self.select_project_header_by_name(prev_name);
+                    // Move to last worktree of previous project (if any)
+                    self.selected_worktree_idx = if *prev_worktrees_len == 0 {
+                        None
+                    } else {
+                        Some(*prev_worktrees_len - 1)
+                    };
+                }
+                // Otherwise, stay at current position (at the beginning)
+            }
+            Some(wt_idx) => {
+                if wt_idx > 0 {
+                    // Move to previous worktree in current project
+                    self.selected_worktree_idx = Some(wt_idx - 1);
+                } else {
+                    // At first worktree, move to project header
+                    self.selected_worktree_idx = None;
+                }
+            }
         }
-        // Otherwise, stay at current position (at the beginning)
         self.sync_sidebar_list_state();
     }
 
     /// Select a project by name, updating selection indices.
+    /// This selects the first worktree of the project.
     fn select_project_by_name(&mut self, name: &str) {
         if let Some(idx) = self.projects.iter().position(|p| p.name == name) {
             self.selected_project_idx = Some(idx);
@@ -467,6 +506,15 @@ impl AppState {
             } else {
                 Some(0)
             };
+        }
+    }
+
+    /// Select a project header by name (no worktree selected).
+    /// This is used for project-level selection (dashboard view).
+    fn select_project_header_by_name(&mut self, name: &str) {
+        if let Some(idx) = self.projects.iter().position(|p| p.name == name) {
+            self.selected_project_idx = Some(idx);
+            self.selected_worktree_idx = None;
         }
     }
 
@@ -609,6 +657,22 @@ impl AppState {
         self.pane_preview = content;
     }
 
+    /// Update the dashboard pane contents for multi-pane preview.
+    /// Each tuple is (branch_name, content).
+    pub fn set_dashboard_panes(&mut self, panes: Vec<(String, String)>) {
+        self.dashboard_panes = panes;
+    }
+
+    /// Clear the dashboard pane contents.
+    pub fn clear_dashboard_panes(&mut self) {
+        self.dashboard_panes.clear();
+    }
+
+    /// Check if we're in dashboard mode (project header selected, no worktree).
+    pub fn is_dashboard_mode(&self) -> bool {
+        self.selected_project_idx.is_some() && self.selected_worktree_idx.is_none()
+    }
+
     /// Set an info status message.
     pub fn set_info_message(&mut self, message: impl Into<String>) {
         self.status_message = Some(StatusMessage {
@@ -657,14 +721,14 @@ impl AppState {
         self.select_first_in_sorted_order();
     }
 
-    /// Select the first project/worktree in sorted order.
+    /// Select the first project header in sorted order.
     fn select_first_in_sorted_order(&mut self) {
         if self.projects.is_empty() {
             return;
         }
         let sorted = self.sorted_projects();
         if let Some(first) = sorted.first() {
-            self.select_project_by_name(&first.name.clone());
+            self.select_project_header_by_name(&first.name.clone());
             self.sync_sidebar_list_state();
         }
     }
@@ -788,14 +852,29 @@ mod tests {
     }
 
     #[test]
-    fn test_set_projects_auto_selects_first() {
+    fn test_set_projects_auto_selects_first_project_header() {
         let mut state = AppState::new();
         let projects = create_test_projects();
         state.set_projects(projects);
 
+        // Now selects project header (no worktree)
+        assert_eq!(state.selected_project_idx(), Some(0));
+        assert_eq!(state.selected_worktree_idx(), None); // Project header selected
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+    }
+
+    #[test]
+    fn test_select_next_from_project_header_to_worktree() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        // Starts at project-a header (worktree_idx = None)
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        state.select_next();
+        // Now at project-a, worktree 0 (main)
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), Some(0));
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
     }
 
     #[test]
@@ -803,26 +882,38 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Should start at project-a, worktree 0
-        assert_eq!(state.selected_worktree_idx(), Some(0));
+        state.select_next(); // project-a, worktree 0
+        state.select_next(); // project-a, worktree 1
 
-        state.select_next();
-        // Now at project-a, worktree 1 (feature-1)
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), Some(1));
     }
 
     #[test]
-    fn test_select_next_moves_to_next_project() {
+    fn test_select_next_moves_to_next_project_header() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Navigate: project-a header -> worktree 0 -> worktree 1 -> project-b header
+        state.select_next(); // project-a, worktree 0
         state.select_next(); // project-a, worktree 1
-        state.select_next(); // project-b, worktree 0
+        state.select_next(); // project-b header
 
         assert_eq!(state.selected_project_idx(), Some(1));
-        assert_eq!(state.selected_worktree_idx(), Some(0));
+        assert_eq!(state.selected_worktree_idx(), None); // Project header
         assert_eq!(state.selected_project().unwrap().name, "project-b");
+    }
+
+    #[test]
+    fn test_select_prev_to_project_header() {
+        let mut state = AppState::new();
+        state.set_projects(create_test_projects());
+
+        state.select_next(); // project-a, worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        state.select_prev(); // Back to project-a header
+        assert_eq!(state.selected_worktree_idx(), None);
     }
 
     #[test]
@@ -830,7 +921,8 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        state.select_next(); // Move to worktree 1
+        state.select_next(); // project-a, worktree 0
+        state.select_next(); // project-a, worktree 1
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
         state.select_prev(); // Back to worktree 0
@@ -838,12 +930,17 @@ mod tests {
     }
 
     #[test]
-    fn test_select_prev_moves_to_prev_project() {
+    fn test_select_prev_moves_to_prev_project_last_worktree() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Navigate to project-b header
+        state.select_next(); // project-a, worktree 0
         state.select_next(); // project-a, worktree 1
+        state.select_next(); // project-b header
         state.select_next(); // project-b, worktree 0
+
+        state.select_prev(); // project-b header
         state.select_prev(); // project-a, worktree 1 (last worktree of prev project)
 
         assert_eq!(state.selected_project_idx(), Some(0));
@@ -851,10 +948,14 @@ mod tests {
     }
 
     #[test]
-    fn test_selected_session_id() {
+    fn test_selected_session_id_none_on_project_header() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // On project header, no session id
+        assert_eq!(state.selected_session_id(), None);
+
+        state.select_next(); // Move to first worktree
         assert_eq!(
             state.selected_session_id(),
             Some("project-a__main".to_string())
@@ -1095,17 +1196,23 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Initial state: project-a (idx 0), worktree 0 -> flat index: 0 (project) + 1 (worktree 0) = 1
+        // Initial state: project-a header selected
         // Structure:
-        // 0: project-a (project header)
-        // 1:   main (worktree 0) <- selected
+        // 0: project-a (project header) <- selected
+        // 1:   main (worktree 0)
         // 2:   feature-1 (worktree 1)
         // 3: project-b (project header)
         // 4:   main (worktree 0)
+        assert_eq!(state.flat_sidebar_index(), Some(0)); // project header
+
+        state.select_next(); // worktree 0 (main)
         assert_eq!(state.flat_sidebar_index(), Some(1));
 
         state.select_next(); // worktree 1 (feature-1)
         assert_eq!(state.flat_sidebar_index(), Some(2));
+
+        state.select_next(); // project-b header
+        assert_eq!(state.flat_sidebar_index(), Some(3));
 
         state.select_next(); // project-b, worktree 0
         assert_eq!(state.flat_sidebar_index(), Some(4));
@@ -1117,15 +1224,19 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // ListState should sync with flat index
+        // Starts at project-a header
+        assert_eq!(state.sidebar_list_state().selected(), Some(0));
+
+        state.select_next(); // worktree 0
         assert_eq!(state.sidebar_list_state().selected(), Some(1));
 
-        state.select_next();
+        state.select_next(); // worktree 1
         assert_eq!(state.sidebar_list_state().selected(), Some(2));
 
-        state.select_next();
-        assert_eq!(state.sidebar_list_state().selected(), Some(4));
+        state.select_next(); // project-b header
+        assert_eq!(state.sidebar_list_state().selected(), Some(3));
 
-        state.select_prev();
+        state.select_prev(); // back to worktree 1
         assert_eq!(state.sidebar_list_state().selected(), Some(2));
     }
 
@@ -1170,16 +1281,18 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Select first project
+        // Select first project (starts at project-a header)
         assert_eq!(state.selected_project().unwrap().name, "project-a");
 
         // Toggle favorite on selected project
         state.toggle_favorite_selected();
         assert!(state.is_favorite("project-a"));
 
-        // Move to second project and toggle
-        state.select_next();
-        state.select_next();
+        // After toggling, project-a becomes favorite, so sorted order stays the same
+        // Move to second project header: worktree 0 -> worktree 1 -> project-b header
+        state.select_next(); // project-a, worktree 0
+        state.select_next(); // project-a, worktree 1
+        state.select_next(); // project-b header
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         state.toggle_favorite_selected();
         assert!(state.is_favorite("project-b"));
@@ -1259,45 +1372,53 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Verify initial state - first project header is selected
+        assert!(state.selected_project().is_some());
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
+
         // Mark project-b as favorite
         state.toggle_favorite("project-b");
 
+        // After toggle, selection moves to first in sorted order (project-b header)
+        assert!(state.has_favorites());
+        assert!(state.selected_project().is_some());
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None);
+
         // Sorted order with separator:
-        // 0: project-b (favorite, project header)
+        // 0: project-b (favorite, project header) <- selected
         // 1:   main (worktree)
         // 2: ──────── (separator)
         // 3: project-a (non-favorite, project header)
         // 4:   main (worktree 0)
         // 5:   feature-1 (worktree 1)
 
-        // Verify favorites are set
-        assert!(state.has_favorites());
-        assert!(state.is_favorite("project-b"));
-        assert!(!state.is_favorite("project-a"));
+        // flat_sidebar_index should return 0 for project-b header
+        assert_eq!(state.flat_sidebar_index(), Some(0));
 
-        // After toggling favorite, selection moves to first in sorted order (project-b)
+        // Navigate through the list to verify indices
+        state.select_next(); // project-b, worktree 0 (main)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
-
-        // Flat index should be 1 (project-b header=0, worktree=1)
         assert_eq!(state.flat_sidebar_index(), Some(1));
 
-        // Navigate to project-a (skip separator at index 2)
-        state.select_next(); // Now at project-a, worktree 0
+        state.select_next(); // project-a header (after separator at index 2)
         assert_eq!(state.selected_project().unwrap().name, "project-a");
-        assert_eq!(state.selected_worktree_idx(), Some(0));
+        assert_eq!(state.selected_worktree_idx(), None);
+        assert_eq!(state.flat_sidebar_index(), Some(3));
 
-        // Flat index should be 4 (after separator)
+        state.select_next(); // project-a, worktree 0
+        assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(state.flat_sidebar_index(), Some(4));
 
-        // Navigate to next worktree in project-a
-        state.select_next(); // Now at project-a, worktree 1
+        state.select_next(); // project-a, worktree 1
         assert_eq!(state.selected_worktree_idx(), Some(1));
         assert_eq!(state.flat_sidebar_index(), Some(5));
     }
 
     #[test]
-    fn test_navigation_follows_sorted_order() {
+    fn test_navigation_follows_sorted_order_with_favorites() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
@@ -1305,49 +1426,60 @@ mod tests {
         // Sorted order: project-b (favorite), project-a (non-favorite)
         state.toggle_favorite("project-b");
 
-        // Initial selection should be first in sorted order (project-b)
+        // Initial selection should be first in sorted order (project-b header)
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None); // Project header
+
+        // Navigate: project-b header -> worktree 0 -> project-a header
+        state.select_next(); // project-b, worktree 0
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        // Navigate to next - should stay in project-b (no more worktrees)
-        // then move to project-a
-        state.select_next();
+        state.select_next(); // project-a header
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        // Navigate to project-a worktrees
+        state.select_next(); // project-a, worktree 0
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        // Navigate to next worktree in project-a
-        state.select_next();
+        state.select_next(); // project-a, worktree 1
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
-        // Navigate back - should go to project-a worktree 0
-        state.select_prev();
+        // Navigate back
+        state.select_prev(); // project-a, worktree 0
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        // Navigate back - should go to project-b (last worktree)
-        state.select_prev();
+        state.select_prev(); // project-a header
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
+
+        state.select_prev(); // project-b, last worktree (worktree 0)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
     }
 
     #[test]
-    fn test_toggle_favorite_updates_selection_to_sorted_first() {
+    fn test_toggle_favorite_updates_selection_to_sorted_first_header() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Initially selected: project-a
+        // Initially selected: project-a header
         assert_eq!(state.selected_project().unwrap().name, "project-a");
 
         // Toggle project-b as favorite
         state.toggle_favorite("project-b");
 
-        // Selection should move to first in sorted order (project-b)
+        // Selection should move to first in sorted order (project-b header)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None); // Project header
     }
 
     #[test]
-    fn test_set_projects_selects_first_in_sorted_order_with_favorites() {
+    fn test_set_projects_selects_first_in_sorted_order_with_favorites_header() {
         let mut state = AppState::new();
 
         // Set favorites BEFORE setting projects (simulating app startup)
@@ -1358,9 +1490,9 @@ mod tests {
         // Now set projects
         state.set_projects(create_test_projects());
 
-        // Selection should be first in sorted order (project-b is favorite)
+        // Selection should be first in sorted order (project-b header)
         assert_eq!(state.selected_project().unwrap().name, "project-b");
-        assert_eq!(state.selected_worktree_idx(), Some(0));
+        assert_eq!(state.selected_worktree_idx(), None); // Project header
     }
 
     // ========== Additional tests for rich UI tree feature ==========
