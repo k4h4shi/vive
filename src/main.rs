@@ -12,8 +12,8 @@ use crossterm::{
 use ratatui::Terminal;
 
 use vive::{
-    App, Config, EventSource, ProductionApp, RealEventSource, RealProjectDiscovery, event::Action,
-    tmux::TmuxOrchestrator,
+    App, Config, EventSource, GhIssueFetcher, ProductionApp, RealEventSource, RealProjectDiscovery,
+    event::Action, tmux::TmuxOrchestrator,
 };
 
 fn main() -> Result<()> {
@@ -33,6 +33,7 @@ fn main() -> Result<()> {
         RealEventSource,
         TmuxOrchestrator::new(),
         RealProjectDiscovery,
+        GhIssueFetcher,
         config,
     );
 
