@@ -1089,10 +1089,30 @@ mod tests {
         // 4:   main (worktree 0)
         // 5:   feature-1 (worktree 1)
 
-        // Initial selection should be project-b's first worktree (index 1)
-        // But we need to update selection to match sorted order
-        // For now, test the calculation method directly
+        // Verify favorites are set
         assert!(state.has_favorites());
+        assert!(state.is_favorite("project-b"));
+        assert!(!state.is_favorite("project-a"));
+
+        // After toggling favorite, selection moves to first in sorted order (project-b)
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Flat index should be 1 (project-b header=0, worktree=1)
+        assert_eq!(state.flat_sidebar_index(), Some(1));
+
+        // Navigate to project-a (skip separator at index 2)
+        state.select_next(); // Now at project-a, worktree 0
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), Some(0));
+
+        // Flat index should be 4 (after separator)
+        assert_eq!(state.flat_sidebar_index(), Some(4));
+
+        // Navigate to next worktree in project-a
+        state.select_next(); // Now at project-a, worktree 1
+        assert_eq!(state.selected_worktree_idx(), Some(1));
+        assert_eq!(state.flat_sidebar_index(), Some(5));
     }
 
     #[test]

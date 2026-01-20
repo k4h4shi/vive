@@ -152,11 +152,20 @@ where
 
         // Discover projects
         let projects_root = self.config.effective_projects_root();
-        if let Ok(projects) = self
+        match self
             .discovery
             .discover(&projects_root, &self.config.ignored_dirs)
         {
-            self.state.set_projects(projects);
+            Ok(projects) => {
+                self.state.set_projects(projects);
+            }
+            Err(e) => {
+                // Log the error but don't fail - user can still use the app
+                eprintln!(
+                    "Warning: Failed to discover projects in '{}': {e}",
+                    projects_root.display()
+                );
+            }
         }
         Ok(())
     }
