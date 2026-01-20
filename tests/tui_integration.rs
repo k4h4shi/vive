@@ -229,9 +229,7 @@ pub fn assert_buffer_contains(buffer: &Buffer, expected: &str) {
     let content = buffer_to_string(buffer);
     assert!(
         content.contains(expected),
-        "Expected buffer to contain '{}', but got:\n{}",
-        expected,
-        content
+        "Expected buffer to contain '{expected}', but got:\n{content}"
     );
 }
 
@@ -240,9 +238,7 @@ pub fn assert_buffer_not_contains(buffer: &Buffer, unexpected: &str) {
     let content = buffer_to_string(buffer);
     assert!(
         !content.contains(unexpected),
-        "Expected buffer NOT to contain '{}', but found it in:\n{}",
-        unexpected,
-        content
+        "Expected buffer NOT to contain '{unexpected}', but found it in:\n{content}"
     );
 }
 
@@ -790,12 +786,11 @@ fn test_favorites_toggle_on_f() {
 
     app.init().unwrap();
 
-    // Clear any favorites that might have been loaded from disk
-    for name in app.state().favorites().clone() {
-        app.state_mut().toggle_favorite(&name);
-    }
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
 
-    // No favorites now - starts at project-alpha header
+    // No favorites initially (after clearing) - starts at project-alpha header
     assert!(!app.state().favorites().contains("project-alpha"));
     assert_eq!(
         app.state().selected_project().unwrap().name,
@@ -832,12 +827,11 @@ fn test_favorites_show_star_icon() {
 
     app.init().unwrap();
 
-    // Clear any favorites that might have been loaded from disk
-    for name in app.state().favorites().clone() {
-        app.state_mut().toggle_favorite(&name);
-    }
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
 
-    // Toggle favorite
+    // Toggle favorite to add project-alpha
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
@@ -1099,6 +1093,47 @@ fn test_preview_shows_spinner_content() {
 
     let buffer = app.terminal().backend().buffer();
     assert_buffer_contains(buffer, "Working on task");
+}
+
+/// Test: Preview area scrolls to show the latest (bottom) content.
+/// When the preview content is longer than the display area, the most recent
+/// lines at the bottom should be visible, not the older lines at the top.
+#[test]
+fn test_preview_scrolls_to_bottom() {
+    let projects = create_test_projects();
+
+    // Create content with many lines - old content at top, latest at bottom
+    // Use "FIRST_LINE_MARKER" to avoid substring matching issues
+    let mut lines = Vec::new();
+    lines.push("FIRST_LINE_MARKER_OLD".to_string());
+    for i in 2..=30 {
+        lines.push(format!("Old line {i}"));
+    }
+    lines.push(">>> LATEST MESSAGE <<<".to_string());
+    lines.push("This is the most recent output".to_string());
+    let content = lines.join("\n");
+
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", &content)]);
+
+    app.init().unwrap();
+
+    // Navigate to worktree 0 (main) to get session ID for preview
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    app.update_pane_preview();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+
+    // The latest content at the bottom should be visible
+    assert_buffer_contains(buffer, "LATEST MESSAGE");
+    assert_buffer_contains(buffer, "most recent output");
+
+    // The old content at the top should NOT be visible (scrolled out)
+    assert_buffer_not_contains(buffer, "FIRST_LINE_MARKER_OLD");
 }
 
 /// Test: Input mode typing updates input buffer.

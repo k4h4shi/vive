@@ -439,13 +439,13 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     }
 
     /// Send keys to a target (session:window.pane).
+    ///
+    /// When `enter` is true, the input text and Enter key are sent as **separate**
+    /// tmux commands to ensure reliable delivery. This follows the tmuxcc approach
+    /// where splitting input and Enter prevents timing issues with Claude Code.
     pub fn send_keys(&self, target: &str, keys: &str, enter: bool) -> Result<()> {
-        let mut cmd_args = args!["send-keys", "-t", target, keys];
-
-        if enter {
-            cmd_args.push("C-m".to_string());
-        }
-
+        // First, send the input text
+        let cmd_args = args!["send-keys", "-t", target, keys];
         let result = self.executor.execute(cmd_args)?;
 
         if !result.success {
@@ -454,6 +454,22 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
                 target,
                 result.stderr.trim()
             );
+        }
+
+        // Then, send Enter as a separate command if requested
+        // This separation ensures reliable prompt delivery to Claude Code
+        // Using C-m (Ctrl+M) which is the control sequence for carriage return
+        if enter {
+            let enter_args = args!["send-keys", "-t", target, "C-m"];
+            let enter_result = self.executor.execute(enter_args)?;
+
+            if !enter_result.success {
+                anyhow::bail!(
+                    "Failed to send Enter to '{}': {}",
+                    target,
+                    enter_result.stderr.trim()
+                );
+            }
         }
 
         Ok(())
@@ -627,7 +643,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         project_name: &str,
         worktree_sessions: &[(String, String)],
     ) -> Result<bool> {
-        let dashboard_session = format!("{project_name}:dashboard");
+        let dashboard_session = format!("{project_name}__dashboard");
 
         // Check if dashboard already exists
         if self.has_session(&dashboard_session)? {
@@ -666,8 +682,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     }
 
     /// Get the dashboard session name for a project.
+    /// Uses double underscore to avoid tmux's session:window delimiter.
     pub fn dashboard_session_name(project_name: &str) -> String {
-        format!("{project_name}:dashboard")
+        format!("{project_name}__dashboard")
     }
 
     // ========================================================================
@@ -894,12 +911,24 @@ mod tests {
     }
 
     #[test]
-    fn test_send_keys_with_enter() {
+    fn test_send_keys_with_enter_separated() {
+        use mockall::Sequence;
+
         let mut mock = MockTmuxExecutor::new();
+        let mut seq = Sequence::new();
+
+        // First call: send the input text
         mock.expect_execute()
-            .withf(|args| {
-                *args == to_strings(&["send-keys", "-t", "my-session:main", "claude", "C-m"])
-            })
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:main", "claude"]))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(mock_success("")));
+
+        // Second call: send Enter separately (C-m = Ctrl+M)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:main", "C-m"]))
+            .times(1)
+            .in_sequence(&mut seq)
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
@@ -1222,11 +1251,14 @@ mod tests {
             })
             .returning(|_| Ok(mock_success("")));
 
-        // send_keys for initial command
+        // send_keys for initial command (input text)
         mock.expect_execute()
-            .withf(|args| {
-                *args == to_strings(&["send-keys", "-t", "my-session:task-1", "claude", "C-m"])
-            })
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:task-1", "claude"]))
+            .returning(|_| Ok(mock_success("")));
+
+        // send_keys for Enter (sent separately as C-m)
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["send-keys", "-t", "my-session:task-1", "C-m"]))
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
