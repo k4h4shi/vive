@@ -142,6 +142,16 @@ pub enum FocusMode {
     Input,
 }
 
+/// Which pane is currently focused (for key navigation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FocusPane {
+    /// Sidebar pane (project/worktree list).
+    #[default]
+    Sidebar,
+    /// Preview pane (terminal output).
+    Preview,
+}
+
 /// Method for creating a new task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CreateTaskMethod {
@@ -245,6 +255,12 @@ pub struct AppState {
     /// Set of project names that are expanded (showing worktrees).
     /// Projects not in this set are collapsed.
     expanded_projects: HashSet<String>,
+    /// Which pane is currently focused (Sidebar or Preview).
+    focus_pane: FocusPane,
+    /// Scroll offset for the preview pane (in lines).
+    preview_scroll_offset: u16,
+    /// Total line count in preview content (cached for scroll calculations).
+    preview_line_count: usize,
 }
 
 impl Default for AppState {
@@ -270,6 +286,9 @@ impl Default for AppState {
             favorites_modified: false,
             issue_title_cache: IssueTitleCache::new(),
             expanded_projects: HashSet::new(),
+            focus_pane: FocusPane::Sidebar,
+            preview_scroll_offset: 0,
+            preview_line_count: 0,
         }
     }
 }
@@ -583,6 +602,104 @@ impl AppState {
     /// Exit input mode.
     pub fn exit_input_mode(&mut self) {
         self.focus_mode = FocusMode::Normal;
+    }
+
+    // ========== Focus Pane Methods ==========
+
+    /// Get the current focus pane.
+    pub fn focus_pane(&self) -> FocusPane {
+        self.focus_pane
+    }
+
+    /// Check if the sidebar pane is focused.
+    pub fn is_sidebar_focused(&self) -> bool {
+        self.focus_pane == FocusPane::Sidebar
+    }
+
+    /// Check if the preview pane is focused.
+    pub fn is_preview_focused(&self) -> bool {
+        self.focus_pane == FocusPane::Preview
+    }
+
+    /// Focus the sidebar pane.
+    pub fn focus_sidebar(&mut self) {
+        self.focus_pane = FocusPane::Sidebar;
+    }
+
+    /// Focus the preview pane.
+    pub fn focus_preview(&mut self) {
+        self.focus_pane = FocusPane::Preview;
+    }
+
+    /// Toggle focus between sidebar and preview panes.
+    /// Does nothing if in input mode.
+    pub fn toggle_focus_pane(&mut self) {
+        if self.focus_mode == FocusMode::Input {
+            return;
+        }
+        self.focus_pane = match self.focus_pane {
+            FocusPane::Sidebar => FocusPane::Preview,
+            FocusPane::Preview => FocusPane::Sidebar,
+        };
+    }
+
+    // ========== Preview Scroll Methods ==========
+
+    /// Get the current preview scroll offset.
+    pub fn preview_scroll_offset(&self) -> u16 {
+        self.preview_scroll_offset
+    }
+
+    /// Get the total line count in preview content.
+    pub fn preview_line_count(&self) -> usize {
+        self.preview_line_count
+    }
+
+    /// Set the preview line count (called when updating preview content).
+    pub fn set_preview_line_count(&mut self, count: usize) {
+        self.preview_line_count = count;
+        // Clamp scroll offset if content shrunk
+        let max_scroll = count.saturating_sub(1) as u16;
+        if self.preview_scroll_offset > max_scroll {
+            self.preview_scroll_offset = max_scroll;
+        }
+    }
+
+    /// Scroll the preview up by one line.
+    pub fn scroll_preview_up(&mut self) {
+        self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(1);
+    }
+
+    /// Scroll the preview down by one line.
+    pub fn scroll_preview_down(&mut self, visible_height: u16) {
+        let max_scroll = (self.preview_line_count as u16).saturating_sub(visible_height);
+        if self.preview_scroll_offset < max_scroll {
+            self.preview_scroll_offset += 1;
+        }
+    }
+
+    /// Scroll the preview up by a half page.
+    pub fn scroll_preview_page_up(&mut self, visible_height: u16) {
+        let scroll_amount = visible_height / 2;
+        self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(scroll_amount);
+    }
+
+    /// Scroll the preview down by a half page.
+    pub fn scroll_preview_page_down(&mut self, visible_height: u16) {
+        let scroll_amount = visible_height / 2;
+        let max_scroll = (self.preview_line_count as u16).saturating_sub(visible_height);
+        self.preview_scroll_offset = (self.preview_scroll_offset + scroll_amount).min(max_scroll);
+    }
+
+    /// Reset preview scroll to the bottom (show most recent content).
+    pub fn reset_preview_scroll(&mut self) {
+        // Set to max value; rendering will clamp to actual content
+        self.preview_scroll_offset = u16::MAX;
+    }
+
+    /// Reset preview scroll to the top.
+    pub fn reset_preview_scroll_to_top(&mut self) {
+        self.preview_scroll_offset = 0;
     }
 
     /// Add a character to the input buffer at the cursor position.
@@ -2735,5 +2852,207 @@ mod tests {
         state.select_prev();
         assert_eq!(state.selected_project().unwrap().name, "project-a");
         assert_eq!(state.selected_worktree_idx(), None);
+    }
+
+    // ========== Focus Pane Tests ==========
+
+    #[test]
+    fn test_default_focus_pane_is_sidebar() {
+        let state = AppState::new();
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+        assert!(state.is_sidebar_focused());
+        assert!(!state.is_preview_focused());
+    }
+
+    #[test]
+    fn test_toggle_focus_pane() {
+        let mut state = AppState::new();
+
+        // Initially sidebar focused
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+
+        // Toggle to preview
+        state.toggle_focus_pane();
+        assert_eq!(state.focus_pane(), FocusPane::Preview);
+        assert!(state.is_preview_focused());
+        assert!(!state.is_sidebar_focused());
+
+        // Toggle back to sidebar
+        state.toggle_focus_pane();
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+        assert!(state.is_sidebar_focused());
+    }
+
+    #[test]
+    fn test_toggle_focus_pane_ignores_input_mode() {
+        let mut state = AppState::new();
+        state.enter_input_mode();
+
+        // Initially sidebar (but in input mode)
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+
+        // Toggle should be ignored in input mode
+        state.toggle_focus_pane();
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+    }
+
+    #[test]
+    fn test_focus_sidebar_explicitly() {
+        let mut state = AppState::new();
+        state.focus_preview();
+        assert_eq!(state.focus_pane(), FocusPane::Preview);
+
+        state.focus_sidebar();
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+    }
+
+    #[test]
+    fn test_focus_preview_explicitly() {
+        let mut state = AppState::new();
+        assert_eq!(state.focus_pane(), FocusPane::Sidebar);
+
+        state.focus_preview();
+        assert_eq!(state.focus_pane(), FocusPane::Preview);
+    }
+
+    // ========== Preview Scroll Tests ==========
+
+    #[test]
+    fn test_preview_scroll_default_values() {
+        let state = AppState::new();
+        assert_eq!(state.preview_scroll_offset(), 0);
+        assert_eq!(state.preview_line_count(), 0);
+    }
+
+    #[test]
+    fn test_set_preview_line_count() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+        assert_eq!(state.preview_line_count(), 100);
+    }
+
+    #[test]
+    fn test_set_preview_line_count_clamps_scroll_offset() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+
+        // Manually set scroll offset to a high value
+        state.scroll_preview_down(20);
+        state.scroll_preview_down(20);
+        state.scroll_preview_down(20);
+        state.scroll_preview_down(20);
+
+        // Now reduce line count - scroll offset should be clamped
+        state.set_preview_line_count(10);
+        assert!(state.preview_scroll_offset() <= 9);
+    }
+
+    #[test]
+    fn test_scroll_preview_up() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+
+        // Manually set scroll offset to 10
+        for _ in 0..10 {
+            state.scroll_preview_down(20);
+        }
+        let initial_offset = state.preview_scroll_offset();
+
+        state.scroll_preview_up();
+        assert_eq!(
+            state.preview_scroll_offset(),
+            initial_offset.saturating_sub(1)
+        );
+    }
+
+    #[test]
+    fn test_scroll_preview_up_at_top() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+
+        // Should not go below 0
+        state.scroll_preview_up();
+        assert_eq!(state.preview_scroll_offset(), 0);
+    }
+
+    #[test]
+    fn test_scroll_preview_down() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+
+        state.scroll_preview_down(20);
+        assert_eq!(state.preview_scroll_offset(), 1);
+    }
+
+    #[test]
+    fn test_scroll_preview_down_at_bottom() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(30);
+        let visible_height = 20;
+
+        // Scroll to max (30 - 20 = 10)
+        for _ in 0..15 {
+            state.scroll_preview_down(visible_height);
+        }
+
+        // Should not exceed max scroll
+        assert_eq!(state.preview_scroll_offset(), 10);
+    }
+
+    #[test]
+    fn test_scroll_preview_page_up() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+        let visible_height = 20;
+
+        // Scroll down first
+        for _ in 0..20 {
+            state.scroll_preview_down(visible_height);
+        }
+
+        let offset_before = state.preview_scroll_offset();
+        state.scroll_preview_page_up(visible_height);
+
+        // Should scroll up by half a page (10 lines)
+        assert_eq!(
+            state.preview_scroll_offset(),
+            offset_before.saturating_sub(10)
+        );
+    }
+
+    #[test]
+    fn test_scroll_preview_page_down() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+        let visible_height = 20;
+
+        state.scroll_preview_page_down(visible_height);
+
+        // Should scroll down by half a page (10 lines)
+        assert_eq!(state.preview_scroll_offset(), 10);
+    }
+
+    #[test]
+    fn test_reset_preview_scroll() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+
+        // Reset to bottom (u16::MAX, will be clamped during render)
+        state.reset_preview_scroll();
+        assert_eq!(state.preview_scroll_offset(), u16::MAX);
+    }
+
+    #[test]
+    fn test_reset_preview_scroll_to_top() {
+        let mut state = AppState::new();
+        state.set_preview_line_count(100);
+
+        // Scroll down first
+        state.scroll_preview_down(20);
+        state.scroll_preview_down(20);
+
+        // Reset to top
+        state.reset_preview_scroll_to_top();
+        assert_eq!(state.preview_scroll_offset(), 0);
     }
 }

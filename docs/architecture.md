@@ -31,8 +31,15 @@
 - **Dashboard View**:
     - Sidebar: Project list with aggregate status indicators.
     - Main Area: Task details for the selected project.
+- **Focus Pane Management**:
+    - **FocusPane Enum**: `Sidebar` (default) or `Preview` - determines which pane receives key events.
+    - **Sidebar Focus**: j/k navigate the project/worktree list.
+    - **Preview Focus**: j/k scroll the preview content, Ctrl-d/Ctrl-u for page scroll, g/G for top/bottom.
+    - **Visual Feedback**: Active pane has yellow highlighted border; inactive pane has gray border.
 - **Interaction**:
     - Keyboard navigation (vim-style j/k) and Mouse support.
+    - Tab or h/l keys toggle focus between panes.
+    - Mouse click on pane switches focus; mouse wheel scrolls the focused pane.
     - "Open" action triggers the Tmux Orchestrator.
 
 ### 4. Tmux Orchestrator (The "Hands")
