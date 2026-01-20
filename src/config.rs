@@ -201,20 +201,19 @@ impl Favorites {
 
     /// Saves favorites to `~/.vive/favorites.toml`.
     pub fn save(&self) -> Result<()> {
-        let favorites_path = Self::favorites_file_path()
-            .context("Could not determine favorites file path")?;
+        let favorites_path =
+            Self::favorites_file_path().context("Could not determine favorites file path")?;
 
         // Ensure config directory exists
-        if let Some(parent) = favorites_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create config directory: {}", parent.display())
-                })?;
-            }
+        if let Some(parent) = favorites_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize favorites")?;
+        let content = toml::to_string_pretty(self).context("Failed to serialize favorites")?;
 
         fs::write(&favorites_path, content).with_context(|| {
             format!(
