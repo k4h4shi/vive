@@ -1176,21 +1176,30 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
+        // Verify initial state - first project header is selected
+        assert!(state.selected_project().is_some());
+        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_worktree_idx(), None);
+
         // Mark project-b as favorite
         state.toggle_favorite("project-b");
 
+        // After toggle, selection moves to first in sorted order (project-b header)
+        assert!(state.has_favorites());
+        assert!(state.selected_project().is_some());
+        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_worktree_idx(), None);
+
         // Sorted order with separator:
-        // 0: project-b (favorite, project header)
+        // 0: project-b (favorite, project header) <- selected
         // 1:   main (worktree)
         // 2: ──────── (separator)
         // 3: project-a (non-favorite, project header)
         // 4:   main (worktree 0)
         // 5:   feature-1 (worktree 1)
 
-        // Initial selection should be project-b's first worktree (index 1)
-        // But we need to update selection to match sorted order
-        // For now, test the calculation method directly
-        assert!(state.has_favorites());
+        // flat_sidebar_index should return 0 for project-b header
+        assert_eq!(state.flat_sidebar_index(), Some(0));
     }
 
     #[test]
