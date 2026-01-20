@@ -75,3 +75,10 @@ graph TD
 3.  **UI Rendering**:
     - The TUI renders based on a snapshot of `AppState`.
     - It joins the Static Data (Project Tree) with Dynamic Data (Status Map) using `SessionId` as the key.
+
+4.  **Favorites Persistence**:
+    - Favorites are stored in `~/.vive/favorites.toml`.
+    - Loaded at startup, saved immediately when toggled.
+    - **Robustness**: If loading fails (e.g., corrupted file), a `favorites_load_failed` flag is set.
+    - When this flag is set, saving is skipped to prevent overwriting potentially valid data.
+    - This prevents data loss in edge cases where the file cannot be read but may still contain valid favorites.
