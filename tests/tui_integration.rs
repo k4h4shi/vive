@@ -175,7 +175,7 @@ pub type TestApp = App<TestBackend, MockEventSource, MockTmuxExecutor, MockProje
 
 /// Create a test application with the given projects and events.
 pub fn create_test_app(projects: Vec<Project>, events: Vec<Event>) -> TestApp {
-    let backend = TestBackend::new(80, 24);
+    let backend = TestBackend::new(120, 30);
     let terminal = Terminal::new(backend).unwrap();
     let event_source = MockEventSource::new(events);
     let tmux = TmuxOrchestrator::with_executor(MockTmuxExecutor::new());
@@ -191,7 +191,7 @@ pub fn create_test_app_with_tmux(
     events: Vec<Event>,
     tmux_sessions: Vec<(&str, &str)>,
 ) -> TestApp {
-    let backend = TestBackend::new(80, 24);
+    let backend = TestBackend::new(120, 30);
     let terminal = Terminal::new(backend).unwrap();
     let event_source = MockEventSource::new(events);
     let executor = MockTmuxExecutor::new();
@@ -545,7 +545,7 @@ fn test_quit_on_ctrl_c() {
     assert!(app.state().should_quit());
 }
 
-/// Test: Status icon rendering - idle status shows white circle.
+/// Test: Status icon rendering - idle status shows bullet.
 #[test]
 fn test_status_icon_idle() {
     let projects = create_test_projects();
@@ -555,8 +555,8 @@ fn test_status_icon_idle() {
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    // Idle status icon
-    assert_buffer_contains(buffer, "⚪");
+    // Idle status icon (bullet)
+    assert_buffer_contains(buffer, "•");
 }
 
 /// Test: Status update - Mock status changes are reflected.
@@ -568,17 +568,19 @@ fn test_status_update_changes_icon() {
     app.init().unwrap();
 
     // Set a session status to Working
-    app.state_mut()
-        .set_status("project-alpha__main".to_string(), AgentStatus::Working);
+    app.state_mut().set_status(
+        "project-alpha__main".to_string(),
+        AgentStatus::Working { detail: None },
+    );
 
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    // Working status icon (green circle)
-    assert_buffer_contains(buffer, "🟢");
+    // Working status icon (gear)
+    assert_buffer_contains(buffer, "⚙");
 }
 
-/// Test: Status update - Waiting status shows yellow circle.
+/// Test: Status update - WaitingEdit status shows pencil icon.
 #[test]
 fn test_status_waiting_icon() {
     let projects = create_test_projects();
@@ -586,13 +588,15 @@ fn test_status_waiting_icon() {
 
     app.init().unwrap();
 
-    app.state_mut()
-        .set_status("project-alpha__main".to_string(), AgentStatus::Waiting);
+    app.state_mut().set_status(
+        "project-alpha__main".to_string(),
+        AgentStatus::WaitingEdit { path: None },
+    );
 
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    assert_buffer_contains(buffer, "🟡");
+    assert_buffer_contains(buffer, "✎");
 }
 
 /// Test: Preview area updates from tmux capture.
@@ -931,7 +935,7 @@ fn test_deletion_modal_n_cancels() {
     assert!(app.state().modal.is_none());
 }
 
-/// Test: Status - Error status shows red icon.
+/// Test: Status - Error status shows cross icon.
 #[test]
 fn test_status_error_icon() {
     let projects = create_test_projects();
@@ -945,7 +949,7 @@ fn test_status_error_icon() {
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    assert_buffer_contains(buffer, "🔴");
+    assert_buffer_contains(buffer, "✖");
 }
 
 /// Test: Multiple projects with different statuses.
@@ -957,17 +961,21 @@ fn test_multiple_project_statuses() {
     app.init().unwrap();
 
     // Set different statuses for different sessions
-    app.state_mut()
-        .set_status("project-alpha__main".to_string(), AgentStatus::Working);
-    app.state_mut()
-        .set_status("project-beta__main".to_string(), AgentStatus::Waiting);
+    app.state_mut().set_status(
+        "project-alpha__main".to_string(),
+        AgentStatus::Working { detail: None },
+    );
+    app.state_mut().set_status(
+        "project-beta__main".to_string(),
+        AgentStatus::WaitingEdit { path: None },
+    );
 
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    // Should show both green and yellow circles
-    assert_buffer_contains(buffer, "🟢");
-    assert_buffer_contains(buffer, "🟡");
+    // Should show gear and pencil icons
+    assert_buffer_contains(buffer, "⚙");
+    assert_buffer_contains(buffer, "✎");
 }
 
 /// Test: Navigation at boundary doesn't crash.
@@ -1166,4 +1174,302 @@ fn test_footer_shows_favorite_hint() {
 
     let buffer = app.terminal().backend().buffer();
     assert_buffer_contains(buffer, "Fav");
+}
+
+// ========== Additional tests for rich UI tree feature ==========
+
+/// Test: Tree structure shows project collapse indicator (▼).
+#[test]
+fn test_tree_shows_collapse_indicator() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "▼");
+}
+
+/// Test: Tree structure shows tree prefixes (├─ and └─).
+#[test]
+fn test_tree_shows_branch_prefixes() {
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature",
+                "def456",
+                Some("feature".to_string()),
+            ),
+        ]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // First worktree should have ├─
+    assert_buffer_contains(buffer, "├─");
+    // Last worktree should have └─
+    assert_buffer_contains(buffer, "└─");
+}
+
+/// Test: Tree structure shows single worktree with └─.
+#[test]
+fn test_tree_single_worktree_shows_end_prefix() {
+    let projects = vec![
+        Project::new("single-worktree", "/path/to/single").with_worktrees(vec![Worktree::new(
+            "/path/to/single",
+            "abc123",
+            Some("main".to_string()),
+        )]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "└─");
+}
+
+/// Test: Status text is displayed inline.
+#[test]
+fn test_status_text_inline_display() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Set a working status with detail
+    app.state_mut().set_status(
+        "project-alpha__main".to_string(),
+        AgentStatus::Working {
+            detail: Some("Exploring".to_string()),
+        },
+    );
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should show "Working" in the status text
+    assert_buffer_contains(buffer, "Working");
+}
+
+/// Test: Success status shows checkmark icon.
+#[test]
+fn test_status_success_icon() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    app.state_mut()
+        .set_status("project-alpha__main".to_string(), AgentStatus::Success);
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "✓");
+    assert_buffer_contains(buffer, "Done");
+}
+
+/// Test: WaitingShell status shows prompt icon.
+#[test]
+fn test_status_waiting_shell_icon() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    app.state_mut().set_status(
+        "project-alpha__main".to_string(),
+        AgentStatus::WaitingShell {
+            command: Some("cargo build".to_string()),
+        },
+    );
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, ">");
+}
+
+/// Test: WaitingOther status shows question icon.
+#[test]
+fn test_status_waiting_other_icon() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    app.state_mut()
+        .set_status("project-alpha__main".to_string(), AgentStatus::WaitingOther);
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "?");
+}
+
+/// Test: Long branch name is truncated.
+#[test]
+fn test_long_branch_name_truncated() {
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![Worktree::new(
+            "/path/to/test/.worktrees/very-long-feature-branch-name",
+            "abc123",
+            Some("very-long-feature-branch-name-that-exceeds-max".to_string()),
+        )]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should contain truncation indicator
+    assert_buffer_contains(buffer, "...");
+}
+
+/// Test: Padding dots appear between branch and status.
+#[test]
+fn test_padding_dots_between_branch_and_status() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should have padding dots
+    assert_buffer_contains(buffer, "...");
+}
+
+/// Test: Multiple statuses are displayed correctly.
+#[test]
+fn test_multiple_status_types() {
+    let projects = vec![
+        Project::new("multi-status", "/path/to/multi").with_worktrees(vec![
+            Worktree::new("/path/to/multi", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/multi/.worktrees/working",
+                "def456",
+                Some("working".to_string()),
+            ),
+            Worktree::new(
+                "/path/to/multi/.worktrees/error",
+                "ghi789",
+                Some("error".to_string()),
+            ),
+        ]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Set different statuses
+    app.state_mut().set_status(
+        "multi-status__main".to_string(),
+        AgentStatus::Working { detail: None },
+    );
+    app.state_mut().set_status(
+        "multi-status__working".to_string(),
+        AgentStatus::WaitingEdit { path: None },
+    );
+    app.state_mut()
+        .set_status("multi-status__error".to_string(), AgentStatus::Error);
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should show all different icons
+    assert_buffer_contains(buffer, "⚙"); // Working
+    assert_buffer_contains(buffer, "✎"); // WaitingEdit
+    assert_buffer_contains(buffer, "✖"); // Error
+}
+
+/// Test: Favorite project shows star in parentheses.
+#[test]
+fn test_favorite_shows_star_in_parentheses() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+
+    // Toggle favorite
+    let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "(★)");
+}
+
+/// Test: Tree structure maintains proper indentation.
+#[test]
+fn test_tree_proper_indentation() {
+    let projects = vec![
+        Project::new("indentation-test", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc", Some("main".to_string())),
+            Worktree::new("/path/to/test/f1", "def", Some("feature-1".to_string())),
+            Worktree::new("/path/to/test/f2", "ghi", Some("feature-2".to_string())),
+        ]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // All worktrees should be indented under the project
+    // First two worktrees should have ├─
+    assert_buffer_contains(buffer, "├─");
+    // Last worktree should have └─
+    assert_buffer_contains(buffer, "└─");
+}
+
+/// Test: UTF-8 branch names are truncated safely without panic.
+#[test]
+fn test_utf8_branch_name_truncation() {
+    // Test with Japanese branch name that exceeds max length
+    let projects = vec![
+        Project::new("utf8-test", "/path/to/utf8").with_worktrees(vec![Worktree::new(
+            "/path/to/utf8",
+            "abc123",
+            Some("feature/日本語ブランチ名テスト".to_string()),
+        )]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    // Should not panic when rendering UTF-8 branch names
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should contain truncation indicator
+    assert_buffer_contains(buffer, "...");
+}
+
+/// Test: Emoji in branch names are handled safely.
+#[test]
+fn test_emoji_branch_name_truncation() {
+    let projects = vec![
+        Project::new("emoji-test", "/path/to/emoji").with_worktrees(vec![Worktree::new(
+            "/path/to/emoji",
+            "abc123",
+            Some("feature/🚀🎉-awesome-feature".to_string()),
+        )]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    // Should not panic when rendering emoji branch names
+    app.render().unwrap();
+
+    // Just verify it doesn't panic - the truncation behavior is tested
 }
