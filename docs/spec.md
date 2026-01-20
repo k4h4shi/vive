@@ -24,10 +24,13 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 
 ### 2.3 エージェント監視 (Monitoring)
 - [ ] **Status Detection**: Claude Codeのプロセス状態と出力を解析し、リアルタイムで状態を表示する。
-    - 🟢 **Working**: 思考中・実行中（CPU使用、スピナー検出）。
-    - 🟡 **Wait**: ユーザー入力待ち（承認、シェル実行許可など）。
-    - 🔴 **Error**: プロセス異常終了。
-    - ⚪ **Idle**: セッションはあるがコマンド未実行。
+    - ⚙ **Working**: 思考中・実行中（CPU使用、スピナー検出）。黄色で表示。
+    - ✎ **Wait (Edit)**: ファイル編集の承認待ち。赤色で表示。
+    - `>` **Wait (Shell)**: シェルコマンド実行の承認待ち。赤色で表示。
+    - ? **Wait (Other)**: その他のユーザー入力待ち。マゼンタ色で表示。
+    - ✓ **Success**: 正常完了。緑色で表示。
+    - ✖ **Error**: プロセス異常終了。赤色で表示。
+    - • **Idle**: セッションはあるがコマンド未実行。グレーで表示。
 - [ ] **Hysteresis**: ステータスのちらつき（Working ↔ Idle）を防ぐため、短時間のアイドルは無視する。
 
 ### 2.4 オーケストレーション (Orchestration)
@@ -49,13 +52,13 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 |                     | (Task Selected)                                               |
 | ▼ mechanix (★)      |  Claude Code >                                                |
 |   ├─ feature/ui...  |  I have analyzed the error. The issue is in main.rs.          |
-|   │  (🟢 Working)   |  Shall I fix it? [y/n]                                        |
+|   │  ⚙ Working      |  Shall I fix it? [y/n]                                        |
 |   └─ fix/bug-123    |                                                               |
-|      (🟡 Wait)      | (Project Selected)                                            |
+|      ✎ Wait: Edit   | (Project Selected)                                            |
 |                     |  Project: mechanix                                            |
 | ▼ vive              |  Active Tasks: 2                                              |
 |   └─ main           |                                                               |
-|      (⚪ Idle)      |  [ Open Dashboard ] -> Launches Tmux Grid View                |
+|      • Idle         |  [ Open Dashboard ] -> Launches Tmux Grid View                |
 +---------------------+---------------------------------------------------------------+
 | [3] Command Input Area                                                              |
 | > _                                                                                 |
@@ -74,6 +77,17 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | `i` | **Input** | コマンド入力モードへ移行 |
 | `Esc` | **Cancel** | 入力モード解除 / モーダルを閉じる |
 | `q` | **Quit** | Viveを終了する |
+
+#### 入力モード時のキー操作
+
+| キー | 動作 | 備考 |
+| :--- | :--- | :--- |
+| `←` / `→` | カーソル移動 | 入力文字列内でカーソルを左右に移動 |
+| `Backspace` | 文字削除 | カーソル位置の前の文字を削除 |
+| `Enter` | 送信 | 入力内容をTmuxに送信 |
+| `Esc` | キャンセル | 入力モードを解除 |
+
+入力モードでは日本語入力（IME）にも対応しています。カーソル位置がIME変換ウィンドウの表示位置に反映されます。
 
 ## 4. 技術仕様 (Architecture)
 

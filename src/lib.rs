@@ -136,24 +136,54 @@ where
 
     /// Initialize the application by discovering projects and loading favorites.
     pub fn init(&mut self) -> Result<()> {
-        // Load favorites from disk
-        if let Ok(favorites) = Favorites::load() {
-            self.state.set_favorites(favorites.projects);
+        // Load favorites from disk - use robust loading that handles errors gracefully
+        match Favorites::load() {
+            Ok(favorites) => {
+                self.state.set_favorites(favorites.projects);
+            }
+            Err(e) => {
+                // Log the error but don't fail - user can still use the app
+                // Important: we mark that loading failed so we don't overwrite
+                // potentially valid data on the next save
+                eprintln!("Warning: Failed to load favorites: {e}");
+                self.state.mark_favorites_load_failed();
+            }
         }
 
         // Discover projects
         let projects_root = self.config.effective_projects_root();
-        if let Ok(projects) = self
+        match self
             .discovery
             .discover(&projects_root, &self.config.ignored_dirs)
         {
-            self.state.set_projects(projects);
+            Ok(projects) => {
+                self.state.set_projects(projects);
+            }
+            Err(e) => {
+                // Log the error but don't fail - user can still use the app
+                eprintln!(
+                    "Warning: Failed to discover projects in '{}': {e}",
+                    projects_root.display()
+                );
+            }
         }
         Ok(())
     }
 
     /// Save the current favorites to disk.
+    ///
+    /// This method is defensive: if favorites failed to load at startup
+    /// AND the user hasn't modified favorites, we don't save (to avoid
+    /// overwriting potentially valid data). However, if the user has
+    /// explicitly modified favorites, we honor their intent and save.
     fn save_favorites(&self) {
+        // Don't save if loading failed AND user hasn't modified favorites
+        // If user explicitly modified, honor their intent and save
+        if self.state.favorites_load_failed() && !self.state.favorites_modified() {
+            eprintln!("Warning: Skipping favorites save because loading failed at startup");
+            return;
+        }
+
         let favorites = Favorites {
             projects: self.state.favorites().clone(),
         };
