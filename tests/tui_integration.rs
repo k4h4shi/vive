@@ -1432,3 +1432,44 @@ fn test_tree_proper_indentation() {
     // Last worktree should have └─
     assert_buffer_contains(buffer, "└─");
 }
+
+/// Test: UTF-8 branch names are truncated safely without panic.
+#[test]
+fn test_utf8_branch_name_truncation() {
+    // Test with Japanese branch name that exceeds max length
+    let projects = vec![
+        Project::new("utf8-test", "/path/to/utf8").with_worktrees(vec![Worktree::new(
+            "/path/to/utf8",
+            "abc123",
+            Some("feature/日本語ブランチ名テスト".to_string()),
+        )]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    // Should not panic when rendering UTF-8 branch names
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Should contain truncation indicator
+    assert_buffer_contains(buffer, "...");
+}
+
+/// Test: Emoji in branch names are handled safely.
+#[test]
+fn test_emoji_branch_name_truncation() {
+    let projects = vec![
+        Project::new("emoji-test", "/path/to/emoji").with_worktrees(vec![Worktree::new(
+            "/path/to/emoji",
+            "abc123",
+            Some("feature/🚀🎉-awesome-feature".to_string()),
+        )]),
+    ];
+    let mut app = create_test_app(projects, vec![]);
+
+    app.init().unwrap();
+    // Should not panic when rendering emoji branch names
+    app.render().unwrap();
+
+    // Just verify it doesn't panic - the truncation behavior is tested
+}

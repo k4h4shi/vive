@@ -167,15 +167,19 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
             };
 
             // Fixed-width branch name (truncate if too long, pad if short)
+            // Uses character count to handle UTF-8 safely
             let max_branch_len = 16;
-            let branch_display = if branch_name.len() > max_branch_len {
-                format!("{}...", &branch_name[..max_branch_len - 3])
+            let branch_char_count = branch_name.chars().count();
+            let branch_display = if branch_char_count > max_branch_len {
+                let truncated: String = branch_name.chars().take(max_branch_len - 3).collect();
+                format!("{truncated}...")
             } else {
                 branch_name.to_string()
             };
 
             // Padding dots between branch name and status
-            let padding_len = max_branch_len.saturating_sub(branch_display.len()) + 1;
+            let display_char_count = branch_display.chars().count();
+            let padding_len = max_branch_len.saturating_sub(display_char_count) + 1;
             let padding = ".".repeat(padding_len);
 
             // Status text for inline display
