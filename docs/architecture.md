@@ -21,6 +21,11 @@
     - **Waiting**: PID exists, process state is sleeping (S/S+), and stdout matches "input prompt" patterns (e.g., "> ", "Waiting for input").
     - **Done**: Process exited successfully.
     - **Error**: Process exited with error.
+- **Status Priority** (tmuxcc-inspired):
+    - Waiting states (WaitingEdit, WaitingShell, WaitingOther) take priority over spinner detection.
+    - This ensures "input waiting" is correctly displayed even when pane title has a spinner.
+- **Hysteresis**: 500ms delay to prevent UI flickering during rapid status changes.
+- **Preview Capture**: 200 lines captured to ensure command confirmation prompts are visible after long outputs.
 
 ### 3. TUI Layer (The "Face")
 - **Dashboard View**:
