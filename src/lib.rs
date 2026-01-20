@@ -17,6 +17,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+
+/// Default number of lines to capture for pane preview.
+/// Issue #57: Increased from 50 to 200 to prevent command confirmation prompts
+/// from being cut off when there's a long output (like diffs or thought logs).
+pub const DEFAULT_PREVIEW_LINES: usize = 200;
 use crossterm::event::Event;
 use ratatui::{Terminal, backend::Backend};
 
@@ -423,7 +428,7 @@ where
             self.state.selected_worktree(),
         ) && let Some(session_id) = worktree.session_id(&project.name)
             && self.tmux.has_session(&session_id).unwrap_or(false)
-            && let Ok(content) = self.tmux.capture_pane(&session_id, 50)
+            && let Ok(content) = self.tmux.capture_pane(&session_id, DEFAULT_PREVIEW_LINES)
         {
             // Parse the content to detect agent status
             let parsed = parser::parse_status(&content);
@@ -493,3 +498,14 @@ pub type ProductionApp<W> = App<
     RealTmuxExecutor,
     RealProjectDiscovery,
 >;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #57: Verify preview lines constant is set to 200 (increased from 50)
+    #[test]
+    fn test_default_preview_lines_is_200() {
+        assert_eq!(DEFAULT_PREVIEW_LINES, 200);
+    }
+}
