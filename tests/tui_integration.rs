@@ -289,6 +289,8 @@ pub fn create_test_projects() -> Vec<Project> {
 }
 
 /// Helper to expand all projects in an App (for tests expecting worktree navigation).
+/// Only expands projects that are not already expanded (to handle cases where
+/// favorites loaded from disk may already be expanded).
 pub fn expand_all_projects(app: &mut TestApp) {
     // Get all project names
     let project_names: Vec<String> = app
@@ -298,7 +300,10 @@ pub fn expand_all_projects(app: &mut TestApp) {
         .map(|p| p.name.clone())
         .collect();
     for name in project_names {
-        app.state_mut().toggle_expanded(&name);
+        // Only expand if not already expanded
+        if !app.state().is_expanded(&name) {
+            app.state_mut().toggle_expanded(&name);
+        }
     }
 }
 
