@@ -64,11 +64,11 @@ impl StatusMonitor {
             }
             AgentStatus::Idle => {
                 // Check if we're still in the cooldown period
-                if let Some(last) = self.last_active.get(session_id) {
-                    if now.duration_since(*last) < self.hysteresis {
-                        // Still in cooldown - report as Working
-                        return AgentStatus::Working;
-                    }
+                if let Some(last) = self.last_active.get(session_id)
+                    && now.duration_since(*last) < self.hysteresis
+                {
+                    // Still in cooldown - report as Working
+                    return AgentStatus::Working;
                 }
                 AgentStatus::Idle
             }
@@ -105,10 +105,10 @@ pub fn combine_status_with_title(
     pane_title: Option<&str>,
 ) -> AgentStatus {
     // If title has spinner, force Working status
-    if let Some(title) = pane_title {
-        if title_has_spinner(title) {
-            return AgentStatus::Working;
-        }
+    if let Some(title) = pane_title
+        && title_has_spinner(title)
+    {
+        return AgentStatus::Working;
     }
     parsed_status
 }

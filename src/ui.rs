@@ -191,8 +191,15 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
         state.pane_preview.clone()
     };
 
+    // Calculate scroll to show the bottom (most recent) content
+    // Account for borders (2 lines) when calculating visible height
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let content_lines = content.lines().count();
+    let scroll_offset = content_lines.saturating_sub(visible_height) as u16;
+
     let preview = Paragraph::new(content)
         .wrap(Wrap { trim: false })
+        .scroll((scroll_offset, 0))
         .block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(preview, area);
 }

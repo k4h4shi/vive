@@ -217,7 +217,7 @@ mod tests {
             ParsedStatus::WaitingApproval {
                 approval_type: ApprovalType::FileEdit { .. },
             } => {}
-            other => panic!("Expected FileEdit approval, got {:?}", other),
+            other => panic!("Expected FileEdit approval, got {other:?}"),
         }
     }
 
@@ -228,7 +228,7 @@ mod tests {
             ParsedStatus::WaitingApproval {
                 approval_type: ApprovalType::FileCreate { .. },
             } => {}
-            other => panic!("Expected FileCreate approval, got {:?}", other),
+            other => panic!("Expected FileCreate approval, got {other:?}"),
         }
     }
 
@@ -241,7 +241,7 @@ mod tests {
             } => {
                 assert_eq!(command, Some("cargo test".to_string()));
             }
-            other => panic!("Expected ShellCommand approval, got {:?}", other),
+            other => panic!("Expected ShellCommand approval, got {other:?}"),
         }
     }
 
@@ -252,7 +252,7 @@ mod tests {
             ParsedStatus::WaitingApproval {
                 approval_type: ApprovalType::General,
             } => {}
-            other => panic!("Expected General approval, got {:?}", other),
+            other => panic!("Expected General approval, got {other:?}"),
         }
     }
 
@@ -263,7 +263,7 @@ mod tests {
             ParsedStatus::WaitingApproval {
                 approval_type: ApprovalType::General,
             } => {}
-            other => panic!("Expected General approval from button UI, got {:?}", other),
+            other => panic!("Expected General approval from button UI, got {other:?}"),
         }
     }
 
@@ -272,7 +272,7 @@ mod tests {
         let content = "⠋ Working on task...";
         match parse_status(content) {
             ParsedStatus::Working { .. } => {}
-            other => panic!("Expected Working status, got {:?}", other),
+            other => panic!("Expected Working status, got {other:?}"),
         }
     }
 
@@ -328,7 +328,7 @@ mod tests {
                 ParsedStatus::WaitingApproval {
                     approval_type: ApprovalType::FileEdit { .. },
                 } => {}
-                other => panic!("Expected FileEdit for '{}', got {:?}", content, other),
+                other => panic!("Expected FileEdit for '{content}', got {other:?}"),
             }
         }
     }
@@ -345,7 +345,7 @@ mod tests {
                 ParsedStatus::WaitingApproval {
                     approval_type: ApprovalType::FileCreate { .. },
                 } => {}
-                other => panic!("Expected FileCreate for '{}', got {:?}", content, other),
+                other => panic!("Expected FileCreate for '{content}', got {other:?}"),
             }
         }
     }
@@ -363,7 +363,7 @@ mod tests {
                 ParsedStatus::WaitingApproval {
                     approval_type: ApprovalType::ShellCommand { .. },
                 } => {}
-                other => panic!("Expected ShellCommand for '{}', got {:?}", content, other),
+                other => panic!("Expected ShellCommand for '{content}', got {other:?}"),
             }
         }
     }
@@ -381,7 +381,7 @@ mod tests {
                 ParsedStatus::WaitingApproval {
                     approval_type: ApprovalType::General,
                 } => {}
-                other => panic!("Expected General for '{}', got {:?}", content, other),
+                other => panic!("Expected General for '{content}', got {other:?}"),
             }
         }
     }
@@ -412,10 +412,7 @@ mod tests {
             let content = format!("{spinner} Processing...");
             match parse_status(&content) {
                 ParsedStatus::Working { .. } => {}
-                other => panic!(
-                    "Expected Working for spinner '{}', got {:?}",
-                    spinner, other
-                ),
+                other => panic!("Expected Working for spinner '{spinner}', got {other:?}"),
             }
         }
     }
@@ -427,7 +424,7 @@ mod tests {
             ParsedStatus::Working { task } => {
                 assert_eq!(task, Some("Plan".to_string()));
             }
-            other => panic!("Expected Working with task, got {:?}", other),
+            other => panic!("Expected Working with task, got {other:?}"),
         }
     }
 
@@ -438,7 +435,7 @@ mod tests {
             ParsedStatus::Working { task } => {
                 assert_eq!(task, Some("Working".to_string()));
             }
-            other => panic!("Expected Working, got {:?}", other),
+            other => panic!("Expected Working, got {other:?}"),
         }
     }
 
@@ -492,7 +489,7 @@ mod tests {
             ParsedStatus::WaitingApproval {
                 approval_type: ApprovalType::FileEdit { .. },
             } => {}
-            other => panic!("Expected FileEdit (approval has priority), got {:?}", other),
+            other => panic!("Expected FileEdit (approval has priority), got {other:?}"),
         }
     }
 
@@ -504,10 +501,9 @@ mod tests {
             ParsedStatus::WaitingApproval {
                 approval_type: ApprovalType::ShellCommand { .. },
             } => {}
-            other => panic!(
-                "Expected ShellCommand (specific approval has priority), got {:?}",
-                other
-            ),
+            other => {
+                panic!("Expected ShellCommand (specific approval has priority), got {other:?}")
+            }
         }
     }
 
@@ -524,8 +520,7 @@ mod tests {
             assert_eq!(
                 parse_status(content),
                 ParsedStatus::Idle,
-                "Expected Idle for '{}'",
-                content
+                "Expected Idle for '{content}'"
             );
         }
     }
