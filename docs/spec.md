@@ -34,7 +34,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 - [ ] **Hysteresis**: ステータスのちらつき（Working ↔ Idle）を防ぐため、短時間のアイドルは無視する。
 
 ### 2.4 オーケストレーション (Orchestration)
-- [ ] **Launch Strategy**:
+- [x] **Launch Strategy**:
     - **Inline**: 現在のターミナルをTmuxセッションに切り替える（デフォルト）。
     - **Spawn**: 設定された外部ターミナル（Ghostty等）で新しいウィンドウを開く。
 - [ ] **Preview**: 選択中のタスクのTmuxペインの内容（最新N行）をTUI上でリアルタイム表示する。

@@ -26,7 +26,7 @@ pub const DEFAULT_PREVIEW_LINES: usize = 200;
 use crossterm::event::Event;
 use ratatui::{Terminal, backend::Backend};
 
-pub use crate::config::{Config, Favorites};
+pub use crate::config::{Config, Favorites, LaunchStrategy, TerminalConfig};
 pub use crate::discovery::{Project, discover_projects};
 pub use crate::event::Action;
 pub use crate::github::{GhIssueFetcher, IssueTitleFetcher, IssueTitleResult};
