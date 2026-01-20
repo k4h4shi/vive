@@ -305,8 +305,9 @@ where
 
                             match branch_delete {
                                 Ok(output) if output.status.success() => {
-                                    self.state
-                                        .set_success_message(format!("Deleted task '{branch_name}'"));
+                                    self.state.set_success_message(format!(
+                                        "Deleted task '{branch_name}'"
+                                    ));
                                 }
                                 Ok(output) => {
                                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -375,26 +376,10 @@ where
                 .apply_hysteresis(&session_id, title_combined);
 
             self.state.set_status(session_id.clone(), final_status);
-
             self.state.set_pane_preview(content);
             return;
         }
         self.state.set_pane_preview(String::new());
-    }
-
-    /// Run the main application loop.
-    pub fn run(&mut self) -> Result<()> {
-        self.init()?;
-
-        loop {
-            self.render()?;
-
-            if !self.tick(Duration::from_millis(100))? {
-                break;
-            }
-        }
-
-        Ok(())
     }
 }
 

@@ -191,8 +191,15 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &AppState) {
         state.pane_preview.clone()
     };
 
+    // Calculate scroll to show the bottom (most recent) content
+    // Account for borders (2 lines) when calculating visible height
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let content_lines = content.lines().count();
+    let scroll_offset = content_lines.saturating_sub(visible_height) as u16;
+
     let preview = Paragraph::new(content)
         .wrap(Wrap { trim: false })
+        .scroll((scroll_offset, 0))
         .block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(preview, area);
 }
@@ -290,11 +297,22 @@ fn render_confirm_deletion_modal(frame: &mut Frame, area: Rect, branch_name: &st
         Line::from("This will remove the worktree and branch."),
         Line::from(""),
         Line::from(vec![
-            Span::styled("y", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "y",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(": Yes  "),
-            Span::styled("n", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "n",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("/"),
-            Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw(": No"),
         ]),
     ];

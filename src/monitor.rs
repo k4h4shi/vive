@@ -13,7 +13,9 @@ use crate::state::AgentStatus;
 const DEFAULT_HYSTERESIS_MS: u64 = 2000;
 
 /// Spinner characters used by Claude Code.
-const SPINNER_CHARS: &[char] = &['⠿', '⠇', '⠋', '⠙', '⠸', '⠴', '⠦', '⠧', '⠖', '⠏', '⏺', '▶', '►'];
+const SPINNER_CHARS: &[char] = &[
+    '⠿', '⠇', '⠋', '⠙', '⠸', '⠴', '⠦', '⠧', '⠖', '⠏', '⏺', '▶', '►',
+];
 
 /// Status monitor with hysteresis support.
 #[derive(Debug)]
@@ -62,11 +64,11 @@ impl StatusMonitor {
             }
             AgentStatus::Idle => {
                 // Check if we're still in the cooldown period
-                if let Some(last) = self.last_active.get(session_id) {
-                    if now.duration_since(*last) < self.hysteresis {
-                        // Still in cooldown - report as Working
-                        return AgentStatus::Working;
-                    }
+                if let Some(last) = self.last_active.get(session_id)
+                    && now.duration_since(*last) < self.hysteresis
+                {
+                    // Still in cooldown - report as Working
+                    return AgentStatus::Working;
                 }
                 AgentStatus::Idle
             }
@@ -103,10 +105,10 @@ pub fn combine_status_with_title(
     pane_title: Option<&str>,
 ) -> AgentStatus {
     // If title has spinner, force Working status
-    if let Some(title) = pane_title {
-        if title_has_spinner(title) {
-            return AgentStatus::Working;
-        }
+    if let Some(title) = pane_title
+        && title_has_spinner(title)
+    {
+        return AgentStatus::Working;
     }
     parsed_status
 }
@@ -300,10 +302,7 @@ mod tests {
         // Test all defined spinner characters
         for &c in SPINNER_CHARS {
             let title = format!("Test {c} title");
-            assert!(
-                title_has_spinner(&title),
-                "Should detect spinner char: {c}"
-            );
+            assert!(title_has_spinner(&title), "Should detect spinner char: {c}");
         }
     }
 
@@ -325,7 +324,8 @@ mod tests {
     #[test]
     fn test_combine_status_with_title_waiting_with_spinner() {
         // Waiting with spinner should become Working
-        let status = combine_status_with_title(AgentStatus::Waiting, Some("⠋ Waiting for input..."));
+        let status =
+            combine_status_with_title(AgentStatus::Waiting, Some("⠋ Waiting for input..."));
         assert_eq!(status, AgentStatus::Working);
     }
 

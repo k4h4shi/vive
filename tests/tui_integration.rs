@@ -229,9 +229,7 @@ pub fn assert_buffer_contains(buffer: &Buffer, expected: &str) {
     let content = buffer_to_string(buffer);
     assert!(
         content.contains(expected),
-        "Expected buffer to contain '{}', but got:\n{}",
-        expected,
-        content
+        "Expected buffer to contain '{expected}', but got:\n{content}"
     );
 }
 
@@ -240,9 +238,7 @@ pub fn assert_buffer_not_contains(buffer: &Buffer, unexpected: &str) {
     let content = buffer_to_string(buffer);
     assert!(
         !content.contains(unexpected),
-        "Expected buffer NOT to contain '{}', but found it in:\n{}",
-        unexpected,
-        content
+        "Expected buffer NOT to contain '{unexpected}', but found it in:\n{content}"
     );
 }
 
@@ -765,7 +761,11 @@ fn test_favorites_toggle_on_f() {
 
     app.init().unwrap();
 
-    // No favorites initially
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
+
+    // No favorites initially (after clearing)
     assert!(!app.state().favorites().contains("project-alpha"));
 
     // Press 'f' to toggle favorite
@@ -792,7 +792,11 @@ fn test_favorites_show_star_icon() {
 
     app.init().unwrap();
 
-    // Toggle favorite
+    // Clear any favorites loaded from disk to ensure test isolation
+    app.state_mut()
+        .set_favorites(std::collections::HashSet::new());
+
+    // Toggle favorite to add project-alpha
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
@@ -806,14 +810,16 @@ fn test_favorites_show_star_icon() {
 /// Test: Deletion modal - Press 'd' on non-main branch opens modal.
 #[test]
 fn test_deletion_modal_opens_on_d() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/feature-x",
-            "def456",
-            Some("feature-x".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature-x",
+                "def456",
+                Some("feature-x".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -858,14 +864,16 @@ fn test_deletion_on_main_shows_error() {
 /// Test: Deletion modal renders with branch name.
 #[test]
 fn test_deletion_modal_renders_branch_name() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/my-feature",
-            "def456",
-            Some("my-feature".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/my-feature",
+                "def456",
+                Some("my-feature".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -890,14 +898,16 @@ fn test_deletion_modal_renders_branch_name() {
 /// Test: Deletion modal - 'n' cancels deletion.
 #[test]
 fn test_deletion_modal_n_cancels() {
-    let projects = vec![Project::new("test-project", "/path/to/test").with_worktrees(vec![
-        Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
-        Worktree::new(
-            "/path/to/test/.worktrees/feature-1",
-            "def456",
-            Some("feature-1".to_string()),
-        ),
-    ])];
+    let projects = vec![
+        Project::new("test-project", "/path/to/test").with_worktrees(vec![
+            Worktree::new("/path/to/test", "abc123", Some("main".to_string())),
+            Worktree::new(
+                "/path/to/test/.worktrees/feature-1",
+                "def456",
+                Some("feature-1".to_string()),
+            ),
+        ]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -963,9 +973,13 @@ fn test_multiple_project_statuses() {
 /// Test: Navigation at boundary doesn't crash.
 #[test]
 fn test_navigation_at_boundary() {
-    let projects = vec![Project::new("single-project", "/path/to/single").with_worktrees(vec![
-        Worktree::new("/path/to/single", "abc123", Some("main".to_string())),
-    ])];
+    let projects = vec![
+        Project::new("single-project", "/path/to/single").with_worktrees(vec![Worktree::new(
+            "/path/to/single",
+            "abc123",
+            Some("main".to_string()),
+        )]),
+    ];
     let mut app = create_test_app(projects, vec![]);
 
     app.init().unwrap();
@@ -1008,6 +1022,41 @@ fn test_preview_shows_spinner_content() {
 
     let buffer = app.terminal().backend().buffer();
     assert_buffer_contains(buffer, "Working on task");
+}
+
+/// Test: Preview area scrolls to show the latest (bottom) content.
+/// When the preview content is longer than the display area, the most recent
+/// lines at the bottom should be visible, not the older lines at the top.
+#[test]
+fn test_preview_scrolls_to_bottom() {
+    let projects = create_test_projects();
+
+    // Create content with many lines - old content at top, latest at bottom
+    // Use "FIRST_LINE_MARKER" to avoid substring matching issues
+    let mut lines = Vec::new();
+    lines.push("FIRST_LINE_MARKER_OLD".to_string());
+    for i in 2..=30 {
+        lines.push(format!("Old line {i}"));
+    }
+    lines.push(">>> LATEST MESSAGE <<<".to_string());
+    lines.push("This is the most recent output".to_string());
+    let content = lines.join("\n");
+
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", &content)]);
+
+    app.init().unwrap();
+    app.update_pane_preview();
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+
+    // The latest content at the bottom should be visible
+    assert_buffer_contains(buffer, "LATEST MESSAGE");
+    assert_buffer_contains(buffer, "most recent output");
+
+    // The old content at the top should NOT be visible (scrolled out)
+    assert_buffer_not_contains(buffer, "FIRST_LINE_MARKER_OLD");
 }
 
 /// Test: Input mode typing updates input buffer.
