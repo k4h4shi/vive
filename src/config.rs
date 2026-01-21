@@ -50,6 +50,37 @@ pub struct TerminalConfig {
     pub args: Vec<String>,
 }
 
+/// Auto-kickstart configuration for task creation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoKickstartConfig {
+    /// Command to send for manual task creation.
+    /// Default: "claude --print-architecture"
+    pub manual_command: String,
+
+    /// Command to send for issue-based task creation.
+    /// Use `{issue_number}` as placeholder for the issue number.
+    /// Default: "/fix {issue_number}"
+    pub issue_command: String,
+}
+
+impl Default for AutoKickstartConfig {
+    fn default() -> Self {
+        Self {
+            manual_command: "claude --print-architecture".to_string(),
+            issue_command: "/fix {issue_number}".to_string(),
+        }
+    }
+}
+
+impl AutoKickstartConfig {
+    /// Build the issue command with issue number substituted.
+    pub fn build_issue_command(&self, issue_number: u32) -> String {
+        self.issue_command
+            .replace("{issue_number}", &issue_number.to_string())
+    }
+}
+
 impl TerminalConfig {
     /// Check if the strategy is spawn mode.
     pub fn is_spawn(&self) -> bool {
@@ -105,6 +136,18 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub keybindings: HashMap<String, String>,
+
+    /// Auto-kickstart configuration for task creation.
+    /// Configures commands sent to Claude after creating a new task.
+    ///
+    /// Example:
+    /// ```toml
+    /// [auto_kickstart]
+    /// manual_command = "claude --print-architecture"
+    /// issue_command = "/fix {issue_number}"
+    /// ```
+    #[serde(default)]
+    pub auto_kickstart: AutoKickstartConfig,
 }
 
 impl Default for Config {
@@ -115,6 +158,7 @@ impl Default for Config {
             tmux_prefix: None,
             terminal: TerminalConfig::default(),
             keybindings: HashMap::new(),
+            auto_kickstart: AutoKickstartConfig::default(),
         }
     }
 }
@@ -752,5 +796,38 @@ enter = "tmux switch-client -t {session_id}"
 
         let cmd = config.build_keybinding_command_with_placeholders("enter", "my-session", None);
         assert_eq!(cmd, Some("tmux switch-client -t my-session".to_string()));
+    }
+
+    #[test]
+    fn test_auto_kickstart_default() {
+        let config = AutoKickstartConfig::default();
+        assert_eq!(config.manual_command, "claude --print-architecture");
+        assert_eq!(config.issue_command, "/fix {issue_number}");
+    }
+
+    #[test]
+    fn test_auto_kickstart_build_issue_command() {
+        let config = AutoKickstartConfig::default();
+        assert_eq!(config.build_issue_command(42), "/fix 42");
+        assert_eq!(config.build_issue_command(123), "/fix 123");
+    }
+
+    #[test]
+    fn test_auto_kickstart_custom_command() {
+        let config = AutoKickstartConfig {
+            manual_command: "custom start".to_string(),
+            issue_command: "gh issue view {issue_number}".to_string(),
+        };
+        assert_eq!(config.manual_command, "custom start");
+        assert_eq!(config.build_issue_command(99), "gh issue view 99");
+    }
+
+    #[test]
+    fn test_config_includes_auto_kickstart() {
+        let config = Config::default();
+        assert_eq!(
+            config.auto_kickstart.manual_command,
+            "claude --print-architecture"
+        );
     }
 }

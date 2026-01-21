@@ -280,7 +280,7 @@ where
                 }
             }
 
-            Action::CreateTask(branch_name) => {
+            Action::CreateTask(branch_name, auto_kickstart) => {
                 if let Some(project) = self.state.selected_project().cloned() {
                     let worktree_path = project.path.join(".worktrees").join(&branch_name);
                     let output = std::process::Command::new("git")
@@ -311,6 +311,12 @@ where
                                 .tmux
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
+                            // Auto-kickstart: send initial command if enabled
+                            if auto_kickstart {
+                                let command = &self.config.auto_kickstart.manual_command;
+                                let _ = self.tmux.send_keys(&session_id, command, true);
+                            }
 
                             self.state
                                 .set_success_message(format!("Created worktree '{branch_name}'"));
@@ -368,7 +374,7 @@ where
                 }
             }
 
-            Action::CreateTaskFromIssue(issue) => {
+            Action::CreateTaskFromIssue(issue, auto_kickstart) => {
                 let branch_name = issue.branch_name();
                 // Reuse the CreateTask logic
                 if let Some(project) = self.state.selected_project().cloned() {
@@ -401,6 +407,17 @@ where
                                 .tmux
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
+                            // Auto-kickstart: start Claude and send issue command
+                            if auto_kickstart {
+                                // First, start Claude CLI
+                                let _ = self.tmux.send_keys(&session_id, "claude", true);
+                                // Then send issue command after a brief delay for Claude to start
+                                // Note: The command will be queued and processed once Claude is ready
+                                let command =
+                                    self.config.auto_kickstart.build_issue_command(issue.number);
+                                let _ = self.tmux.send_keys(&session_id, &command, true);
+                            }
 
                             self.state.set_success_message(format!(
                                 "Created worktree '{}' for Issue #{}",
@@ -574,6 +591,9 @@ where
             let dashboard_session = TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
             if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
                 // Capture from underlying worktree sessions directly
+                // Note: We build both `pane_contents` (for grid UI) and `combined_preview`
+                // (for MCP API / single-view fallback). The UI uses `dashboard_panes`,
+                // while `pane_preview` is kept for potential MCP integration.
                 let mut pane_contents: Vec<(String, String)> = Vec::new();
                 let mut combined_preview = String::new();
 

@@ -19,7 +19,8 @@ pub enum Action {
     /// Send input to the current tmux pane.
     SendInput(String),
     /// Create a new task/worktree with the given branch name.
-    CreateTask(String),
+    /// Second parameter is whether to auto-kickstart (send initial command).
+    CreateTask(String, bool),
     /// Refresh pane preview for the selected worktree.
     RefreshPreview,
     /// Toggle favorite status of the selected project.
@@ -31,7 +32,8 @@ pub enum Action {
     /// Fetch issues for the issue picker modal.
     FetchIssues,
     /// Create a task from the selected issue.
-    CreateTaskFromIssue(crate::github::GitHubIssue),
+    /// Second parameter is whether to auto-kickstart (send initial command).
+    CreateTaskFromIssue(crate::github::GitHubIssue, bool),
 }
 
 /// Poll for terminal events with a timeout.
@@ -354,7 +356,6 @@ fn handle_create_task_method_modal_key(key: KeyEvent, state: &mut AppState) -> A
         }
         KeyCode::Enter => {
             let method = state.selected_create_task_method();
-            state.close_modal();
             match method {
                 Some(CreateTaskMethod::Manual) => {
                     state.open_manual_create_task_modal();
@@ -367,6 +368,10 @@ fn handle_create_task_method_modal_key(key: KeyEvent, state: &mut AppState) -> A
                 None => Action::None,
             }
         }
+        KeyCode::Tab => {
+            state.toggle_modal_auto_kickstart();
+            Action::None
+        }
         KeyCode::Char('j') | KeyCode::Down => {
             state.toggle_create_task_method();
             Action::None
@@ -376,12 +381,10 @@ fn handle_create_task_method_modal_key(key: KeyEvent, state: &mut AppState) -> A
             Action::None
         }
         KeyCode::Char('m') | KeyCode::Char('M') => {
-            state.close_modal();
             state.open_manual_create_task_modal();
             Action::None
         }
         KeyCode::Char('i') | KeyCode::Char('I') => {
-            state.close_modal();
             state.open_issue_picker_modal();
             Action::FetchIssues
         }
@@ -397,11 +400,16 @@ fn handle_issue_picker_modal_key(key: KeyEvent, state: &mut AppState) -> Action 
         }
         KeyCode::Enter => {
             if let Some(issue) = state.selected_issue().cloned() {
+                let auto_kickstart = state.modal_auto_kickstart().unwrap_or(true);
                 state.close_modal();
-                Action::CreateTaskFromIssue(issue)
+                Action::CreateTaskFromIssue(issue, auto_kickstart)
             } else {
                 Action::None
             }
+        }
+        KeyCode::Tab => {
+            state.toggle_modal_auto_kickstart();
+            Action::None
         }
         KeyCode::Char('j') | KeyCode::Down => {
             state.issue_picker_select_next();
@@ -431,12 +439,17 @@ fn handle_create_task_modal_key(key: KeyEvent, state: &mut AppState) -> Action {
         }
         KeyCode::Enter => {
             let input = state.modal_input().unwrap_or("").to_string();
+            let auto_kickstart = state.modal_auto_kickstart().unwrap_or(true);
             state.close_modal();
             if input.is_empty() {
                 Action::None
             } else {
-                Action::CreateTask(input)
+                Action::CreateTask(input, auto_kickstart)
             }
+        }
+        KeyCode::Tab => {
+            state.toggle_modal_auto_kickstart();
+            Action::None
         }
         KeyCode::Backspace => {
             state.modal_input_backspace();
@@ -705,7 +718,7 @@ mod tests {
         handle_key_event(key_event(KeyCode::Char('t')), &mut state);
 
         let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
-        assert_eq!(action, Action::CreateTask("feat".to_string()));
+        assert_eq!(action, Action::CreateTask("feat".to_string(), true));
         assert!(state.modal.is_none());
     }
 
@@ -1038,9 +1051,10 @@ mod tests {
 
         let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
         match action {
-            Action::CreateTaskFromIssue(issue) => {
+            Action::CreateTaskFromIssue(issue, auto_kickstart) => {
                 assert_eq!(issue.number, 42);
                 assert_eq!(issue.title, "Test issue");
+                assert!(auto_kickstart); // Default is true
             }
             _ => panic!("Expected CreateTaskFromIssue action"),
         }
@@ -1324,5 +1338,107 @@ mod tests {
             state.preview_scroll_offset(),
             initial_offset.saturating_sub(5) // Scrolls 5 lines
         );
+    }
+
+    // ========== Auto-Kickstart Key Event Tests ==========
+
+    #[test]
+    fn test_tab_toggles_auto_kickstart_in_method_modal() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Initial state: auto_kickstart is true
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+
+        // Press Tab to toggle
+        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        // Press Tab again
+        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+    }
+
+    #[test]
+    fn test_tab_toggles_auto_kickstart_in_create_task_modal() {
+        let mut state = AppState::new();
+        state.open_manual_create_task_modal();
+
+        // Initial state: auto_kickstart is true
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+
+        // Press Tab to toggle
+        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+    }
+
+    #[test]
+    fn test_tab_toggles_auto_kickstart_in_issue_picker_modal() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        // Initial state: auto_kickstart is true
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+
+        // Press Tab to toggle
+        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
+        assert_eq!(action, Action::None);
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+    }
+
+    #[test]
+    fn test_create_task_action_includes_auto_kickstart_true() {
+        let mut state = AppState::new();
+        state.open_manual_create_task_modal();
+        state.modal_input_char('t');
+        state.modal_input_char('e');
+        state.modal_input_char('s');
+        state.modal_input_char('t');
+
+        // auto_kickstart is true by default
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        assert_eq!(action, Action::CreateTask("test".to_string(), true));
+    }
+
+    #[test]
+    fn test_create_task_action_includes_auto_kickstart_false() {
+        let mut state = AppState::new();
+        state.open_manual_create_task_modal();
+        state.modal_input_char('t');
+        state.modal_input_char('e');
+        state.modal_input_char('s');
+        state.modal_input_char('t');
+
+        // Toggle auto_kickstart off
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        assert_eq!(action, Action::CreateTask("test".to_string(), false));
+    }
+
+    #[test]
+    fn test_create_task_from_issue_action_includes_auto_kickstart_false() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![GitHubIssue::new(42, "Test issue")]);
+
+        // Toggle auto_kickstart off
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        match action {
+            Action::CreateTaskFromIssue(issue, auto_kickstart) => {
+                assert_eq!(issue.number, 42);
+                assert!(!auto_kickstart);
+            }
+            _ => panic!("Expected CreateTaskFromIssue action"),
+        }
     }
 }

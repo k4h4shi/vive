@@ -342,10 +342,11 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         Style::default().fg(Color::DarkGray)
     };
 
-    // Issue #65: Disable wrap to fix scroll calculation.
-    // With Wrap enabled, long lines become multiple screen lines, causing
+    // Issue #65: Wrapping is intentionally disabled for correct scroll calculation.
+    // Ratatui's Paragraph does NOT wrap by default (wrap is opt-in via .wrap()).
+    // With wrap enabled, long lines become multiple screen lines, causing
     // scroll_offset (based on logical lines) to be incorrect.
-    // Long lines will be truncated at the preview edge instead of wrapping.
+    // By not calling .wrap(), long lines are truncated at the preview edge.
     let preview = Paragraph::new(text).scroll((scroll_offset, 0)).block(
         Block::default()
             .borders(Borders::ALL)
@@ -431,7 +432,7 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
             branch_name.clone()
         };
 
-        // Issue #65: Disable wrap for consistent scroll calculation
+        // Issue #65: Wrapping disabled (Ratatui default) for consistent scroll calculation
         let pane_widget = Paragraph::new(text)
             .scroll((scroll_offset, 0))
             .block(Block::default().borders(Borders::ALL).title(pane_title));
@@ -525,27 +526,46 @@ fn unicode_display_width(c: char) -> u16 {
 
 fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
     match modal {
-        ModalType::CreateTaskMethod { selected } => {
-            render_create_task_method_modal(frame, area, *selected)
-        }
-        ModalType::CreateTask { input } => render_create_task_modal(frame, area, input),
+        ModalType::CreateTaskMethod {
+            selected,
+            auto_kickstart,
+        } => render_create_task_method_modal(frame, area, *selected, *auto_kickstart),
+        ModalType::CreateTask {
+            input,
+            auto_kickstart,
+        } => render_create_task_modal(frame, area, input, *auto_kickstart),
         ModalType::IssuePicker {
             issues,
             selected_idx,
             filter,
             error,
             loading,
-        } => render_issue_picker_modal(frame, area, issues, *selected_idx, filter, error, *loading),
+            auto_kickstart,
+        } => render_issue_picker_modal(
+            frame,
+            area,
+            issues,
+            *selected_idx,
+            filter,
+            error,
+            *loading,
+            *auto_kickstart,
+        ),
         ModalType::ConfirmDeletion { branch_name } => {
             render_confirm_deletion_modal(frame, area, branch_name)
         }
     }
 }
 
-fn render_create_task_method_modal(frame: &mut Frame, area: Rect, selected: CreateTaskMethod) {
+fn render_create_task_method_modal(
+    frame: &mut Frame,
+    area: Rect,
+    selected: CreateTaskMethod,
+    auto_kickstart: bool,
+) {
     // Center the modal
-    let modal_width = 50.min(area.width.saturating_sub(4));
-    let modal_height = 10;
+    let modal_width = 55.min(area.width.saturating_sub(4));
+    let modal_height = 12;
     let modal_x = (area.width.saturating_sub(modal_width)) / 2;
     let modal_y = (area.height.saturating_sub(modal_height)) / 2;
 
@@ -570,6 +590,9 @@ fn render_create_task_method_modal(frame: &mut Frame, area: Rect, selected: Crea
         Style::default().fg(Color::White)
     };
 
+    let checkbox = if auto_kickstart { "[x]" } else { "[ ]" };
+    let checkbox_style = Style::default().fg(Color::Cyan);
+
     let content = vec![
         Line::from(""),
         Line::from("How would you like to create a task?"),
@@ -584,8 +607,19 @@ fn render_create_task_method_modal(frame: &mut Frame, area: Rect, selected: Crea
         ]),
         Line::from(""),
         Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(checkbox, checkbox_style),
+            Span::styled(
+                " Auto-Kickstart (Tab to toggle)",
+                Style::default().fg(Color::White),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
             Span::styled("j/k", Style::default().fg(Color::DarkGray)),
             Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Tab", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Toggle  ", Style::default().fg(Color::DarkGray)),
             Span::styled("Enter", Style::default().fg(Color::DarkGray)),
             Span::styled(": Confirm  ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::DarkGray)),
@@ -602,6 +636,7 @@ fn render_create_task_method_modal(frame: &mut Frame, area: Rect, selected: Crea
     frame.render_widget(modal_widget, modal_area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_issue_picker_modal(
     frame: &mut Frame,
     area: Rect,
@@ -610,10 +645,11 @@ fn render_issue_picker_modal(
     filter: &str,
     error: &Option<String>,
     loading: bool,
+    auto_kickstart: bool,
 ) {
     // Center the modal
     let modal_width = 70.min(area.width.saturating_sub(4));
-    let modal_height = 20.min(area.height.saturating_sub(4));
+    let modal_height = 22.min(area.height.saturating_sub(4));
     let modal_x = (area.width.saturating_sub(modal_width)) / 2;
     let modal_y = (area.height.saturating_sub(modal_height)) / 2;
 
@@ -623,6 +659,14 @@ fn render_issue_picker_modal(
     frame.render_widget(Clear, modal_area);
 
     let mut content: Vec<Line> = Vec::new();
+
+    // Auto-kickstart checkbox
+    let checkbox = if auto_kickstart { "[x]" } else { "[ ]" };
+    content.push(Line::from(vec![
+        Span::styled(checkbox, Style::default().fg(Color::Cyan)),
+        Span::styled(" Auto-Kickstart (Tab)", Style::default().fg(Color::White)),
+    ]));
+    content.push(Line::from(""));
 
     // Filter input line
     content.push(Line::from(vec![
@@ -747,6 +791,8 @@ fn render_issue_picker_modal(
     content.push(Line::from(vec![
         Span::styled("j/k", Style::default().fg(Color::DarkGray)),
         Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Tab", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Toggle  ", Style::default().fg(Color::DarkGray)),
         Span::styled("Enter", Style::default().fg(Color::DarkGray)),
         Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
         Span::styled("Esc", Style::default().fg(Color::DarkGray)),
@@ -762,10 +808,10 @@ fn render_issue_picker_modal(
     frame.render_widget(modal_widget, modal_area);
 }
 
-fn render_create_task_modal(frame: &mut Frame, area: Rect, input: &str) {
+fn render_create_task_modal(frame: &mut Frame, area: Rect, input: &str, auto_kickstart: bool) {
     // Center the modal
-    let modal_width = 50.min(area.width.saturating_sub(4));
-    let modal_height = 7;
+    let modal_width = 55.min(area.width.saturating_sub(4));
+    let modal_height = 10;
     let modal_x = (area.width.saturating_sub(modal_width)) / 2;
     let modal_y = (area.height.saturating_sub(modal_height)) / 2;
 
@@ -773,6 +819,8 @@ fn render_create_task_modal(frame: &mut Frame, area: Rect, input: &str) {
 
     // Clear the area behind the modal
     frame.render_widget(Clear, modal_area);
+
+    let checkbox = if auto_kickstart { "[x]" } else { "[ ]" };
 
     let content = vec![
         Line::from(""),
@@ -782,6 +830,23 @@ fn render_create_task_modal(frame: &mut Frame, area: Rect, input: &str) {
             Span::styled("> ", Style::default().fg(Color::Green)),
             Span::raw(input),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(checkbox, Style::default().fg(Color::Cyan)),
+            Span::styled(
+                " Auto-Kickstart (Tab to toggle)",
+                Style::default().fg(Color::White),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Tab", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Toggle  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Create  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+            Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
         ]),
     ];
 
