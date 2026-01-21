@@ -30,7 +30,23 @@ Viveを使うことで、「タスクを作成する」という1つのアクシ
 ### 4. アクション (Action)
 ユーザーの操作（Command）によって引き起こされる具体的な処理です。
 例えば、Vive上で「タスクを開く（Enterキー）」という操作（Command）を行った際、実際にOS上でどのような処理（Action）を実行するかを定義します。
-これにより、「VSCodeで開く」「Ghosttyの新しいタブで開く」など、振る舞いを自由にカスタマイズできます。
+
+#### Keybindings (キーバインディング)
+
+`config.toml` の `[keybindings]` セクションで、各キーに対応するアクションをカスタマイズできます。
+
+```toml
+[keybindings]
+enter = "tmux switch-client -t {session_id}"
+o = "ghostty -e tmux attach -t {session_id}"
+n = "code {path}"
+```
+
+**利用可能なプレースホルダー:**
+- `{session_id}`: TmuxセッションID（例: `project__feature-issue-123`）
+- `{path}`: ワークツリーのパス（例: `/home/user/src/project/.worktrees/feature/issue-123`）
+
+これにより、「VSCodeで開く」「Ghosttyの新しいタブで開く」「tmuxの別ウィンドウで開く」など、キーごとに異なる振る舞いを自由にカスタマイズできます。
 
 ### 5. フック (Hook)
 ライフサイクルイベントに連動して実行される自動処理です。
@@ -52,4 +68,5 @@ Viveを使うことで、「タスクを作成する」という1つのアクシ
 ### 3. コンテキストの切り替え (Switching)
 タスクを選択して Enter を押すだけで、そのタスクのTmuxセッションに接続（Attach）します。
 作業が終われば Detach してViveに戻り、別のタスクに移る。この切り替えが瞬時に行えます。
-ターミナルアプリ（Ghosttyなど）のタブやウィンドウで開くようにカスタマイズも可能です。
+
+キーバインディング設定により、ターミナルアプリ（Ghosttyなど）のタブやウィンドウで開いたり、VSCodeで開いたりと、キーごとに異なる動作をカスタマイズできます。

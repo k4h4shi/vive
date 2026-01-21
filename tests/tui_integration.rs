@@ -1856,8 +1856,8 @@ fn test_enter_on_project_header_triggers_attach() {
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
     let action = app.handle_key_event(key);
 
-    // Should trigger AttachSession action
-    assert_eq!(action, Action::AttachSession);
+    // Should trigger AttachSession action with "enter" key
+    assert_eq!(action, Action::AttachSession("enter".to_string()));
 }
 
 /// Test: Enter on worktree triggers AttachSession action.
@@ -1877,8 +1877,8 @@ fn test_enter_on_worktree_triggers_attach() {
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
     let action = app.handle_key_event(key);
 
-    // Should trigger AttachSession action
-    assert_eq!(action, Action::AttachSession);
+    // Should trigger AttachSession action with "enter" key
+    assert_eq!(action, Action::AttachSession("enter".to_string()));
 }
 
 /// Test: Full navigation cycle: header -> worktrees -> next header -> worktrees.
@@ -2024,8 +2024,8 @@ fn test_o_key_on_project_header_triggers_attach() {
     let key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
 
-    // Should trigger AttachSession action
-    assert_eq!(action, Action::AttachSession);
+    // Should trigger AttachSession action with "o" key
+    assert_eq!(action, Action::AttachSession("o".to_string()));
 }
 
 /// Test: Dashboard session name uses double underscore delimiter.

@@ -113,8 +113,8 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>, config: &Conf
             };
 
             // Handle AttachSession specially since it requires terminal control
-            if action == Action::AttachSession {
-                handle_attach_session(app, config)?;
+            if let Action::AttachSession(key) = action {
+                handle_attach_session(app, config, &key)?;
             } else {
                 app.handle_action(action)?;
             }
@@ -135,17 +135,25 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>, config: &Conf
 }
 
 /// Handle the AttachSession action which requires special terminal handling.
-fn handle_attach_session<W: Write>(app: &mut ProductionApp<W>, config: &Config) -> Result<()> {
+///
+/// The `key` parameter specifies which key triggered the action (e.g., "enter", "o").
+/// If a custom keybinding is configured for that key, the command is executed.
+/// Otherwise, falls back to legacy terminal config behavior.
+fn handle_attach_session<W: Write>(
+    app: &mut ProductionApp<W>,
+    config: &Config,
+    key: &str,
+) -> Result<()> {
     if let Some(project) = app.state().selected_project() {
         let project_name = project.name.clone();
 
         // Check if we're on project header (no worktree selected) -> dashboard mode
         if app.state().selected_worktree_idx().is_none() {
             // Project-level selection: create/attach to dashboard session
-            handle_dashboard_attach(app, &project_name, config)?;
+            handle_dashboard_attach(app, &project_name, config, key)?;
         } else {
             // Worktree-level selection: attach to specific worktree session
-            handle_worktree_attach(app, &project_name, config)?;
+            handle_worktree_attach(app, &project_name, config, key)?;
         }
     } else {
         app.state_mut().set_error_message("No project selected");
@@ -159,6 +167,7 @@ fn handle_dashboard_attach<W: Write>(
     app: &mut ProductionApp<W>,
     project_name: &str,
     config: &Config,
+    key: &str,
 ) -> Result<()> {
     use vive::tmux::TmuxOrchestrator;
 
@@ -195,7 +204,9 @@ fn handle_dashboard_attach<W: Write>(
         .tmux
         .ensure_dashboard_session(project_name, &worktree_sessions);
 
-    execute_launch(app, config, &dashboard_session)?;
+    // For dashboard, path is the project root
+    let project_path = project.path.to_string_lossy().to_string();
+    execute_launch(app, config, &dashboard_session, Some(&project_path), key)?;
 
     Ok(())
 }
@@ -205,6 +216,7 @@ fn handle_worktree_attach<W: Write>(
     app: &mut ProductionApp<W>,
     project_name: &str,
     config: &Config,
+    key: &str,
 ) -> Result<()> {
     let project = app
         .state()
@@ -231,12 +243,12 @@ fn handle_worktree_attach<W: Write>(
         });
 
     if let Some((session_id, worktree_path)) = session_info {
-        let worktree_path_str = worktree_path.to_string_lossy();
+        let worktree_path_str = worktree_path.to_string_lossy().to_string();
         let _ = app
             .tmux
             .ensure_session(&session_id, Some(&worktree_path_str));
 
-        execute_launch(app, config, &session_id)?;
+        execute_launch(app, config, &session_id, Some(&worktree_path_str), key)?;
     }
 
     Ok(())
@@ -244,14 +256,26 @@ fn handle_worktree_attach<W: Write>(
 
 /// Execute the launch strategy for attaching to a tmux session.
 ///
-/// This helper function handles both inline and spawn strategies:
-/// - **Inline**: Suspends TUI and replaces the process with tmux attach
-/// - **Spawn**: Launches external terminal without suspending TUI
+/// This helper function first checks for custom keybindings, then falls back
+/// to legacy terminal config:
+/// - **Custom keybinding**: Execute the configured shell command
+/// - **Inline** (legacy): Suspends TUI and replaces the process with tmux attach
+/// - **Spawn** (legacy): Launches external terminal without suspending TUI
 fn execute_launch<W: Write>(
     app: &mut ProductionApp<W>,
     config: &Config,
     session_id: &str,
+    worktree_path: Option<&str>,
+    key: &str,
 ) -> Result<()> {
+    // Check for custom keybinding first
+    if let Some(command) =
+        config.build_keybinding_command_with_placeholders(key, session_id, worktree_path)
+    {
+        return execute_keybinding_command(app, &command);
+    }
+
+    // Fall back to legacy terminal config behavior
     match config.terminal.strategy {
         LaunchStrategy::Spawn => {
             spawn_terminal_session(&config.terminal, session_id, app)?;
@@ -271,6 +295,38 @@ fn execute_launch<W: Write>(
         }
     }
     Ok(())
+}
+
+/// Execute a custom keybinding command using the shell.
+///
+/// This function runs the command via `sh -c` to allow for complex shell commands
+/// including pipes, redirects, and variable expansion.
+fn execute_keybinding_command<W: Write>(app: &mut ProductionApp<W>, command: &str) -> Result<()> {
+    match Command::new("sh").args(["-c", command]).spawn() {
+        Ok(mut child) => {
+            // Spawn a background thread to reap the child process when it exits.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            app.state_mut()
+                .set_success_message(format!("Executed: {}", truncate_command(command)));
+        }
+        Err(e) => {
+            app.state_mut()
+                .set_error_message(format!("Failed to execute command: {e}"));
+        }
+    }
+    Ok(())
+}
+
+/// Truncate a command for display in status messages.
+fn truncate_command(command: &str) -> String {
+    const MAX_LEN: usize = 50;
+    if command.len() <= MAX_LEN {
+        command.to_string()
+    } else {
+        format!("{}...", &command[..MAX_LEN - 3])
+    }
 }
 
 /// Spawn an external terminal attached to the given session.
