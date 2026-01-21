@@ -750,8 +750,7 @@ enter = "tmux switch-client -t {session_id}"
             ..Default::default()
         };
 
-        let cmd =
-            config.build_keybinding_command_with_placeholders("enter", "my-session", None);
+        let cmd = config.build_keybinding_command_with_placeholders("enter", "my-session", None);
         assert_eq!(cmd, Some("tmux switch-client -t my-session".to_string()));
     }
 }
