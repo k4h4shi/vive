@@ -120,9 +120,10 @@ fn run_with_terminal_control<W: Write>(app: &mut ProductionApp<W>, config: &Conf
             }
         }
 
-        // Periodic preview update
+        // Periodic preview and status update
         if app.last_preview_update.elapsed() >= app.preview_update_interval {
             app.update_pane_preview();
+            app.update_all_statuses();
             app.last_preview_update = Instant::now();
         }
 

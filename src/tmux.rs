@@ -546,10 +546,13 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// * `lines` - Number of lines to capture from the end
     ///
     /// # Returns
-    /// The captured pane content as a string.
+    /// The captured pane content as a string (last N lines).
     pub fn capture_pane(&self, target: &str, lines: usize) -> Result<String> {
-        let start_line = format!("-{lines}");
+        // Issue #65: Use "-S -{lines}" to capture only the last N lines from history.
+        // This avoids capturing the entire scrollback buffer which can be expensive
+        // for sessions with large history, especially when called every refresh.
         // -e flag preserves ANSI escape sequences (colors)
+        let start_line = format!("-{lines}");
         let result = self.executor.execute(args![
             "capture-pane",
             "-t",
@@ -1466,14 +1469,15 @@ mod tests {
                         "-p",
                         "-e",
                         "-S",
-                        "-100",
+                        "-3",
                     ])
             })
-            .returning(|_| Ok(mock_success("Line 1\nLine 2\n")));
+            .returning(|_| Ok(mock_success("Line 3\nLine 4\nLine 5\n")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
-        let output = orchestrator.capture_pane("my-session:main", 100).unwrap();
-        assert_eq!(output, "Line 1\nLine 2\n");
+        // Request only 3 lines - tmux now handles the slicing
+        let output = orchestrator.capture_pane("my-session:main", 3).unwrap();
+        assert_eq!(output, "Line 3\nLine 4\nLine 5\n");
     }
 
     #[test]
