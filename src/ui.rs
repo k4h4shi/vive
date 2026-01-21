@@ -289,54 +289,38 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         return;
     }
 
-    let text = if state.pane_preview.is_empty() {
+    let (text, line_count) = if state.pane_preview.is_empty() {
         let msg = "No active session. Press Enter to attach.\n\nSelect a worktree and press Enter/o to switch to that tmux session.";
-        Text::raw(msg)
+        (Text::raw(msg), msg.lines().count())
     } else {
         // Clone pane_preview to avoid borrow conflicts
         let preview_content = state.pane_preview.clone();
         // Parse ANSI escape sequences to preserve Claude Code colors
-        preview_content
+        let text = preview_content
             .as_bytes()
             .into_text()
-            .unwrap_or_else(|_| Text::raw(preview_content.clone()))
+            .unwrap_or_else(|_| Text::raw(preview_content.clone()));
+        let line_count = text.lines.len();
+        (text, line_count)
     };
+
+    // Update line count in state for scroll calculations
+    state.set_preview_line_count(line_count);
 
     // Calculate scroll offset
     // Account for borders (2 lines) when calculating visible height
     let visible_height = area.height.saturating_sub(2);
-    // Account for borders (2 chars) when calculating visible width
-    let visible_width = area.width.saturating_sub(2) as usize;
 
     // Cache visible height in state for scroll calculations in event handling
     state.set_preview_visible_height(visible_height);
 
     let visible_height = visible_height as usize;
 
-    // Issue #65: Calculate wrapped line count to fix scroll offset calculation.
-    // Long lines (like Claude Code's separator bars) wrap to multiple screen lines,
-    // so we need to count actual rendered lines, not logical lines.
-    let wrapped_line_count: usize = text
-        .lines
-        .iter()
-        .map(|line| {
-            let line_width = line.width();
-            if line_width == 0 || visible_width == 0 {
-                1 // Empty line still takes 1 screen line
-            } else {
-                (line_width + visible_width - 1) / visible_width // ceil division
-            }
-        })
-        .sum();
-
-    // Update line count in state for scroll calculations
-    state.set_preview_line_count(wrapped_line_count);
-
     // When sidebar is focused, auto-scroll to bottom (show most recent content)
     // When preview is focused, use user's scroll offset
     let scroll_offset = if state.is_preview_focused() {
         // Use user's scroll offset, but ensure it's valid
-        let max_scroll = wrapped_line_count.saturating_sub(visible_height) as u16;
+        let max_scroll = line_count.saturating_sub(visible_height) as u16;
         let user_offset = state.preview_scroll_offset();
         if user_offset == u16::MAX {
             // User requested to go to bottom
@@ -346,7 +330,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         }
     } else {
         // Auto-scroll to bottom when sidebar is focused
-        wrapped_line_count.saturating_sub(visible_height) as u16
+        line_count.saturating_sub(visible_height) as u16
     };
 
     // Border style based on focus
