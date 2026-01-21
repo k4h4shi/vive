@@ -546,13 +546,12 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     /// * `lines` - Number of lines to capture from the end
     ///
     /// # Returns
-    /// The captured pane content as a string.
+    /// The captured pane content as a string (last N lines).
     pub fn capture_pane(&self, target: &str, lines: usize) -> Result<String> {
-        let start_line = format!("-{lines}");
+        // Issue #65: Use "-S -" (start of history) and "-E -" (end of visible pane)
+        // to capture all available content. Previously used "-S -N" which returned
+        // empty when history_size < N. Then we take the last N lines in Rust.
         // -e flag preserves ANSI escape sequences (colors)
-        // -E "" ensures we capture to the end of the pane content, not just to
-        // the cursor position. This fixes Issue #65 where preview showed stale
-        // data when the pane was scrolled or cursor was at a different position.
         let result = self.executor.execute(args![
             "capture-pane",
             "-t",
@@ -560,9 +559,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             "-p",
             "-e",
             "-S",
-            &start_line,
+            "-",
             "-E",
-            "",
+            "-",
         ])?;
 
         if !result.success {
@@ -573,7 +572,11 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             );
         }
 
-        Ok(result.stdout)
+        // Take only the last N lines from the captured content
+        let all_lines: Vec<&str> = result.stdout.lines().collect();
+        let start_idx = all_lines.len().saturating_sub(lines);
+        let last_lines: Vec<&str> = all_lines[start_idx..].to_vec();
+        Ok(last_lines.join("\n"))
     }
 
     /// Capture content from all panes in a session.
@@ -1360,9 +1363,9 @@ mod tests {
                         "-p",
                         "-e",
                         "-S",
-                        "-50",
+                        "-",
                         "-E",
-                        "",
+                        "-",
                     ])
             })
             .returning(|_| {
@@ -1473,16 +1476,17 @@ mod tests {
                         "-p",
                         "-e",
                         "-S",
-                        "-100",
+                        "-",
                         "-E",
-                        "",
+                        "-",
                     ])
             })
-            .returning(|_| Ok(mock_success("Line 1\nLine 2\n")));
+            .returning(|_| Ok(mock_success("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
-        let output = orchestrator.capture_pane("my-session:main", 100).unwrap();
-        assert_eq!(output, "Line 1\nLine 2\n");
+        // Request only 3 lines, should get the last 3
+        let output = orchestrator.capture_pane("my-session:main", 3).unwrap();
+        assert_eq!(output, "Line 3\nLine 4\nLine 5");
     }
 
     #[test]
