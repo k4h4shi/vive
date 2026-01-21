@@ -13,7 +13,9 @@ pub enum Action {
     /// Quit the application.
     Quit,
     /// Attach to the selected tmux session.
-    AttachSession,
+    /// Contains the key name that triggered the action (e.g., "enter", "o").
+    /// This allows looking up custom keybindings in config.
+    AttachSession(String),
     /// Send input to the current tmux pane.
     SendInput(String),
     /// Create a new task/worktree with the given branch name.
@@ -181,9 +183,13 @@ fn handle_sidebar_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         }
 
         // Attach to session
-        KeyCode::Enter | KeyCode::Char('o') => {
+        KeyCode::Enter => {
             state.clear_status_message();
-            Action::AttachSession
+            Action::AttachSession("enter".to_string())
+        }
+        KeyCode::Char('o') => {
+            state.clear_status_message();
+            Action::AttachSession("o".to_string())
         }
 
         // Input mode
@@ -277,9 +283,13 @@ fn handle_preview_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         }
 
         // Enter/o still attaches to session (useful when viewing preview)
-        KeyCode::Enter | KeyCode::Char('o') => {
+        KeyCode::Enter => {
             state.clear_status_message();
-            Action::AttachSession
+            Action::AttachSession("enter".to_string())
+        }
+        KeyCode::Char('o') => {
+            state.clear_status_message();
+            Action::AttachSession("o".to_string())
         }
 
         _ => Action::None,
@@ -560,14 +570,14 @@ mod tests {
     fn test_attach_session_on_enter() {
         let mut state = create_test_state_with_projects();
         let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
-        assert_eq!(action, Action::AttachSession);
+        assert_eq!(action, Action::AttachSession("enter".to_string()));
     }
 
     #[test]
     fn test_attach_session_on_o() {
         let mut state = create_test_state_with_projects();
         let action = handle_key_event(key_event(KeyCode::Char('o')), &mut state);
-        assert_eq!(action, Action::AttachSession);
+        assert_eq!(action, Action::AttachSession("o".to_string()));
     }
 
     #[test]
@@ -1258,7 +1268,7 @@ mod tests {
         state.focus_preview();
 
         let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
-        assert_eq!(action, Action::AttachSession);
+        assert_eq!(action, Action::AttachSession("enter".to_string()));
     }
 
     // ========== Mouse Scroll Tests with Focus ==========

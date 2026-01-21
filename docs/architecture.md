@@ -45,7 +45,8 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
 *   **Git Wrapper**:
     *   `git worktree add/remove` 等を実行し、物理的な作業ディレクトリを管理します。
 *   **Command Dispatcher**:
-    *   ユーザー設定 (`config.toml`) に基づき、タスクを開く際のコマンド（例: `ghostty --target {session_id}`）や、作成後の自動実行コマンドを構築して実行します。
+    *   ユーザー設定 (`config.toml`) の `[keybindings]` セクションに基づき、各キーに対応するコマンドを構築して実行します。
+    *   キーごとに異なるアクションを設定可能（例: `Enter` でtmux切り替え、`o` で新しいターミナルウィンドウを開く）。
 
 ## データフロー
 
@@ -55,18 +56,52 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
     *   **TUI**: `AppState` の内容を描画。
 3.  **アクション**:
     *   ユーザーが「作成」→ `git worktree add` → `tmux new-session` → `AppState`更新。
-    *   ユーザーが「開く」→ 設定されたコマンドを実行（端末切り替え）。
+    *   ユーザーが「開く」→ 設定されたキーバインディングに基づきコマンドを実行（端末切り替え）。
 
 ## カスタマイズ設計
 
 Viveは「何を実行するか」をユーザー設定に委ねる設計になっています。
 
-### コマンド実行 (Exec)
-タスクを開く際や、作成時に実行されるコマンドは `config.toml` で定義可能です。
-プレースホルダー（`{session_id}`, `{path}`など）を使うことで、動的なコマンド生成が可能です。
+### Keybindings (キーバインディング)
+
+タスクを開く際のコマンドは `config.toml` の `[keybindings]` セクションで定義可能です。
+各キー（`enter`, `o`, `n` など）に対して、実行するシェルコマンドを設定できます。
+
+#### プレースホルダー
+
+コマンド内で以下のプレースホルダーを使用できます：
+
+| プレースホルダー | 説明 |
+| :--- | :--- |
+| `{session_id}` | 対象タスクのTmuxセッション名 (例: `project__feature-issue-123`) |
+| `{path}` | 対象タスクのワークツリーパス (例: `/home/user/src/project/.worktrees/feature/issue-123`) |
+
+#### 設定例
+
+```toml
+[keybindings]
+# Enter: 現在のターミナル内でtmuxセッションを切り替え
+enter = "tmux switch-client -t {session_id}"
+
+# o: Ghosttyの新しいタブでセッションを開く
+o = "ghostty -e tmux attach -t {session_id}"
+
+# n: VSCodeでワークツリーを開く
+n = "code {path}"
+```
+
+#### デフォルト動作
+
+`[keybindings]` が設定されていない場合、デフォルトで `tmux switch-client -t {session_id}` と同等の動作（インライン切り替え）を行います。
+
+### 移行について
+
+既存の `[terminal]` セクション（`strategy`, `command`, `args`）は**非推奨 (Deprecated)** です。
+`[keybindings]` セクションを使用してください。より柔軟な設定が可能です。
 
 これにより、以下のような柔軟な運用が可能になります：
 *   OS標準のターミナルで開く
 *   VSCodeで開く (`code {path}`)
+*   キーごとに異なるアプリケーションで開く
 *   タスク作成直後に `npm install` を走らせる
 *   タスク作成直後に Claude Code を起動してプロンプトを流し込む

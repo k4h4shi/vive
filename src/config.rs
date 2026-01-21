@@ -6,7 +6,7 @@
 //! - Support configuration for projects_root, ignored_dirs, and tmux_prefix
 //! - Load and save favorites to `~/.vive/favorites.toml`
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -87,8 +87,24 @@ pub struct Config {
     pub tmux_prefix: Option<String>,
 
     /// Terminal configuration for session launching.
+    /// DEPRECATED: Use `keybindings` instead for more flexible configuration.
     #[serde(default)]
     pub terminal: TerminalConfig,
+
+    /// Custom keybindings for session actions.
+    /// Keys are key names (e.g., "enter", "o", "n"), values are shell commands.
+    /// Use `{session_id}` as placeholder for the target session name.
+    /// Use `{path}` as placeholder for the worktree path.
+    ///
+    /// Example:
+    /// ```toml
+    /// [keybindings]
+    /// enter = "tmux switch-client -t {session_id}"
+    /// o = "ghostty -e tmux attach -t {session_id}"
+    /// n = "code {path}"
+    /// ```
+    #[serde(default)]
+    pub keybindings: HashMap<String, String>,
 }
 
 impl Default for Config {
@@ -98,6 +114,7 @@ impl Default for Config {
             ignored_dirs: DEFAULT_IGNORED_DIRS.iter().map(|s| s.to_string()).collect(),
             tmux_prefix: None,
             terminal: TerminalConfig::default(),
+            keybindings: HashMap::new(),
         }
     }
 }
@@ -168,19 +185,32 @@ ignored_dirs = [".git", "node_modules", ".worktrees", "target", "dist"]
 # Optional tmux prefix key override (e.g., "C-a" for Ctrl+a)
 # tmux_prefix = "C-a"
 
-# Terminal launch configuration
-[terminal]
-# Launch strategy: "inline" (default) or "spawn"
-# - inline: Replace current process with tmux attach
-# - spawn: Launch external terminal without suspending TUI
-# strategy = "spawn"
-
-# Command to run for spawn strategy (e.g., "ghostty", "wezterm", "alacritty")
-# command = "ghostty"
-
-# Arguments for the spawn command
+# Custom keybindings for opening sessions
 # Use {session_id} as placeholder for the target session name
-# args = ["+e", "tmux attach -t {session_id}"]
+# Use {path} as placeholder for the worktree path
+[keybindings]
+# Default behavior (inline tmux switch) - uncomment to customize:
+# enter = "tmux switch-client -t {session_id}"
+
+# Open in new Ghostty window:
+# o = "ghostty -e tmux attach -t {session_id}"
+
+# Open in new terminal tab (example for iTerm2):
+# o = "open -a iTerm && osascript -e 'tell application \"iTerm2\" to tell current window to create tab with default profile command \"tmux attach -t {session_id}\"'"
+
+# Open in VS Code:
+# n = "code {path}"
+
+# Open in new tmux window:
+# n = "tmux new-window -t {session_id}"
+
+# DEPRECATED: [terminal] section - use [keybindings] instead for more flexibility
+# The [terminal] section still works for backwards compatibility but will be
+# removed in a future version.
+# [terminal]
+# strategy = "spawn"
+# command = "ghostty"
+# args = ["-e", "tmux attach -t {session_id}"]
 "#;
             fs::write(&config_path, default_content).with_context(|| {
                 format!("Failed to write config file: {}", config_path.display())
@@ -213,11 +243,49 @@ ignored_dirs = [".git", "node_modules", ".worktrees", "target", "dist"]
     pub fn should_ignore(&self, dir_name: &str) -> bool {
         self.ignored_dirs.iter().any(|ignored| ignored == dir_name)
     }
+
+    /// Check if custom keybindings are configured.
+    pub fn has_keybindings(&self) -> bool {
+        !self.keybindings.is_empty()
+    }
+
+    /// Build a command from keybinding with session_id substitution.
+    ///
+    /// Returns `None` if no keybinding is configured for the given key.
+    pub fn build_keybinding_command(&self, key: &str, session_id: &str) -> Option<String> {
+        self.keybindings
+            .get(key)
+            .map(|cmd| substitute_session_id(cmd, session_id))
+    }
+
+    /// Build a command from keybinding with all placeholder substitutions.
+    ///
+    /// Supports `{session_id}` and `{path}` placeholders.
+    /// Returns `None` if no keybinding is configured for the given key.
+    pub fn build_keybinding_command_with_placeholders(
+        &self,
+        key: &str,
+        session_id: &str,
+        path: Option<&str>,
+    ) -> Option<String> {
+        self.keybindings.get(key).map(|cmd| {
+            let mut result = substitute_session_id(cmd, session_id);
+            if let Some(p) = path {
+                result = result.replace("{path}", p);
+            }
+            result
+        })
+    }
 }
 
 /// Get the user's home directory.
 fn dirs_home() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+/// Substitute `{session_id}` placeholder in a command string.
+pub fn substitute_session_id(command: &str, session_id: &str) -> String {
+    command.replace("{session_id}", session_id)
 }
 
 /// Favorites data stored in `~/.vive/favorites.toml`.
@@ -538,5 +606,151 @@ projects = ["project-a", "project-b"]
         let path = path.unwrap();
         assert!(path.to_string_lossy().contains(".vive"));
         assert!(path.to_string_lossy().ends_with("favorites.toml"));
+    }
+
+    // ========================================================================
+    // TDD: Keybindings configuration tests (Issue #66)
+    // ========================================================================
+
+    #[test]
+    fn test_keybindings_default_is_empty() {
+        let config = Config::default();
+        assert!(config.keybindings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_keybindings_from_toml() {
+        let toml_content = r#"
+[keybindings]
+enter = "tmux switch-client -t {session_id}"
+o = "~/.local/bin/ghostty-tab {session_id}"
+n = "tmux new-window -t {session_id}"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.keybindings.len(), 3);
+        assert_eq!(
+            config.keybindings.get("enter"),
+            Some(&"tmux switch-client -t {session_id}".to_string())
+        );
+        assert_eq!(
+            config.keybindings.get("o"),
+            Some(&"~/.local/bin/ghostty-tab {session_id}".to_string())
+        );
+        assert_eq!(
+            config.keybindings.get("n"),
+            Some(&"tmux new-window -t {session_id}".to_string())
+        );
+    }
+
+    #[test]
+    fn test_keybinding_substitute_session_id() {
+        let command = "tmux switch-client -t {session_id}";
+        let result = substitute_session_id(command, "myproject__feature");
+        assert_eq!(result, "tmux switch-client -t myproject__feature");
+    }
+
+    #[test]
+    fn test_keybinding_substitute_multiple_placeholders() {
+        let command = "echo {session_id} && tmux attach -t {session_id}";
+        let result = substitute_session_id(command, "my-session");
+        assert_eq!(result, "echo my-session && tmux attach -t my-session");
+    }
+
+    #[test]
+    fn test_mixed_config_keybindings_with_terminal() {
+        let toml_content = r#"
+[terminal]
+strategy = "spawn"
+command = "ghostty"
+
+[keybindings]
+enter = "custom-command {session_id}"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        // keybindings should be present
+        assert!(config.keybindings.contains_key("enter"));
+        // terminal config still parsed (for migration period)
+        assert_eq!(config.terminal.command, Some("ghostty".to_string()));
+    }
+
+    #[test]
+    fn test_build_keybinding_command() {
+        use std::collections::HashMap;
+        let mut keybindings = HashMap::new();
+        keybindings.insert(
+            "enter".to_string(),
+            "tmux switch-client -t {session_id}".to_string(),
+        );
+
+        let config = Config {
+            keybindings,
+            ..Default::default()
+        };
+
+        let cmd = config.build_keybinding_command("enter", "my-session");
+        assert_eq!(cmd, Some("tmux switch-client -t my-session".to_string()));
+    }
+
+    #[test]
+    fn test_unknown_keybinding_returns_none() {
+        let config = Config::default();
+        let cmd = config.build_keybinding_command("x", "my-session");
+        assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn test_has_keybindings() {
+        let config = Config::default();
+        assert!(!config.has_keybindings());
+
+        let toml_content = r#"
+[keybindings]
+enter = "tmux switch-client -t {session_id}"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.has_keybindings());
+    }
+
+    #[test]
+    fn test_keybinding_with_path_placeholder() {
+        use std::collections::HashMap;
+        let mut keybindings = HashMap::new();
+        keybindings.insert(
+            "o".to_string(),
+            "code {path} && tmux attach -t {session_id}".to_string(),
+        );
+
+        let config = Config {
+            keybindings,
+            ..Default::default()
+        };
+
+        let cmd = config.build_keybinding_command_with_placeholders(
+            "o",
+            "my-session",
+            Some("/home/user/project"),
+        );
+        assert_eq!(
+            cmd,
+            Some("code /home/user/project && tmux attach -t my-session".to_string())
+        );
+    }
+
+    #[test]
+    fn test_keybinding_without_path_placeholder() {
+        use std::collections::HashMap;
+        let mut keybindings = HashMap::new();
+        keybindings.insert(
+            "enter".to_string(),
+            "tmux switch-client -t {session_id}".to_string(),
+        );
+
+        let config = Config {
+            keybindings,
+            ..Default::default()
+        };
+
+        let cmd = config.build_keybinding_command_with_placeholders("enter", "my-session", None);
+        assert_eq!(cmd, Some("tmux switch-client -t my-session".to_string()));
     }
 }
