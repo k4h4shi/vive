@@ -280,7 +280,7 @@ where
                 }
             }
 
-            Action::CreateTask(branch_name) => {
+            Action::CreateTask(branch_name, auto_kickstart) => {
                 if let Some(project) = self.state.selected_project().cloned() {
                     let worktree_path = project.path.join(".worktrees").join(&branch_name);
                     let output = std::process::Command::new("git")
@@ -311,6 +311,12 @@ where
                                 .tmux
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
+                            // Auto-kickstart: send initial command if enabled
+                            if auto_kickstart {
+                                let command = "claude --print-architecture";
+                                let _ = self.tmux.send_keys(&session_id, command, true);
+                            }
 
                             self.state
                                 .set_success_message(format!("Created worktree '{branch_name}'"));
@@ -368,7 +374,7 @@ where
                 }
             }
 
-            Action::CreateTaskFromIssue(issue) => {
+            Action::CreateTaskFromIssue(issue, auto_kickstart) => {
                 let branch_name = issue.branch_name();
                 // Reuse the CreateTask logic
                 if let Some(project) = self.state.selected_project().cloned() {
@@ -401,6 +407,12 @@ where
                                 .tmux
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
+                            // Auto-kickstart: send initial command with issue reference
+                            if auto_kickstart {
+                                let command = format!("/fix {}", issue.number);
+                                let _ = self.tmux.send_keys(&session_id, &command, true);
+                            }
 
                             self.state.set_success_message(format!(
                                 "Created worktree '{}' for Issue #{}",

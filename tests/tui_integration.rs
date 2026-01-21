@@ -2323,9 +2323,10 @@ fn test_issue_picker_select_creates_task() {
 
     // Should return CreateTaskFromIssue action
     match action {
-        Action::CreateTaskFromIssue(issue) => {
+        Action::CreateTaskFromIssue(issue, auto_kickstart) => {
             assert_eq!(issue.number, 42);
             assert_eq!(issue.branch_name(), "feature/issue-42");
+            assert!(auto_kickstart); // Default is true
         }
         _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
     }
@@ -2404,9 +2405,10 @@ fn test_full_issue_picker_flow() {
     let action = app.handle_key_event(key);
 
     match action {
-        Action::CreateTaskFromIssue(issue) => {
+        Action::CreateTaskFromIssue(issue, auto_kickstart) => {
             assert_eq!(issue.number, 200);
             assert_eq!(issue.branch_name(), "feature/issue-200");
+            assert!(auto_kickstart); // Default is true
         }
         _ => panic!("Expected CreateTaskFromIssue action"),
     }
