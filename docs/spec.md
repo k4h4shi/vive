@@ -3,7 +3,6 @@
 ## 1. 概要 (Concept)
 
 Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェント（Claude Code）を一元管理するための**「AI開発オーケストレーター」**です。
-ユーザー（開発者）はViveを通じて、複数の並行開発タスクを俯瞰し、監視し、必要に応じて介入・指示を行うことができます。
 
 ### ターゲットユーザー
 - ソロ開発者（ドッグフーディング）
@@ -14,7 +13,6 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 ### 2.1 プロジェクト管理
 - [ ] **Configurable Root**: `~/src` などのルートディレクトリを指定し、Gitリポジトリを再帰的に検出・一覧表示する。
 - [ ] **Favorites**: 頻繁にアクセスするプロジェクトを「お気に入り（★）」登録し、リスト最上部に固定表示する。
-- [ ] **Project Dashboard**: プロジェクトを選択した際、**Tmuxネイティブなダッシュボードセッション**を起動し、配下の全タスクをグリッド表示する。
 
 ### 2.2 タスク（Worktree）管理
 - [ ] **Auto-Discovery**: `git worktree list` を解析し、既存のワークツリーを「タスク」として自動検出する。
@@ -35,13 +33,20 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
     - • **Idle**: セッションはあるがコマンド未実行。グレーで表示。
 - [ ] **Hysteresis**: ステータスのちらつき（Working ↔ Idle）を防ぐため、短時間のアイドルは無視する。
 
-### 2.4 オーケストレーション (Orchestration)
-- [x] **Launch Strategy**:
-    - **Inline**: 現在のターミナルをTmuxセッションに切り替える（デフォルト）。
-    - **Spawn**: 設定された外部ターミナル（Ghostty等）で新しいウィンドウを開く。
-- [x] **Preview**: 選択中のタスクのTmuxペインの内容（最新N行）をTUI上でリアルタイム表示する。プレビューにフォーカスして過去のログをスクロール閲覧可能。
-- [ ] **Command Input**: Tmuxにアタッチせずとも、Viveから直接コマンド（`y` やプロンプト）を送信できる。
-- [ ] **Native Dashboard**: プロジェクト選択時、全タスクのセッションをペインに埋め込んだ（Nested Tmux）特別なセッションを作成・表示する。
+### 2.4 オーケストレーション (Command & Hooks)
+ユーザー定義のコマンドとフックにより、柔軟なワークフローを実現する。
+
+- [ ] **User-Defined Commands**: `config.toml` に定義された任意のコマンドを実行可能にする。
+    - プレースホルダー（`{session_id}`, `{path}`, `{project_name}`）の置換をサポート。
+- [ ] **Action Bindings**: UI上のアクション（Enterキーなど）に対して、実行するコマンドを割り当てる。
+    - 例: `open = "ghostty --target {session_id}"`
+- [ ] **Lifecycle Hooks**: 特定のイベント発生時に自動実行されるコマンドを定義する。
+    - `post_create_task`: タスク作成完了時に実行（例: `npm install`, `claude` 起動）。
+
+### 2.5 プレビュー (Preview)
+- [x] **Live Preview**: 選択中のタスクのTmuxペインの内容（最新N行）をTUI上でリアルタイム表示する。
+    - 非アクティブなタスクの進行状況や、エージェントの待機理由を確認可能にする。
+- [x] **Preview Scroll**: プレビューにフォーカスして過去のログをスクロール閲覧可能。
 
 ## 3. UI仕様 (Interface)
 
@@ -76,7 +81,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | `Tab` | **フォーカス切り替え** | サイドバーとプレビュー間でフォーカスを切り替え |
 | `h` / `←` | **サイドバーへフォーカス** | 左ペイン（サイドバー）にフォーカスを移動 |
 | `l` / `→` | **プレビューへフォーカス** | 右ペイン（プレビュー）にフォーカスを移動 |
-| `Enter` / `o` | **Open/Attach** | 選択中のタスクを開く。プロジェクト選択時はDashboardを開く。 |
+| `Enter` / `o` | **Open/Attach** | 選択中のタスクを開く（設定されたコマンドを実行）。 |
 | `q` | **Quit** | Viveを終了する |
 
 #### サイドバーフォーカス時
@@ -113,68 +118,12 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 フォーカス中のペインは**黄色の太線枠**で強調表示されます。非フォーカスのペインは**グレーの枠線**で表示されます。
 これにより、ユーザーは常に「今どちらのペインを操作しているか」を視覚的に確認できます。
 
-#### 入力モード時のキー操作
-
-| キー | 動作 | 備考 |
-| :--- | :--- | :--- |
-| `←` / `→` | カーソル移動 | 入力文字列内でカーソルを左右に移動 |
-| `Backspace` | 文字削除 | カーソル位置の前の文字を削除 |
-| `Enter` | 送信 | 入力内容をTmuxに送信 |
-| `Esc` | キャンセル | 入力モードを解除 |
-
-入力モードでは日本語入力（IME）にも対応しています。カーソル位置がIME変換ウィンドウの表示位置に反映されます。
-
-#### Issue Picker Modal
-
-`n` キーを押すと、まずタスク作成方法を選択するモーダルが表示されます。
-
-```text
-+------------------------------------------+
-|            Create Task                   |
-|------------------------------------------|
-|                                          |
-| How would you like to create a task?     |
-|                                          |
-|   [M] Manual - Enter branch name         |
-|   [I] Pick from Issue                    |
-|                                          |
-| j/k: Select  Enter: Confirm  Esc: Cancel |
-+------------------------------------------+
-```
-
-「Pick from Issue」を選択すると、GitHub Issueリストが表示されます。
-
-```text
-+----------------------------------------------------------+
-|                    Pick from Issue                       |
-|----------------------------------------------------------|
-| Filter: _                                                |
-|                                                          |
-| > #55  Add Issue Picker to New Task flow                 |
-|   #54  Display Issue title in preview                    |
-|   #42  Improve error handling                            |
-|   #38  Add dark mode support                             |
-|                                                          |
-| j/k: Navigate  Enter: Select  Esc: Cancel                |
-+----------------------------------------------------------+
-```
-
-| キー | 動作 |
-| :--- | :--- |
-| `j` / `k` | Issue選択を上下に移動 |
-| `Enter` | 選択したIssueから `feature/issue-{番号}` ブランチを作成 |
-| 文字入力 | インクリメンタルフィルター（Issue番号またはタイトルで絞り込み） |
-| `Backspace` | フィルター文字を削除 |
-| `Esc` | キャンセル |
-
 ## 4. 技術仕様 (Architecture)
 
 詳細な実装方針は `docs/research/` 以下のドキュメントを参照してください。
 
 - **状態管理**: `AppState` が静的なプロジェクト情報と動的なエージェントステータス（`HashMap`）を統合管理する。
-- **監視ロジック**: [State Management & Hysteresis](research/state-management.md)
-- **パース処理**: [Robust Parsing Strategy](research/robust-parsing.md)
-- **UI描画**: [Rich UI Tree](research/rich-ui-tree.md)
+- **設定ファイル**: `~/.vive/config.toml` にTOML形式で保存。
 
 ### データモデル
 
@@ -217,5 +166,11 @@ enum ModalType {
     CreateTask { input: String },                     // Manual branch name input
     IssuePicker { issues: Vec<GitHubIssue>, ... },   // Issue selection
     ConfirmDeletion { branch_name: String },          // Delete confirmation
+}
+
+// ユーザー設定可能なコマンド
+struct CommandConfig {
+    open_task: String,    // "tmux attach -t {session_id}" etc.
+    hooks: HashMap<String, String>, // "post_create" -> "..."
 }
 ```
