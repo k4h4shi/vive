@@ -2,36 +2,33 @@
 
 **The AI Development Orchestrator.**
 
-> ⚠️ **Status: Under Active Development (v2)**
-> 
-> We are reimagining Vive as a robust TUI application written in Rust.
-> The legacy shell-script version is deprecated.
+> ⚠️ **Status: Under Active Development**
+>
+> 現在、RustによるTUIアプリケーションとして全面的に再実装中です。
+> 旧シェルスクリプト版は非推奨となりました。
 
-Vive is a terminal-based tool designed to orchestrate multi-project, multi-agent development workflows. It manages Git Worktrees, Tmux sessions, and Claude Code agents to provide a seamless "Cockpit" for parallel development.
+Vive（ヴァイヴ）は、**複数のAIエージェントによる並行開発**を管理・指揮するためのターミナルツールです。
+Git Worktree、Tmux、そしてClaude Codeを一元管理し、複雑になりがちな「マルチタスク開発」をシンプルにします。
 
-## Vision
+## 特徴 (Features)
 
-Manage 10+ AI agents across 5+ repositories without losing your mind.
+Viveは以下の5つのコア機能を提供します。
 
-- **Dashboard**: See everything at once. Projects, tasks, and agent statuses.
-- **Orchestration**: One click to set up a Tmux environment perfectly laid out for the project.
-- **Monitoring**: Know exactly when an agent needs your input (🟢 Working vs 🟡 Waiting).
+1.  **Project**: 全てのリポジトリを一箇所で管理・検索。
+2.  **Task**: 1クリックで「Worktree + Branch + Tmuxセッション」の作業環境を構築。
+3.  **Preview**: エージェントの思考ログやステータス（思考中/入力待ち）をリアルタイム監視。
+4.  **Command**: 自分の好きなターミナルやエディタでタスクを開く（カスタマイズ可能）。
+5.  **Hook**: タスク作成時や終了時に、任意のスクリプトを自動実行。
 
-## Documentation
+## インストール
 
-- [Concept](docs/concept.md)
-- [Architecture](docs/architecture.md)
-- [Functional Requirements](docs/requirements.md)
+### 必須要件
 
-## Installation
+- **Rust** (cargo)
+- **tmux**
+- **git**
 
-### Prerequisites
-
-- **Rust** (with cargo) - [Install Rust](https://www.rust-lang.org/tools/install)
-- **tmux** - Terminal multiplexer
-- **git** - Version control
-
-### Install from Source
+### ソースコードから
 
 ```bash
 git clone https://github.com/k4h4shi/vive.git
@@ -39,49 +36,29 @@ cd vive
 ./install.sh
 ```
 
-This will:
-1. Build the release binary using `cargo build --release`
-2. Install to `~/.local/bin/vive` (or `/usr/local/bin/vive` if needed)
+## 設定 (Configuration)
 
-For CI/CD or scripted installations, use the `--yes` flag to suppress output:
+`~/.vive/config.toml` で挙動をカスタマイズできます。
 
-```bash
-./install.sh --yes
+```toml
+# プロジェクトのルートディレクトリ
+projects_root = "~/src/github"
+
+# アクション設定
+[actions]
+# Enterキーでタスクを開く時のコマンド (Ghosttyの例)
+open = "ghostty --target {session_id}"
+# インラインで開く場合 (デフォルト)
+# open = "tmux attach -t {session_id}"
+
+# フック設定 (自動実行)
+[hooks]
+# タスク作成完了時に実行するコマンド
+post_create = "tmux send-keys -t {session_id} 'claude' C-m"
 ```
 
-### Install with Cargo (for Rust developers)
+## ドキュメント
 
-```bash
-git clone https://github.com/k4h4shi/vive.git
-cd vive
-cargo install --path .
-```
-
-### Uninstall
-
-```bash
-./install.sh --uninstall
-```
-
-## Usage
-
-```bash
-# Launch the TUI dashboard
-vive
-```
-
-### Configuration
-
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `VIVE_PROJECTS_ROOT` | Root directory for project discovery | `~/src` |
-
-## Tech Stack
-
-- **Rust**
-- **Ratatui** (TUI)
-- **Tmux** (Backend)
-
-## Roadmap
-
-Check `docs/requirements.md` for the feature list.
+- [コンセプト (Concept)](docs/concept.md)
+- [仕様書 (Spec)](docs/spec.md)
+- [アーキテクチャ (Architecture)](docs/architecture.md)

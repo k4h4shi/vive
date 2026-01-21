@@ -1,26 +1,54 @@
-# Vive: The AI Development Orchestrator
+# Vive: AI並行開発管理ツール
 
-## Vision
+## 概要
 
-Vive is a terminal-based orchestration tool designed to manage multi-project, multi-agent development workflows. It scales the "Git Worktree + Tmux + Claude" pattern from a single project to a global development environment.
+Vive（ヴァイヴ）は、**複数のAIエージェントを使った並行開発**を効率化するためのターミナルツール（TUI）です。
+「Git Worktree」と「Tmux」を組み合わせることで、**1つのプロジェクトで複数のタスク（機能追加、バグ修正、リファクタリングなど）を同時に進める**スタイルを強力に支援します。
 
-## Core Philosophy
+## コア概念 (Core Concepts)
 
-- **Global Context**: Manage multiple projects simultaneously, not just one.
-- **Visual Orchestration**: Provide a TUI dashboard to monitor the state of all AI agents across all projects.
-- **Context Isolation**: Strictly enforce isolation using Git Worktrees and Tmux sessions.
-- **Seamless Switching**: Enable instant context switching between projects and tasks without cognitive overhead.
+Viveは以下の5つの要素を扱います。
 
-## The Problem
+### 1. プロジェクト (Project)
+Gitリポジトリそのものです。
+Viveは指定されたルートディレクトリ（例: `~/src`）からGitリポジトリを自動検出し、プロジェクトとして一覧表示します。
 
-Managing AI-driven development across multiple repositories is complex:
-- **Visibility**: It's hard to know which agents are working, waiting for input, or finished.
-- **Context Switching**: Jumping between projects requires resetting mental and terminal context.
-- **Process Management**: Manually managing tmux sessions and worktrees for N projects is error-prone.
+### 2. タスク (Task)
+**Viveにおける管理の最小単位**です。
+1つのタスクは、以下の3つの技術的要素がセットになったものです。
 
-## The Solution
+*   **Git Worktree**: メインのディレクトリとは独立した作業ディレクトリ（ブランチ）。
+*   **Tmux Session**: そのタスク専用のターミナルセッション。
+*   **AI Agent**: そのセッション内で動作するClaude Codeなどのエージェントプロセス。
 
-Vive acts as a control tower:
-1.  **Dashboard**: A centralized view of all projects and their active tasks.
-2.  **Monitor**: Real-time status tracking of Claude agents (Working vs. Waiting for Input).
-3.  **Workspace**: Automated layout management using Tmux to present the relevant context immediately.
+Viveを使うことで、「タスクを作成する」という1つのアクションで、これら全てを一括でセットアップできます。
+
+### 3. プレビュー (Preview)
+タスクの中身を「開かずに見る」機能です。
+各タスクで動いているAIエージェントが今何をしているか（思考中、入力待ち、エラー、完了）を、Viveのダッシュボード上でリアルタイムに確認できます。
+
+### 4. コマンド (Command)
+Viveから呼び出す外部アクションです。
+「タスクを開く」という操作に対して、「VSCodeで開く」「Ghosttyの新しいタブで開く」など、ユーザーが自分のワークフローに合わせて振る舞いを定義できます。
+
+### 5. フック (Hook)
+ライフサイクルイベントに連動して実行される自動処理です。
+「タスク作成完了時」や「タスク削除時」などのタイミングで、任意のコマンド（例: `npm install` や `claude` の初期化）を自動実行できます。
+
+## Viveができること
+
+### 1. 状態の一元管理 (Dashboard)
+全プロジェクトの全タスクをツリー構造で一覧表示します。
+どのタスクが進行中で、どのタスクが自分の入力を待っているかが一目でわかります。
+
+### 2. 環境構築の自動化 (Orchestration)
+「新しい機能を作りたい」と思った時、Viveからタスクを作成するだけで、以下の手順が自動で完了します。
+1.  Git Worktree の作成（新しいディレクトリの確保）
+2.  新規ブランチの作成
+3.  専用Tmuxセッションの立ち上げ
+4.  （任意）初期コマンドの実行（例: `claude` の起動）
+
+### 3. コンテキストの切り替え (Switching)
+タスクを選択して Enter を押すだけで、そのタスクのTmuxセッションに接続（Attach）します。
+作業が終われば Detach してViveに戻り、別のタスクに移る。この切り替えが瞬時に行えます。
+ターミナルアプリ（Ghosttyなど）のタブやウィンドウで開くようにカスタマイズも可能です。
