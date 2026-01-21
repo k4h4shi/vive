@@ -33,14 +33,14 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
     - • **Idle**: セッションはあるがコマンド未実行。グレーで表示。
 - [ ] **Hysteresis**: ステータスのちらつき（Working ↔ Idle）を防ぐため、短時間のアイドルは無視する。
 
-### 2.4 オーケストレーション (Command & Hooks)
-ユーザー定義のコマンドとフックにより、柔軟なワークフローを実現する。
+### 2.4 オーケストレーション (Actions & Hooks)
+ユーザー操作（Command）やイベント（Hook）に対する具体的な振る舞い（Action）を定義する。
 
-- [ ] **User-Defined Commands**: `config.toml` に定義された任意のコマンドを実行可能にする。
+- [ ] **User-Defined Actions**: `config.toml` に定義された任意のシェルコマンドを実行可能にする。
     - プレースホルダー（`{session_id}`, `{path}`, `{project_name}`）の置換をサポート。
-- [ ] **Action Bindings**: UI上のアクション（Enterキーなど）に対して、実行するコマンドを割り当てる。
-    - 例: `open = "ghostty --target {session_id}"`
-- [ ] **Lifecycle Hooks**: 特定のイベント発生時に自動実行されるコマンドを定義する。
+- [ ] **Command Bindings**: UI上の操作（Enterキーなど）に対して、実行するアクションを割り当てる。
+    - 例: Open Command (`Enter`) -> `actions.open` ("ghostty --target {session_id}")
+- [ ] **Lifecycle Hooks**: 特定のイベント発生時に自動実行されるアクションを定義する。
     - `post_create_task`: タスク作成完了時に実行（例: `npm install`, `claude` 起動）。
 
 ### 2.5 プレビュー (Preview)
@@ -168,9 +168,14 @@ enum ModalType {
     ConfirmDeletion { branch_name: String },          // Delete confirmation
 }
 
-// ユーザー設定可能なコマンド
-struct CommandConfig {
-    open_task: String,    // "tmux attach -t {session_id}" etc.
+// ユーザー設定可能なアクション定義
+struct ActionsConfig {
+    open: String,    // "tmux attach -t {session_id}" etc.
     hooks: HashMap<String, String>, // "post_create" -> "..."
 }
+
+### 移行計画 (Migration)
+- 既存の `[terminal]` セクション（`strategy`, `command`, `args`）は **非推奨 (Deprecated)** とする。
+- `[actions]` セクションが定義されている場合はそちらを優先する。
+- 将来的に `[terminal]` セクションのサポートを削除する。
 ```
