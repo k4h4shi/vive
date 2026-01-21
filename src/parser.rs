@@ -93,12 +93,14 @@ static PROCEED_PROMPT_PATTERN: Lazy<Regex> =
 static NUMBERED_SELECTION_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?m)^\s*❯?\s*[123]\.\s*(Yes|No)").unwrap());
 
-static ESC_TO_CANCEL_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"Esc to cancel").unwrap());
+static ESC_TO_CANCEL_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"Esc to cancel").unwrap());
 
 // Issue #65: Completion pattern - past tense verb + time (e.g., "✻ Churned for 2m 20s")
 static COMPLETION_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(&format!(r"[{SPINNER_CHARS}]\s+\w+(?:ed|éed)\s+for\s+\d+[msh]\s*\d*[msh]?")).unwrap()
+    Regex::new(&format!(
+        r"[{SPINNER_CHARS}]\s+\w+(?:ed|éed)\s+for\s+\d+[msh]\s*\d*[msh]?"
+    ))
+    .unwrap()
 });
 
 // Issue #65: Active working pattern - "esc to interrupt" indicates Claude Code is working
@@ -107,12 +109,10 @@ static ACTIVE_WORKING_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)esc to interrupt").unwrap());
 
 // Issue #65: Prompt detection patterns
-static PROMPT_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?m)^❯\s*(?:/\w+.*)?$").unwrap());
+static PROMPT_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^❯\s*(?:/\w+.*)?$").unwrap());
 
-static UI_HINT_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)^❯\s+(?:Press up to edit|[123]\.\s*(?:Yes|No))").unwrap()
-});
+static UI_HINT_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)^❯\s+(?:Press up to edit|[123]\.\s*(?:Yes|No))").unwrap());
 
 /// Number of lines from the end to check for approval prompts.
 /// Issue #57: Limit approval detection to recent output to prevent
@@ -772,8 +772,14 @@ mod tests {
     fn test_issue65_active_working_patterns() {
         let cases = [
             ("✳ Percolating… (esc to interrupt)", "Percolating"),
-            ("✽ Forging… (esc to interrupt · ctrl+t to show todos)", "Forging"),
-            ("✻ Checking E2E test failures… (esc to interrupt · ctrl+t to show todos · 3m 32s · ↓ 3.0k tokens)", "Checking"),
+            (
+                "✽ Forging… (esc to interrupt · ctrl+t to show todos)",
+                "Forging",
+            ),
+            (
+                "✻ Checking E2E test failures… (esc to interrupt · ctrl+t to show todos · 3m 32s · ↓ 3.0k tokens)",
+                "Checking",
+            ),
         ];
         for (content, desc) in cases {
             match parse_status(content) {
@@ -787,8 +793,14 @@ mod tests {
     #[test]
     fn test_issue65_prompt_patterns() {
         let cases = [
-            ("───────────────────────────\n❯\n───────────────────────────", "empty prompt"),
-            ("───────────────────────────\n❯ /fix\n───────────────────────────", "command prompt"),
+            (
+                "───────────────────────────\n❯\n───────────────────────────",
+                "empty prompt",
+            ),
+            (
+                "───────────────────────────\n❯ /fix\n───────────────────────────",
+                "command prompt",
+            ),
             ("❯ push して PR 作って", "Japanese command"),
         ];
         for (content, desc) in cases {
@@ -1083,7 +1095,8 @@ mod tests {
     /// Test: strip_ansi function works correctly
     #[test]
     fn test_strip_ansi() {
-        let input = "\x1b[38;2;153;153;153m✻\x1b[39m \x1b[38;2;153;153;153mBrewed for 2m 8s\x1b[39m";
+        let input =
+            "\x1b[38;2;153;153;153m✻\x1b[39m \x1b[38;2;153;153;153mBrewed for 2m 8s\x1b[39m";
         let expected = "✻ Brewed for 2m 8s";
         assert_eq!(strip_ansi(input), expected);
     }

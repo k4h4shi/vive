@@ -586,7 +586,9 @@ where
                         if let Some(sid) = worktree.session_id(&project.name) {
                             // Check if the worktree session exists before capturing
                             if self.tmux.has_session(&sid).unwrap_or(false) {
-                                if let Ok(content) = self.tmux.capture_pane(&sid, DEFAULT_PREVIEW_LINES) {
+                                if let Ok(content) =
+                                    self.tmux.capture_pane(&sid, DEFAULT_PREVIEW_LINES)
+                                {
                                     pane_contents.push((branch.clone(), content.clone()));
                                     if !combined_preview.is_empty() {
                                         combined_preview.push_str("\n--- ");
@@ -621,9 +623,10 @@ where
             .projects
             .iter()
             .flat_map(|project| {
-                project.worktrees.iter().filter_map(|worktree| {
-                    worktree.session_id(&project.name)
-                })
+                project
+                    .worktrees
+                    .iter()
+                    .filter_map(|worktree| worktree.session_id(&project.name))
             })
             .collect();
 
