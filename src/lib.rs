@@ -566,38 +566,43 @@ where
             return;
         }
 
-        // Try dashboard session (when project header is selected, no worktree)
+        // Try dashboard mode (when project header is selected, no worktree)
+        // Issue #65: Capture from underlying worktree sessions directly for full history.
         if let Some(project) = self.state.selected_project()
             && self.state.selected_worktree_idx().is_none()
         {
             let dashboard_session = TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
             if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
-                // Capture individual panes for split preview
-                if let Ok(panes) = self.tmux.list_panes(&dashboard_session) {
-                    // Get branch names from worktrees (panes are created in worktree order)
-                    let branch_names: Vec<String> = project
-                        .worktrees
-                        .iter()
-                        .filter_map(|wt| wt.branch.clone())
-                        .collect();
+                // Capture from underlying worktree sessions directly
+                let mut pane_contents: Vec<(String, String)> = Vec::new();
+                let mut combined_preview = String::new();
 
-                    let mut pane_contents: Vec<(String, String)> = Vec::new();
-                    for (idx, pane) in panes.iter().enumerate() {
-                        // Use pane_id for reliable targeting across sessions
-                        if let Ok(content) = self.tmux.capture_pane(&pane.pane_id, 20) {
-                            let branch_name = branch_names
-                                .get(idx)
-                                .cloned()
-                                .unwrap_or_else(|| format!("Pane {}", idx + 1));
-                            pane_contents.push((branch_name, content));
+                for worktree in &project.worktrees {
+                    if let Some(branch) = &worktree.branch {
+                        // Skip main/master branches from dashboard preview
+                        if branch == "main" || branch == "master" {
+                            continue;
+                        }
+                        if let Some(sid) = worktree.session_id(&project.name) {
+                            // Check if the worktree session exists before capturing
+                            if self.tmux.has_session(&sid).unwrap_or(false) {
+                                if let Ok(content) = self.tmux.capture_pane(&sid, DEFAULT_PREVIEW_LINES) {
+                                    pane_contents.push((branch.clone(), content.clone()));
+                                    if !combined_preview.is_empty() {
+                                        combined_preview.push_str("\n--- ");
+                                        combined_preview.push_str(branch);
+                                        combined_preview.push_str(" ---\n");
+                                    }
+                                    combined_preview.push_str(&content);
+                                }
+                            }
                         }
                     }
-                    self.state.set_dashboard_panes(pane_contents);
+                }
 
-                    // Also set combined preview for fallback
-                    if let Ok(content) = self.tmux.capture_all_panes(&dashboard_session, 15) {
-                        self.state.set_pane_preview(content);
-                    }
+                if !pane_contents.is_empty() {
+                    self.state.set_dashboard_panes(pane_contents);
+                    self.state.set_pane_preview(combined_preview);
                     return;
                 }
             }
@@ -605,6 +610,47 @@ where
 
         self.state.clear_dashboard_panes();
         self.state.set_pane_preview(String::new());
+    }
+
+    /// Update status for all sessions that have tmux sessions.
+    /// This allows status indicators to update even for non-selected items.
+    pub fn update_all_statuses(&mut self) {
+        // Collect session info to avoid borrow conflicts
+        let sessions_to_check: Vec<String> = self
+            .state
+            .projects
+            .iter()
+            .flat_map(|project| {
+                project.worktrees.iter().filter_map(|worktree| {
+                    worktree.session_id(&project.name)
+                })
+            })
+            .collect();
+
+        for session_id in sessions_to_check {
+            // Skip if session doesn't exist
+            if !self.tmux.has_session(&session_id).unwrap_or(false) {
+                continue;
+            }
+
+            // Capture a small amount of content for status detection (faster)
+            if let Ok(content) = self.tmux.capture_pane(&session_id, 30) {
+                let parsed = parser::parse_status(&content);
+                let raw_status = state::AgentStatus::from_parsed(&parsed);
+
+                // Get pane title and combine with parsed status
+                let pane_title = self.tmux.get_pane_title(&session_id).ok().flatten();
+                let title_combined =
+                    monitor::combine_status_with_title(raw_status, pane_title.as_deref());
+
+                // Apply hysteresis to smooth out transitions
+                let final_status = self
+                    .status_monitor
+                    .apply_hysteresis(&session_id, title_combined);
+
+                self.state.set_status(session_id, final_status);
+            }
+        }
     }
 }
 

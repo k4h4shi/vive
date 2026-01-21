@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -283,7 +283,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         "Preview".to_string()
     };
 
-    // Dashboard mode: show split view with summary and panes
+    // Dashboard mode: show split view with panes
     if state.is_dashboard_mode() && !state.dashboard_panes.is_empty() {
         render_dashboard_preview(frame, area, state, &title);
         return;
@@ -342,8 +342,11 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         Style::default().fg(Color::DarkGray)
     };
 
+    // Issue #65: Disable wrap to fix scroll calculation.
+    // With Wrap enabled, long lines become multiple screen lines, causing
+    // scroll_offset (based on logical lines) to be incorrect.
+    // Long lines will be truncated at the preview edge instead of wrapping.
     let preview = Paragraph::new(text)
-        .wrap(Wrap { trim: false })
         .scroll((scroll_offset, 0))
         .block(
             Block::default()
@@ -358,7 +361,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
 fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, title: &str) {
     let pane_count = state.dashboard_panes.len();
 
-    // Split into summary area (3 lines) and panes area
+    // Split into summary area and panes area
     let chunks = Layout::vertical([
         Constraint::Length(4), // Summary (with border)
         Constraint::Min(0),    // Panes
@@ -430,8 +433,8 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
             branch_name.clone()
         };
 
+        // Issue #65: Disable wrap for consistent scroll calculation
         let pane_widget = Paragraph::new(text)
-            .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0))
             .block(Block::default().borders(Borders::ALL).title(pane_title));
         frame.render_widget(pane_widget, *chunk);
