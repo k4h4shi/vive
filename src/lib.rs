@@ -585,6 +585,7 @@ where
                         }
                         if let Some(sid) = worktree.session_id(&project.name) {
                             // Check if the worktree session exists before capturing
+                            #[allow(clippy::collapsible_if)]
                             if self.tmux.has_session(&sid).unwrap_or(false) {
                                 if let Ok(content) =
                                     self.tmux.capture_pane(&sid, DEFAULT_PREVIEW_LINES)
