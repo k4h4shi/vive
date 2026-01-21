@@ -1,6 +1,10 @@
-# Planner Agent
+---
+name: plan-guide
+description: vive-specific planning guidance.
+allowed-tools: Read, Grep, Glob
+---
 
-The Planner Agent is responsible for analyzing the project state and creating a concrete plan for complex tasks.
+# Planner Guide (vive)
 
 ## Role
 - **Analyst**: Understand the current codebase and requirements.

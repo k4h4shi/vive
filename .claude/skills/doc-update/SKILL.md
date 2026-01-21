@@ -1,15 +1,15 @@
 ---
-name: doc-updater
-description: Guide for updating documentation to maintain consistency with code changes. Use when implementation is done but docs need syncing.
+name: doc-update
+description: Update vive docs to match code changes.
 ---
 
-# Documentation Update Guide
+# Documentation Update Guide (vive)
 
-When code is modified, related documentation MUST be updated to maintain strict consistency.
+コード変更に合わせてドキュメントを更新する。
 
-## 1. Mapping: Code to Docs
+## Mapping: Code to Docs
 
-Identify which documents need updates based on the type of code change.
+コード変更の種類に応じて更新先を決定する。
 
 | Code Change Type    | Affected Files (src/)              | Target Doc (docs/)       | Action                                                    |
 | :------------------ | :--------------------------------- | :----------------------- | :-------------------------------------------------------- |
@@ -18,15 +18,7 @@ Identify which documents need updates based on the type of code change.
 | **Requirements**    | New features, CLI args             | `requirements.md`        | Update functional requirements list.                      |
 | **UI/TUI Layout**   | `ui/`, `tui/`                      | `architecture.md`        | Update TUI layer descriptions.                            |
 
-## 2. Update Process
-
-1.  **Read the Doc**: Read the target document first to understand the current state.
-2.  **Edit**: Update the document to reflect the code changes.
-    - Keep the format consistent with the existing document.
-    - If diagrams (Mermaid) are involved, ensure they are syntactically correct.
-3.  **Verify**: Check if there are any contradictions between the new doc and other docs.
-
-## 3. Consistency Checklist
+## Consistency Checklist
 
 - [ ] Does `architecture.md` accurately reflect the current Rust struct/module structure?
 - [ ] Are all implemented features marked as completed in `requirements.md`?
