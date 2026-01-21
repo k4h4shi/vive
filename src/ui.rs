@@ -346,14 +346,12 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // With Wrap enabled, long lines become multiple screen lines, causing
     // scroll_offset (based on logical lines) to be incorrect.
     // Long lines will be truncated at the preview edge instead of wrapping.
-    let preview = Paragraph::new(text)
-        .scroll((scroll_offset, 0))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .border_style(border_style),
-        );
+    let preview = Paragraph::new(text).scroll((scroll_offset, 0)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(border_style),
+    );
     frame.render_widget(preview, area);
 }
 
