@@ -265,7 +265,7 @@ where
         match action {
             Action::None | Action::Quit => {}
 
-            Action::AttachSession => {
+            Action::AttachSession(_key) => {
                 // Note: In tests, this won't actually exec into tmux
                 // For real usage, this is handled specially in run_with_terminal_control
             }
