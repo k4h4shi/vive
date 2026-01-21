@@ -408,8 +408,12 @@ where
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
 
-                            // Auto-kickstart: send initial command with issue reference
+                            // Auto-kickstart: start Claude and send /fix command
                             if auto_kickstart {
+                                // First, start Claude CLI
+                                let _ = self.tmux.send_keys(&session_id, "claude", true);
+                                // Then send /fix command after a brief delay for Claude to start
+                                // Note: The /fix command will be queued and processed once Claude is ready
                                 let command = format!("/fix {}", issue.number);
                                 let _ = self.tmux.send_keys(&session_id, &command, true);
                             }
