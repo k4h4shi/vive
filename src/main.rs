@@ -320,12 +320,22 @@ fn execute_keybinding_command<W: Write>(app: &mut ProductionApp<W>, command: &st
 }
 
 /// Truncate a command for display in status messages.
+///
+/// Uses character count (not byte count) to safely handle UTF-8 strings.
 fn truncate_command(command: &str) -> String {
-    const MAX_LEN: usize = 50;
-    if command.len() <= MAX_LEN {
+    const MAX_CHARS: usize = 50;
+    let char_count = command.chars().count();
+    if char_count <= MAX_CHARS {
         command.to_string()
     } else {
-        format!("{}...", &command[..MAX_LEN - 3])
+        // Find the byte index at the (MAX_CHARS - 3)th character
+        let truncate_at = MAX_CHARS - 3;
+        let byte_idx = command
+            .char_indices()
+            .nth(truncate_at)
+            .map(|(i, _)| i)
+            .unwrap_or(command.len());
+        format!("{}...", &command[..byte_idx])
     }
 }
 
