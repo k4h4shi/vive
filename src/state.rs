@@ -261,6 +261,10 @@ pub struct AppState {
     preview_scroll_offset: u16,
     /// Total line count in preview content (cached for scroll calculations).
     preview_line_count: usize,
+    /// Cached sidebar width from last render (for mouse click handling).
+    sidebar_width: u16,
+    /// Cached preview visible height from last render (for scroll calculations).
+    preview_visible_height: u16,
 }
 
 impl Default for AppState {
@@ -289,6 +293,8 @@ impl Default for AppState {
             focus_pane: FocusPane::Sidebar,
             preview_scroll_offset: 0,
             preview_line_count: 0,
+            sidebar_width: 0,
+            preview_visible_height: 20, // Default fallback
         }
     }
 }
@@ -665,29 +671,51 @@ impl AppState {
         }
     }
 
+    /// Get the cached sidebar width from last render.
+    pub fn sidebar_width(&self) -> u16 {
+        self.sidebar_width
+    }
+
+    /// Set the sidebar width (called during rendering).
+    pub fn set_sidebar_width(&mut self, width: u16) {
+        self.sidebar_width = width;
+    }
+
+    /// Get the cached preview visible height from last render.
+    pub fn preview_visible_height(&self) -> u16 {
+        self.preview_visible_height
+    }
+
+    /// Set the preview visible height (called during rendering).
+    pub fn set_preview_visible_height(&mut self, height: u16) {
+        self.preview_visible_height = height;
+    }
+
     /// Scroll the preview up by one line.
     pub fn scroll_preview_up(&mut self) {
         self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(1);
     }
 
     /// Scroll the preview down by one line.
-    pub fn scroll_preview_down(&mut self, visible_height: u16) {
-        let max_scroll = (self.preview_line_count as u16).saturating_sub(visible_height);
+    pub fn scroll_preview_down(&mut self) {
+        let max_scroll =
+            (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
         if self.preview_scroll_offset < max_scroll {
             self.preview_scroll_offset += 1;
         }
     }
 
     /// Scroll the preview up by a half page.
-    pub fn scroll_preview_page_up(&mut self, visible_height: u16) {
-        let scroll_amount = visible_height / 2;
+    pub fn scroll_preview_page_up(&mut self) {
+        let scroll_amount = self.preview_visible_height / 2;
         self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(scroll_amount);
     }
 
     /// Scroll the preview down by a half page.
-    pub fn scroll_preview_page_down(&mut self, visible_height: u16) {
-        let scroll_amount = visible_height / 2;
-        let max_scroll = (self.preview_line_count as u16).saturating_sub(visible_height);
+    pub fn scroll_preview_page_down(&mut self) {
+        let scroll_amount = self.preview_visible_height / 2;
+        let max_scroll =
+            (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
         self.preview_scroll_offset = (self.preview_scroll_offset + scroll_amount).min(max_scroll);
     }
 
@@ -2935,12 +2963,13 @@ mod tests {
     fn test_set_preview_line_count_clamps_scroll_offset() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         // Manually set scroll offset to a high value
-        state.scroll_preview_down(20);
-        state.scroll_preview_down(20);
-        state.scroll_preview_down(20);
-        state.scroll_preview_down(20);
+        state.scroll_preview_down();
+        state.scroll_preview_down();
+        state.scroll_preview_down();
+        state.scroll_preview_down();
 
         // Now reduce line count - scroll offset should be clamped
         state.set_preview_line_count(10);
@@ -2951,10 +2980,11 @@ mod tests {
     fn test_scroll_preview_up() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         // Manually set scroll offset to 10
         for _ in 0..10 {
-            state.scroll_preview_down(20);
+            state.scroll_preview_down();
         }
         let initial_offset = state.preview_scroll_offset();
 
@@ -2969,6 +2999,7 @@ mod tests {
     fn test_scroll_preview_up_at_top() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         // Should not go below 0
         state.scroll_preview_up();
@@ -2979,8 +3010,9 @@ mod tests {
     fn test_scroll_preview_down() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
-        state.scroll_preview_down(20);
+        state.scroll_preview_down();
         assert_eq!(state.preview_scroll_offset(), 1);
     }
 
@@ -2988,11 +3020,11 @@ mod tests {
     fn test_scroll_preview_down_at_bottom() {
         let mut state = AppState::new();
         state.set_preview_line_count(30);
-        let visible_height = 20;
+        state.set_preview_visible_height(20);
 
         // Scroll to max (30 - 20 = 10)
         for _ in 0..15 {
-            state.scroll_preview_down(visible_height);
+            state.scroll_preview_down();
         }
 
         // Should not exceed max scroll
@@ -3003,15 +3035,15 @@ mod tests {
     fn test_scroll_preview_page_up() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
-        let visible_height = 20;
+        state.set_preview_visible_height(20);
 
         // Scroll down first
         for _ in 0..20 {
-            state.scroll_preview_down(visible_height);
+            state.scroll_preview_down();
         }
 
         let offset_before = state.preview_scroll_offset();
-        state.scroll_preview_page_up(visible_height);
+        state.scroll_preview_page_up();
 
         // Should scroll up by half a page (10 lines)
         assert_eq!(
@@ -3024,9 +3056,9 @@ mod tests {
     fn test_scroll_preview_page_down() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
-        let visible_height = 20;
+        state.set_preview_visible_height(20);
 
-        state.scroll_preview_page_down(visible_height);
+        state.scroll_preview_page_down();
 
         // Should scroll down by half a page (10 lines)
         assert_eq!(state.preview_scroll_offset(), 10);
@@ -3036,6 +3068,7 @@ mod tests {
     fn test_reset_preview_scroll() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         // Reset to bottom (u16::MAX, will be clamped during render)
         state.reset_preview_scroll();
@@ -3046,10 +3079,11 @@ mod tests {
     fn test_reset_preview_scroll_to_top() {
         let mut state = AppState::new();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         // Scroll down first
-        state.scroll_preview_down(20);
-        state.scroll_preview_down(20);
+        state.scroll_preview_down();
+        state.scroll_preview_down();
 
         // Reset to top
         state.reset_preview_scroll_to_top();

@@ -59,35 +59,21 @@ pub fn handle_key_event(key: KeyEvent, state: &mut AppState) -> Action {
 /// Handle a mouse event by updating the application state.
 /// Returns an Action that the main loop should perform.
 ///
-/// The `sidebar_width` parameter is the width of the sidebar in columns,
-/// used to determine which pane was clicked.
+/// Uses the cached sidebar_width and preview_visible_height from state
+/// (set during rendering) for layout-aware mouse handling.
 pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
-    handle_mouse_event_with_layout(mouse, state, None, None)
-}
-
-/// Handle a mouse event with layout information.
-/// - `sidebar_width`: width of sidebar pane (for click detection)
-/// - `preview_visible_height`: visible height of preview area (for scroll calculations)
-pub fn handle_mouse_event_with_layout(
-    mouse: MouseEvent,
-    state: &mut AppState,
-    sidebar_width: Option<u16>,
-    preview_visible_height: Option<u16>,
-) -> Action {
     // Ignore mouse events when modal is open or in input mode
     if state.modal.is_some() || state.focus_mode == FocusMode::Input {
         return Action::None;
     }
 
-    // Default visible height for scroll calculations
-    let visible_height = preview_visible_height.unwrap_or(20);
-
     match mouse.kind {
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-            // Click to switch focus between panes
-            if let Some(width) = sidebar_width {
+            // Click to switch focus between panes using cached sidebar_width
+            let sidebar_width = state.sidebar_width();
+            if sidebar_width > 0 {
                 state.clear_status_message();
-                if mouse.column < width {
+                if mouse.column < sidebar_width {
                     state.focus_sidebar();
                 } else {
                     state.focus_preview();
@@ -109,7 +95,7 @@ pub fn handle_mouse_event_with_layout(
                     Action::RefreshPreview
                 }
                 FocusPane::Preview => {
-                    state.scroll_preview_down(visible_height);
+                    state.scroll_preview_down();
                     Action::None
                 }
             }
@@ -251,15 +237,13 @@ fn handle_sidebar_key_event(key: KeyEvent, state: &mut AppState) -> Action {
 }
 
 /// Handle key events when preview pane is focused.
+/// Scroll calculations use the cached preview_visible_height from state.
 fn handle_preview_key_event(key: KeyEvent, state: &mut AppState) -> Action {
-    // Default visible height for scroll calculations (will be adjusted by UI)
-    const DEFAULT_VISIBLE_HEIGHT: u16 = 20;
-
     match key.code {
         // j/k scroll the preview content (1 line at a time)
         KeyCode::Char('j') | KeyCode::Down => {
             state.clear_status_message();
-            state.scroll_preview_down(DEFAULT_VISIBLE_HEIGHT);
+            state.scroll_preview_down();
             Action::None
         }
         KeyCode::Char('k') | KeyCode::Up => {
@@ -271,12 +255,12 @@ fn handle_preview_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         // Ctrl-d/Ctrl-u for half-page scroll
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.clear_status_message();
-            state.scroll_preview_page_down(DEFAULT_VISIBLE_HEIGHT);
+            state.scroll_preview_page_down();
             Action::None
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.clear_status_message();
-            state.scroll_preview_page_up(DEFAULT_VISIBLE_HEIGHT);
+            state.scroll_preview_page_up();
             Action::None
         }
 
@@ -1195,7 +1179,8 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
-        state.scroll_preview_down(20); // Move down first
+        state.set_preview_visible_height(20);
+        state.scroll_preview_down(); // Move down first
         let initial_offset = state.preview_scroll_offset();
 
         let action = handle_key_event(key_event(KeyCode::Char('k')), &mut state);
@@ -1211,13 +1196,14 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         let action = handle_key_event(
             key_event_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL),
             &mut state,
         );
         assert_eq!(action, Action::None);
-        // Should scroll by half a page (default 10 lines)
+        // Should scroll by half a page (10 lines)
         assert!(state.preview_scroll_offset() > 0);
     }
 
@@ -1226,9 +1212,10 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
         // Scroll down first
         for _ in 0..20 {
-            state.scroll_preview_down(20);
+            state.scroll_preview_down();
         }
         let initial_offset = state.preview_scroll_offset();
 
@@ -1245,7 +1232,8 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
-        state.scroll_preview_down(20); // Move down first
+        state.set_preview_visible_height(20);
+        state.scroll_preview_down(); // Move down first
 
         let action = handle_key_event(key_event(KeyCode::Char('g')), &mut state);
         assert_eq!(action, Action::None);
@@ -1257,6 +1245,7 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
 
         let action = handle_key_event(key_event(KeyCode::Char('G')), &mut state);
         assert_eq!(action, Action::None);
@@ -1290,6 +1279,7 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
+        state.set_preview_visible_height(20);
         let initial_offset = state.preview_scroll_offset();
 
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
@@ -1314,7 +1304,8 @@ mod tests {
         let mut state = create_test_state_with_projects();
         state.focus_preview();
         state.set_preview_line_count(100);
-        state.scroll_preview_down(20); // Move down first
+        state.set_preview_visible_height(20);
+        state.scroll_preview_down(); // Move down first
         let initial_offset = state.preview_scroll_offset();
 
         let action = handle_mouse_event(mouse_scroll_up(), &mut state);

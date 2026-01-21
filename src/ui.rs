@@ -77,6 +77,9 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     ])
     .split(area);
 
+    // Cache layout info in state for mouse event handling
+    state.set_sidebar_width(content_chunks[0].width);
+
     render_sidebar(frame, content_chunks[0], state);
     render_preview(frame, content_chunks[1], state);
 }
@@ -306,7 +309,12 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
 
     // Calculate scroll offset
     // Account for borders (2 lines) when calculating visible height
-    let visible_height = area.height.saturating_sub(2) as usize;
+    let visible_height = area.height.saturating_sub(2);
+
+    // Cache visible height in state for scroll calculations in event handling
+    state.set_preview_visible_height(visible_height);
+
+    let visible_height = visible_height as usize;
 
     // When sidebar is focused, auto-scroll to bottom (show most recent content)
     // When preview is focused, use user's scroll offset
