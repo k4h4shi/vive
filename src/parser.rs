@@ -41,6 +41,15 @@ pub struct Subagent {
     pub description: Option<String>,
 }
 
+// Issue #65: Pattern to strip ANSI escape codes for accurate pattern matching
+static ANSI_ESCAPE_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07").unwrap());
+
+/// Strip ANSI escape codes from text for pattern matching.
+fn strip_ansi(text: &str) -> String {
+    ANSI_ESCAPE_PATTERN.replace_all(text, "").to_string()
+}
+
 // Lazy-initialized regex patterns
 static FILE_EDIT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(Edit|Write|Modify)\s+.*?\?|Do you want to (edit|write|modify)|Allow.*?edit")
@@ -92,10 +101,10 @@ static COMPLETION_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(r"[{SPINNER_CHARS}]\s+\w+(?:ed|éed)\s+for\s+\d+[msh]\s*\d*[msh]?")).unwrap()
 });
 
-// Issue #65: Active working pattern - verb ending with "…" or "..."
-static ACTIVE_WORKING_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(&format!(r"[{SPINNER_CHARS}]\s+\w+(?:ing)?(?:…|\.{{3}})")).unwrap()
-});
+// Issue #65: Active working pattern - "esc to interrupt" indicates Claude Code is working
+// This is more reliable than matching spinner + "…" which can have false positives
+static ACTIVE_WORKING_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)esc to interrupt").unwrap());
 
 // Issue #65: Prompt detection patterns
 static PROMPT_PATTERN: Lazy<Regex> =
@@ -122,6 +131,10 @@ fn get_tail_lines(content: &str, n: usize) -> String {
 
 /// Parse terminal content and return the detected status.
 pub fn parse_status(content: &str) -> ParsedStatus {
+    // Issue #65: Strip ANSI escape codes for accurate pattern matching.
+    // Terminal output contains color codes like [38;2;153;153;153m that interfere with regex.
+    let content = &strip_ansi(content);
+
     // Issue #57: Only check the last N lines for approval prompts
     // to prevent stale prompts from causing incorrect Waiting status
     let tail_for_approval = get_tail_lines(content, APPROVAL_DETECTION_LINES);
@@ -754,19 +767,18 @@ mod tests {
         }
     }
 
-    /// Issue #65: Active working patterns (verb + "…") should be Working
-    /// Covers: Percolating, Forging, and other active verbs
+    /// Issue #65: Active working patterns - "esc to interrupt" indicates Working
     #[test]
     fn test_issue65_active_working_patterns() {
         let cases = [
-            ("✳ Percolating… (ctrl+c to interrupt)", "Percolating"),
-            ("✽ Forging… (esc to interrupt)", "Forging"),
-            ("✻ Thinking…", "Thinking"),
+            ("✳ Percolating… (esc to interrupt)", "Percolating"),
+            ("✽ Forging… (esc to interrupt · ctrl+t to show todos)", "Forging"),
+            ("✻ Checking E2E test failures… (esc to interrupt · ctrl+t to show todos · 3m 32s · ↓ 3.0k tokens)", "Checking"),
         ];
-        for (content, verb) in cases {
+        for (content, desc) in cases {
             match parse_status(content) {
                 ParsedStatus::Working { .. } => {}
-                other => panic!("Active working pattern '{verb}' should be Working, got {other:?}"),
+                other => panic!("Active working with '{desc}' should be Working, got {other:?}"),
             }
         }
     }
@@ -1046,5 +1058,33 @@ mod tests {
             ParsedStatus::Idle,
             "Issue-140 completed (Crunched) state should be Idle"
         );
+    }
+
+    /// Test: ANSI escape codes are stripped before pattern matching (Issue #65)
+    #[test]
+    fn test_issue65_ansi_codes_stripped() {
+        // Real capture from tmux with ANSI color codes (using \x1b escape character)
+        let content_with_ansi = "\
+\x1b[38;2;153;153;153m✻\x1b[39m \x1b[38;2;153;153;153mBrewed for 2m 8s\x1b[39m
+
+\x1b[2m\x1b[38;2;136;136;136m────────────────────────────────────────────────────────────────
+\x1b[0m❯ \x1b[7m \x1b[0m
+\x1b[2m\x1b[38;2;136;136;136m────────────────────────────────────────────────────────────────
+\x1b[0m  \x1b[38;2;175;135;255m⏵⏵ accept edits on\x1b[38;2;153;153;153m (shift+tab to cycle)\x1b[39m
+";
+        // Should be detected as Idle because "✻ Brewed for 2m 8s" is completion pattern
+        assert_eq!(
+            parse_status(content_with_ansi),
+            ParsedStatus::Idle,
+            "Content with ANSI codes should be detected as Idle (Brewed completion pattern)"
+        );
+    }
+
+    /// Test: strip_ansi function works correctly
+    #[test]
+    fn test_strip_ansi() {
+        let input = "\x1b[38;2;153;153;153m✻\x1b[39m \x1b[38;2;153;153;153mBrewed for 2m 8s\x1b[39m";
+        let expected = "✻ Brewed for 2m 8s";
+        assert_eq!(strip_ansi(input), expected);
     }
 }
