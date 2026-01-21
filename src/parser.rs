@@ -41,6 +41,15 @@ pub struct Subagent {
     pub description: Option<String>,
 }
 
+// Issue #65: Pattern to strip ANSI escape codes for accurate pattern matching
+static ANSI_ESCAPE_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07").unwrap());
+
+/// Strip ANSI escape codes from text for pattern matching.
+fn strip_ansi(text: &str) -> String {
+    ANSI_ESCAPE_PATTERN.replace_all(text, "").to_string()
+}
+
 // Lazy-initialized regex patterns
 static FILE_EDIT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(Edit|Write|Modify)\s+.*?\?|Do you want to (edit|write|modify)|Allow.*?edit")
@@ -65,11 +74,45 @@ static COMMAND_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)(?:command|run)[:\s]+`([^`]+)`|```(?:bash|sh)?\n([^`]+)```").unwrap()
 });
 
-static SPINNER_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏▶►]").unwrap());
+// Issue #65: Unified spinner character set used across all spinner-related patterns
+const SPINNER_CHARS: &str = "⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏▶►✳✻✽✶✢";
 
+// Legacy spinner pattern for basic spinner detection
+static SPINNER_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(&format!("[{SPINNER_CHARS}]")).unwrap());
+
+// Subagent pattern uses subset of spinner chars (braille spinners only)
 static SUBAGENT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?m)[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏]\s*(?:Task|Agent)\s*(?:\([^)]*subagent_type\s*[:=]\s*["']?(\w[\w-]*)["']?\)|(\w+))"#).unwrap()
 });
+
+// Issue #65: Approval prompt patterns
+static PROCEED_PROMPT_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)Do you want to proceed\?").unwrap());
+
+static NUMBERED_SELECTION_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)^\s*❯?\s*[123]\.\s*(Yes|No)").unwrap());
+
+static ESC_TO_CANCEL_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"Esc to cancel").unwrap());
+
+// Issue #65: Completion pattern - past tense verb + time (e.g., "✻ Churned for 2m 20s")
+static COMPLETION_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(
+        r"[{SPINNER_CHARS}]\s+\w+(?:ed|éed)\s+for\s+\d+[msh]\s*\d*[msh]?"
+    ))
+    .unwrap()
+});
+
+// Issue #65: Active working pattern - "esc to interrupt" indicates Claude Code is working
+// This is more reliable than matching spinner + "…" which can have false positives
+static ACTIVE_WORKING_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)esc to interrupt").unwrap());
+
+// Issue #65: Prompt detection patterns
+static PROMPT_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^❯\s*(?:/\w+.*)?$").unwrap());
+
+static UI_HINT_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)^❯\s+(?:Press up to edit|[123]\.\s*(?:Yes|No))").unwrap());
 
 /// Number of lines from the end to check for approval prompts.
 /// Issue #57: Limit approval detection to recent output to prevent
@@ -88,11 +131,27 @@ fn get_tail_lines(content: &str, n: usize) -> String {
 
 /// Parse terminal content and return the detected status.
 pub fn parse_status(content: &str) -> ParsedStatus {
+    // Issue #65: Strip ANSI escape codes for accurate pattern matching.
+    // Terminal output contains color codes like [38;2;153;153;153m that interfere with regex.
+    let content = &strip_ansi(content);
+
     // Issue #57: Only check the last N lines for approval prompts
     // to prevent stale prompts from causing incorrect Waiting status
     let tail_for_approval = get_tail_lines(content, APPROVAL_DETECTION_LINES);
 
-    // Check for approval prompts first (highest priority)
+    // Issue #65: Check for "Do you want to proceed?" with numbered selection (highest priority)
+    // This catches Bash command approval prompts like:
+    //   Do you want to proceed?
+    //   ❯ 1. Yes
+    //     2. Yes, and don't ask again
+    //     3. No
+    if detect_proceed_prompt(&tail_for_approval) {
+        return ParsedStatus::WaitingApproval {
+            approval_type: ApprovalType::ShellCommand { command: None },
+        };
+    }
+
+    // Check for approval prompts (file edit, create, shell command)
     if let Some(approval) = detect_approval(&tail_for_approval) {
         return ParsedStatus::WaitingApproval {
             approval_type: approval,
@@ -106,8 +165,31 @@ pub fn parse_status(content: &str) -> ParsedStatus {
         };
     }
 
-    // Check for spinner/working state in recent output
+    // Issue #65: Check for active working pattern ("esc to interrupt") FIRST
+    // This is the most reliable indicator that Claude Code is actively working
     let tail_for_working = get_tail_lines(content, WORKING_DETECTION_LINES);
+    if detect_active_working(&tail_for_working) {
+        return ParsedStatus::Working {
+            task: Some("Working".to_string()),
+        };
+    }
+
+    // Issue #65: Check for idle prompt BEFORE legacy spinner detection
+    // If there's a clear command prompt (❯), the agent is waiting for input
+    // This prevents false Working detection from stale spinner characters
+    let tail_for_prompt = get_tail_lines(content, 10);
+    if detect_idle_prompt(&tail_for_prompt) {
+        return ParsedStatus::Idle;
+    }
+
+    // Issue #65: Check for completion pattern (past tense + time)
+    // e.g., "✻ Churned for 2m 20s" indicates task is complete
+    if detect_completion_pattern(&tail_for_approval) {
+        return ParsedStatus::Idle;
+    }
+
+    // Check for spinner/working state in recent output (legacy detection)
+    // Note: This is low-confidence detection, only used if no idle prompt visible
     if let Some(task) = detect_working(&tail_for_working) {
         return ParsedStatus::Working { task: Some(task) };
     }
@@ -189,7 +271,13 @@ fn detect_button_ui(content: &str) -> bool {
 }
 
 /// Detect working/spinner state.
+/// Issue #65: Excludes completion patterns (past tense + time) to avoid
+/// misclassifying completed tasks as working.
 fn detect_working(content: &str) -> Option<String> {
+    // Don't match completion patterns (e.g., "✻ Churned for 2m 20s")
+    if COMPLETION_PATTERN.is_match(content) {
+        return None;
+    }
     if SPINNER_PATTERN.is_match(content) {
         // Try to extract task name from subagent pattern
         if let Some(caps) = SUBAGENT_PATTERN.captures(content) {
@@ -202,6 +290,63 @@ fn detect_working(content: &str) -> Option<String> {
         return Some("Working".to_string());
     }
     None
+}
+
+// =========================================================================
+// Issue #65: New detection functions for improved accuracy
+// =========================================================================
+
+/// Issue #65: Detect "Do you want to proceed?" with numbered selection.
+/// This catches Claude Code's Bash command approval prompts.
+fn detect_proceed_prompt(content: &str) -> bool {
+    // Must have "Do you want to proceed?" AND (numbered selection OR "Esc to cancel")
+    // "Esc to cancel" appears in all Claude Code approval prompts
+    PROCEED_PROMPT_PATTERN.is_match(content)
+        && (NUMBERED_SELECTION_PATTERN.is_match(content) || ESC_TO_CANCEL_PATTERN.is_match(content))
+}
+
+/// Issue #65: Detect completion pattern (past tense + time).
+/// e.g., "✻ Churned for 2m 20s", "✻ Sautéed for 4m 25s"
+fn detect_completion_pattern(content: &str) -> bool {
+    COMPLETION_PATTERN.is_match(content)
+}
+
+/// Issue #65: Detect active working pattern (verb + "…").
+/// e.g., "✳ Percolating…", "✻ Collecting data…"
+fn detect_active_working(content: &str) -> bool {
+    ACTIVE_WORKING_PATTERN.is_match(content)
+}
+
+/// Issue #65: Detect idle prompt (❯ at end of content, not UI hint).
+/// Returns true if there's an idle command prompt waiting for input.
+fn detect_idle_prompt(content: &str) -> bool {
+    // Check if there's a prompt pattern
+    if !PROMPT_PATTERN.is_match(content) {
+        return false;
+    }
+
+    // Make sure it's not a UI hint (e.g., "❯ Press up to edit", "❯ 1. Yes")
+    if UI_HINT_PATTERN.is_match(content) {
+        return false;
+    }
+
+    // Check that the prompt is at or near the end of content
+    let lines: Vec<&str> = content.lines().collect();
+    for line in lines.iter().rev().take(5) {
+        let trimmed = line.trim();
+        if trimmed.starts_with('❯') {
+            // It's a prompt and not a UI hint
+            return !UI_HINT_PATTERN.is_match(trimmed);
+        }
+        // Skip empty lines and separator lines
+        if !trimmed.is_empty() && !trimmed.chars().all(|c| c == '─' || c == '-') {
+            // Found non-empty, non-separator line that's not a prompt
+            // Keep checking in case prompt is a few lines up
+            continue;
+        }
+    }
+
+    false
 }
 
 /// Extract file path from content.
@@ -600,5 +745,362 @@ mod tests {
             ParsedStatus::Working { .. } => {}
             other => panic!("Expected Working status with spinner, got {other:?}"),
         }
+    }
+
+    // =========================================================================
+    // Issue #65: Improved Agent State Detection Tests
+    // =========================================================================
+
+    /// Issue #65: Completion patterns (past tense + time) should be Idle
+    /// Covers: Churned, Sautéed, Crunched, and other past tense verbs
+    #[test]
+    fn test_issue65_completion_patterns() {
+        let cases = [
+            ("✻ Churned for 2m 20s\n❯", "Churned"),
+            ("✻ Sautéed for 4m 25s\n❯ /cleanup", "Sautéed"),
+            ("✻ Crunched for 2m 8s\n❯", "Crunched"),
+            ("✳ Brewed for 1m 30s\n❯", "Brewed"),
+        ];
+        for (content, verb) in cases {
+            assert_eq!(
+                parse_status(content),
+                ParsedStatus::Idle,
+                "Completion pattern '{verb}' should be Idle"
+            );
+        }
+    }
+
+    /// Issue #65: Active working patterns - "esc to interrupt" indicates Working
+    #[test]
+    fn test_issue65_active_working_patterns() {
+        let cases = [
+            ("✳ Percolating… (esc to interrupt)", "Percolating"),
+            (
+                "✽ Forging… (esc to interrupt · ctrl+t to show todos)",
+                "Forging",
+            ),
+            (
+                "✻ Checking E2E test failures… (esc to interrupt · ctrl+t to show todos · 3m 32s · ↓ 3.0k tokens)",
+                "Checking",
+            ),
+        ];
+        for (content, desc) in cases {
+            match parse_status(content) {
+                ParsedStatus::Working { .. } => {}
+                other => panic!("Active working with '{desc}' should be Working, got {other:?}"),
+            }
+        }
+    }
+
+    /// Issue #65: Prompt patterns (❯) should be Idle
+    #[test]
+    fn test_issue65_prompt_patterns() {
+        let cases = [
+            (
+                "───────────────────────────\n❯\n───────────────────────────",
+                "empty prompt",
+            ),
+            (
+                "───────────────────────────\n❯ /fix\n───────────────────────────",
+                "command prompt",
+            ),
+            ("❯ push して PR 作って", "Japanese command"),
+        ];
+        for (content, desc) in cases {
+            assert_eq!(
+                parse_status(content),
+                ParsedStatus::Idle,
+                "Prompt pattern '{desc}' should be Idle"
+            );
+        }
+    }
+
+    /// Issue #65: UI hints should NOT be treated as idle prompts
+    #[test]
+    fn test_issue65_ui_hints_not_idle() {
+        let content = "✳ Percolating… (ctrl+c to interrupt)\n\n❯ Press up to edit queued messages";
+        match parse_status(content) {
+            ParsedStatus::Working { .. } => {}
+            other => panic!("UI hint with active spinner should be Working, got {other:?}"),
+        }
+    }
+
+    /// Issue #65: Approval patterns should be WaitingApproval
+    #[test]
+    fn test_issue65_approval_patterns() {
+        let content = r#"
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again
+   3. No
+
+ Esc to cancel
+"#;
+        match parse_status(content) {
+            ParsedStatus::WaitingApproval { .. } => {}
+            other => panic!("Approval pattern should be WaitingApproval, got {other:?}"),
+        }
+    }
+
+    // =========================================================================
+    // Issue #65: Real Case Tests (from actual tmux captures)
+    // =========================================================================
+
+    /// Issue #65: Real case - issue-43 completed state
+    #[test]
+    fn test_issue65_real_case_issue43_completed() {
+        let content = r#"
+⏺ Implementation Complete
+  This is a summary of what was done.
+
+✻ Sautéed for 4m 25s
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /cleanup                                                                                                   ↵ send
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+"#;
+        // This should be Idle because:
+        // 1. "Sautéed for 4m 25s" is completion pattern (past tense)
+        // 2. "❯ /cleanup" is a command prompt (not a UI hint)
+        assert_eq!(
+            parse_status(content),
+            ParsedStatus::Idle,
+            "Issue-43 completed state should be Idle"
+        );
+    }
+
+    /// Issue #65: Real case - issue-50 prompt waiting
+    #[test]
+    fn test_issue65_real_case_issue50_prompt_waiting() {
+        let content = r#"
+⏺ Geminiによるコードレビューが完了しました。
+  Review summary here...
+
+❯
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+"#;
+        assert_eq!(
+            parse_status(content),
+            ParsedStatus::Idle,
+            "Issue-50 prompt waiting should be Idle"
+        );
+    }
+
+    /// Issue #65: Real case - issue-127 working
+    #[test]
+    fn test_issue65_real_case_issue127_working() {
+        let content = r#"
+✳ Percolating… (ctrl+c to interrupt · 1m 59s · ↑ 4.1k tokens · thought for 3s)
+
+❯ Press up to edit queued messages
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+"#;
+        match parse_status(content) {
+            ParsedStatus::Working { .. } => {}
+            other => panic!("Issue-127 working state should be Working, got {other:?}"),
+        }
+    }
+
+    /// Issue #65: Real case - Bash approval waiting
+    #[test]
+    fn test_issue65_real_case_bash_approval() {
+        let content = r#"
+⏺ Bash(npm test 2>&1 | tail -50) timeout: 3m 0s
+  ⎿  Running…
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   npm test 2>&1 | tail -50
+   Run unit tests
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for npm test commands
+   3. No
+
+ Esc to cancel · Tab to add additional instructions
+"#;
+        match parse_status(content) {
+            ParsedStatus::WaitingApproval { .. } => {}
+            other => panic!("Bash approval should be WaitingApproval, got {other:?}"),
+        }
+    }
+
+    /// Issue #65: Real case - git commit approval waiting (issue-140)
+    #[test]
+    fn test_issue65_real_case_git_commit_approval() {
+        let content = r#"
+⏺ Bash(git add -A && git commit -m "feat(schema): update Customer and Vehicle models per meeting notes…)
+  ⎿  Running…
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   git add -A && git commit -m "feat(schema): update Customer and Vehicle models per meeting notes
+
+   Issue #140: Update Prisma schema based on 2026-01-20 meeting notes.
+   ...
+   Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+   Commit all changes with detailed message
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for similar commands in /path/to/project
+   3. No
+
+ Esc to cancel · Tab to add additional instructions
+"#;
+        match parse_status(content) {
+            ParsedStatus::WaitingApproval { .. } => {}
+            other => panic!("Git commit approval should be WaitingApproval, got {other:?}"),
+        }
+    }
+
+    /// Issue #65: Real case - issue-140 working state (git push running)
+    #[test]
+    fn test_issue65_real_case_issue140_working() {
+        let content = r#"
+⏺ Bash(git push -u origin feature/issue-140 2>&1) timeout: 1m 0s
+  ⎿  Running…
+
+✽ Forging… (esc to interrupt · thinking)
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+"#;
+        // This should be Working because:
+        // "✽ Forging…" is active working pattern (verb + "…")
+        match parse_status(content) {
+            ParsedStatus::Working { .. } => {}
+            other => panic!("Issue-140 working state should be Working, got {other:?}"),
+        }
+    }
+
+    /// Issue #65: Real case - issue-140 completed state (commit done, prompt waiting)
+    #[test]
+    fn test_issue65_real_case_issue140_completed() {
+        let content = r#"
+⏺ Bash(git add -A && git commit -m "feat(schema): update Customer and Vehicle models per meeting notes…)
+  ⎿  [feature/issue-140 f4f4d70] feat(schema): update Customer and Vehicle models per meeting notes
+      31 files changed, 868 insertions(+), 381 deletions(-)
+      create mode 100644 web/prisma/migrations/20260121010000_update_customer_vehicle_schema/migration.sql
+
+⏺ Issue #140 の実装が完了しました。
+
+  完了した変更
+  - Prisma スキーマの更新
+  - マイグレーション
+  - コード更新
+
+✻ Sautéed for 6m 18s
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ push して PR 作って
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
+"#;
+        // This should be Idle because:
+        // 1. "Sautéed for 6m 18s" is completion pattern (past tense)
+        // 2. "❯ push して PR 作って" is a command prompt (user input waiting)
+        assert_eq!(
+            parse_status(content),
+            ParsedStatus::Idle,
+            "Issue-140 completed state should be Idle"
+        );
+    }
+
+    /// Issue #65: Real case - issue-140 gh pr view approval waiting
+    #[test]
+    fn test_issue65_real_case_issue140_gh_approval() {
+        let content = r#"
+✻ Crunched for 2m 57s
+
+❯ ではPRを取得してください。
+
+⏺ Bash(gh pr view 145 --json title,body,state,reviews,comments)
+  ⎿  Running…
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   gh pr view 145 --json title,body,state,reviews,comments
+   Get PR #145 details including reviews
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for gh pr view commands in /path/to/project
+   3. No
+
+ Esc to cancel · Tab to add additional instructions
+"#;
+        // This should be WaitingApproval because:
+        // "Do you want to proceed?" + numbered selection (❯ 1. Yes, 2. Yes..., 3. No)
+        match parse_status(content) {
+            ParsedStatus::WaitingApproval { .. } => {}
+            other => panic!("gh pr view approval should be WaitingApproval, got {other:?}"),
+        }
+    }
+
+    /// Issue #65: Real case - issue-140 completed after PR review (Crunched pattern)
+    #[test]
+    fn test_issue65_real_case_issue140_completed_crunched() {
+        let content = r#"
+⏺ Gemini がレビューを完了し、PR #145 にコメントを投稿しました。
+
+  PR URL: https://github.com/k4h4shi/mechanix/pull/145
+
+⏺ Ran 1 stop hook
+  ⎿  Documentation has not been fully updated...
+  ⎿  Stop hook error: Prompt hook condition was not met...
+
+✻ Crunched for 2m 57s
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle) · 1 file +0 -0
+"#;
+        // This should be Idle because:
+        // 1. "Crunched for 2m 57s" is completion pattern (past tense)
+        // 2. "❯" is an empty prompt (user input waiting)
+        assert_eq!(
+            parse_status(content),
+            ParsedStatus::Idle,
+            "Issue-140 completed (Crunched) state should be Idle"
+        );
+    }
+
+    /// Test: ANSI escape codes are stripped before pattern matching (Issue #65)
+    #[test]
+    fn test_issue65_ansi_codes_stripped() {
+        // Real capture from tmux with ANSI color codes (using \x1b escape character)
+        let content_with_ansi = "\
+\x1b[38;2;153;153;153m✻\x1b[39m \x1b[38;2;153;153;153mBrewed for 2m 8s\x1b[39m
+
+\x1b[2m\x1b[38;2;136;136;136m────────────────────────────────────────────────────────────────
+\x1b[0m❯ \x1b[7m \x1b[0m
+\x1b[2m\x1b[38;2;136;136;136m────────────────────────────────────────────────────────────────
+\x1b[0m  \x1b[38;2;175;135;255m⏵⏵ accept edits on\x1b[38;2;153;153;153m (shift+tab to cycle)\x1b[39m
+";
+        // Should be detected as Idle because "✻ Brewed for 2m 8s" is completion pattern
+        assert_eq!(
+            parse_status(content_with_ansi),
+            ParsedStatus::Idle,
+            "Content with ANSI codes should be detected as Idle (Brewed completion pattern)"
+        );
+    }
+
+    /// Test: strip_ansi function works correctly
+    #[test]
+    fn test_strip_ansi() {
+        let input =
+            "\x1b[38;2;153;153;153m✻\x1b[39m \x1b[38;2;153;153;153mBrewed for 2m 8s\x1b[39m";
+        let expected = "✻ Brewed for 2m 8s";
+        assert_eq!(strip_ansi(input), expected);
     }
 }

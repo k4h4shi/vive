@@ -1171,7 +1171,7 @@ mod tests {
         let initial_offset = state.preview_scroll_offset();
         let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
         assert_eq!(action, Action::None);
-        assert_eq!(state.preview_scroll_offset(), initial_offset + 1);
+        assert_eq!(state.preview_scroll_offset(), initial_offset + 5); // Scrolls 5 lines
     }
 
     #[test]
@@ -1180,14 +1180,14 @@ mod tests {
         state.focus_preview();
         state.set_preview_line_count(100);
         state.set_preview_visible_height(20);
-        state.scroll_preview_down(); // Move down first
+        state.scroll_preview_down(); // Move down first (+5)
         let initial_offset = state.preview_scroll_offset();
 
         let action = handle_key_event(key_event(KeyCode::Char('k')), &mut state);
         assert_eq!(action, Action::None);
         assert_eq!(
             state.preview_scroll_offset(),
-            initial_offset.saturating_sub(1)
+            initial_offset.saturating_sub(5) // Scrolls 5 lines
         );
     }
 
@@ -1284,7 +1284,7 @@ mod tests {
 
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
         assert_eq!(action, Action::None);
-        assert_eq!(state.preview_scroll_offset(), initial_offset + 1);
+        assert_eq!(state.preview_scroll_offset(), initial_offset + 5); // Scrolls 5 lines
     }
 
     #[test]
@@ -1305,14 +1305,14 @@ mod tests {
         state.focus_preview();
         state.set_preview_line_count(100);
         state.set_preview_visible_height(20);
-        state.scroll_preview_down(); // Move down first
+        state.scroll_preview_down(); // Move down first (+5)
         let initial_offset = state.preview_scroll_offset();
 
         let action = handle_mouse_event(mouse_scroll_up(), &mut state);
         assert_eq!(action, Action::None);
         assert_eq!(
             state.preview_scroll_offset(),
-            initial_offset.saturating_sub(1)
+            initial_offset.saturating_sub(5) // Scrolls 5 lines
         );
     }
 }

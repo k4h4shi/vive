@@ -633,8 +633,14 @@ impl AppState {
     }
 
     /// Focus the preview pane.
+    /// Resets scroll offset to show the bottom (most recent content).
     pub fn focus_preview(&mut self) {
         self.focus_pane = FocusPane::Preview;
+        // Issue #65: Set scroll to bottom when focusing preview.
+        // Use the cached line_count and visible_height from the last render.
+        let max_scroll =
+            (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
+        self.preview_scroll_offset = max_scroll;
     }
 
     /// Toggle focus between sidebar and preview panes.
@@ -691,18 +697,22 @@ impl AppState {
         self.preview_visible_height = height;
     }
 
-    /// Scroll the preview up by one line.
+    /// Scroll the preview up by multiple lines (faster scrolling).
     pub fn scroll_preview_up(&mut self) {
-        self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(1);
+        const SCROLL_LINES: u16 = 5;
+        self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(SCROLL_LINES);
     }
 
-    /// Scroll the preview down by one line.
+    /// Scroll the preview down by multiple lines (faster scrolling).
     pub fn scroll_preview_down(&mut self) {
+        const SCROLL_LINES: u16 = 5;
         let max_scroll =
             (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
-        if self.preview_scroll_offset < max_scroll {
-            self.preview_scroll_offset += 1;
-        }
+        // Use saturating_add to prevent overflow when preview_scroll_offset is u16::MAX (bottom sentinel)
+        self.preview_scroll_offset = self
+            .preview_scroll_offset
+            .saturating_add(SCROLL_LINES)
+            .min(max_scroll);
     }
 
     /// Scroll the preview up by a half page.
@@ -716,7 +726,11 @@ impl AppState {
         let scroll_amount = self.preview_visible_height / 2;
         let max_scroll =
             (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
-        self.preview_scroll_offset = (self.preview_scroll_offset + scroll_amount).min(max_scroll);
+        // Use saturating_add to prevent overflow when preview_scroll_offset is u16::MAX (bottom sentinel)
+        self.preview_scroll_offset = self
+            .preview_scroll_offset
+            .saturating_add(scroll_amount)
+            .min(max_scroll);
     }
 
     /// Reset preview scroll to the bottom (show most recent content).
@@ -2982,16 +2996,15 @@ mod tests {
         state.set_preview_line_count(100);
         state.set_preview_visible_height(20);
 
-        // Manually set scroll offset to 10
-        for _ in 0..10 {
-            state.scroll_preview_down();
-        }
+        // Scroll down first to have room to scroll up
+        state.scroll_preview_down(); // +5
+        state.scroll_preview_down(); // +5 = 10
         let initial_offset = state.preview_scroll_offset();
 
-        state.scroll_preview_up();
+        state.scroll_preview_up(); // -5
         assert_eq!(
             state.preview_scroll_offset(),
-            initial_offset.saturating_sub(1)
+            initial_offset.saturating_sub(5)
         );
     }
 
@@ -3013,7 +3026,7 @@ mod tests {
         state.set_preview_visible_height(20);
 
         state.scroll_preview_down();
-        assert_eq!(state.preview_scroll_offset(), 1);
+        assert_eq!(state.preview_scroll_offset(), 5); // Scrolls 5 lines at a time
     }
 
     #[test]
