@@ -21,6 +21,7 @@
     "ps *",
     "ls *",
     "grep *",
+    "rg *",
     "mkdir *",
     "rm *",
     "cp *",
