@@ -635,6 +635,7 @@ fn render_create_task_method_modal(
     frame.render_widget(modal_widget, modal_area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_issue_picker_modal(
     frame: &mut Frame,
     area: Rect,
