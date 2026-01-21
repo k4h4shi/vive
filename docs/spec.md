@@ -19,6 +19,9 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 - [x] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
     - **Manual**: ブランチ名を手動入力する。
     - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`feature/issue-{番号}` 形式でブランチを自動生成する。
+    - **Auto-Kickstart**: タスク作成後、自動的にClaude Codeを起動してコマンドを送信する（デフォルト有効、Tabキーでトグル可能）。
+        - Manual: `claude --print-architecture` を送信。
+        - Issue Picker: `/fix {issue_number}` を送信してIssueの修正を開始。
 - [ ] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
 - [ ] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
 
@@ -104,6 +107,15 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | `Ctrl-u` | ページアップ | 半ページ分上にスクロール |
 | `g` | 先頭へ移動 | プレビューの先頭にスクロール |
 | `G` (Shift+g) | 末尾へ移動 | プレビューの末尾にスクロール |
+
+#### モーダル表示時（タスク作成）
+
+| キー | 動作 | 備考 |
+| :--- | :--- | :--- |
+| `Tab` | **Auto-Kickstartトグル** | Auto-Kickstartの有効/無効を切り替え |
+| `Enter` | **決定** | 選択を確定 |
+| `Esc` | **キャンセル** | モーダルを閉じる |
+| `j` / `k` または `↓` / `↑` | **選択移動** | リスト内のカーソル移動 |
 
 #### マウス操作
 

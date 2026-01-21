@@ -169,9 +169,16 @@ pub enum ModalType {
     CreateTaskMethod {
         /// Currently selected method.
         selected: CreateTaskMethod,
+        /// Whether to auto-kickstart after worktree creation.
+        auto_kickstart: bool,
     },
     /// Create a new task/worktree with manual input.
-    CreateTask { input: String },
+    CreateTask {
+        /// Branch name input.
+        input: String,
+        /// Whether to auto-kickstart after worktree creation.
+        auto_kickstart: bool,
+    },
     /// Pick from GitHub Issue list.
     IssuePicker {
         /// List of available issues.
@@ -184,6 +191,8 @@ pub enum ModalType {
         error: Option<String>,
         /// Whether we're loading issues.
         loading: bool,
+        /// Whether to auto-kickstart after worktree creation.
+        auto_kickstart: bool,
     },
     /// Confirm deletion of a task/worktree.
     ConfirmDeletion { branch_name: String },
@@ -809,25 +818,58 @@ impl AppState {
     pub fn open_create_task_modal(&mut self) {
         self.modal = Some(ModalType::CreateTaskMethod {
             selected: CreateTaskMethod::Manual,
+            auto_kickstart: true, // Default to enabled
         });
     }
 
     /// Open the manual input modal for creating a task.
+    /// Preserves the auto_kickstart setting from the method selection modal.
     pub fn open_manual_create_task_modal(&mut self) {
+        let auto_kickstart = self.modal_auto_kickstart().unwrap_or(true);
         self.modal = Some(ModalType::CreateTask {
             input: String::new(),
+            auto_kickstart,
         });
     }
 
     /// Open the issue picker modal.
+    /// Preserves the auto_kickstart setting from the method selection modal.
     pub fn open_issue_picker_modal(&mut self) {
+        let auto_kickstart = self.modal_auto_kickstart().unwrap_or(true);
         self.modal = Some(ModalType::IssuePicker {
             issues: Vec::new(),
             selected_idx: 0,
             filter: String::new(),
             error: None,
             loading: true,
+            auto_kickstart,
         });
+    }
+
+    /// Get the current auto_kickstart setting from the modal.
+    pub fn modal_auto_kickstart(&self) -> Option<bool> {
+        match &self.modal {
+            Some(ModalType::CreateTaskMethod { auto_kickstart, .. }) => Some(*auto_kickstart),
+            Some(ModalType::CreateTask { auto_kickstart, .. }) => Some(*auto_kickstart),
+            Some(ModalType::IssuePicker { auto_kickstart, .. }) => Some(*auto_kickstart),
+            _ => None,
+        }
+    }
+
+    /// Toggle the auto_kickstart setting in the current modal.
+    pub fn toggle_modal_auto_kickstart(&mut self) {
+        match &mut self.modal {
+            Some(ModalType::CreateTaskMethod { auto_kickstart, .. }) => {
+                *auto_kickstart = !*auto_kickstart;
+            }
+            Some(ModalType::CreateTask { auto_kickstart, .. }) => {
+                *auto_kickstart = !*auto_kickstart;
+            }
+            Some(ModalType::IssuePicker { auto_kickstart, .. }) => {
+                *auto_kickstart = !*auto_kickstart;
+            }
+            _ => {}
+        }
     }
 
     /// Set the issues for the issue picker modal.
@@ -958,7 +1000,7 @@ impl AppState {
 
     /// Toggle the selected method in the create task method modal.
     pub fn toggle_create_task_method(&mut self) {
-        if let Some(ModalType::CreateTaskMethod { selected }) = &mut self.modal {
+        if let Some(ModalType::CreateTaskMethod { selected, .. }) = &mut self.modal {
             *selected = match selected {
                 CreateTaskMethod::Manual => CreateTaskMethod::PickFromIssue,
                 CreateTaskMethod::PickFromIssue => CreateTaskMethod::Manual,
@@ -969,7 +1011,7 @@ impl AppState {
     /// Get the selected method from the create task method modal.
     pub fn selected_create_task_method(&self) -> Option<CreateTaskMethod> {
         match &self.modal {
-            Some(ModalType::CreateTaskMethod { selected }) => Some(*selected),
+            Some(ModalType::CreateTaskMethod { selected, .. }) => Some(*selected),
             _ => None,
         }
     }
@@ -994,14 +1036,14 @@ impl AppState {
 
     /// Add a character to the modal input.
     pub fn modal_input_char(&mut self, c: char) {
-        if let Some(ModalType::CreateTask { input }) = &mut self.modal {
+        if let Some(ModalType::CreateTask { input, .. }) = &mut self.modal {
             input.push(c);
         }
     }
 
     /// Remove the last character from the modal input.
     pub fn modal_input_backspace(&mut self) {
-        if let Some(ModalType::CreateTask { input }) = &mut self.modal {
+        if let Some(ModalType::CreateTask { input, .. }) = &mut self.modal {
             input.pop();
         }
     }
@@ -1009,7 +1051,7 @@ impl AppState {
     /// Get the current modal input.
     pub fn modal_input(&self) -> Option<&str> {
         match &self.modal {
-            Some(ModalType::CreateTask { input }) => Some(input),
+            Some(ModalType::CreateTask { input, .. }) => Some(input),
             _ => None,
         }
     }
@@ -2463,12 +2505,14 @@ mod tests {
                 filter,
                 error,
                 loading,
+                auto_kickstart,
             }) => {
                 assert!(issues.is_empty());
                 assert_eq!(*selected_idx, 0);
                 assert!(filter.is_empty());
                 assert!(error.is_none());
                 assert!(*loading);
+                assert!(*auto_kickstart); // Default is true
             }
             _ => panic!("Expected IssuePicker modal"),
         }
@@ -3101,5 +3145,106 @@ mod tests {
         // Reset to top
         state.reset_preview_scroll_to_top();
         assert_eq!(state.preview_scroll_offset(), 0);
+    }
+
+    // ========== Auto-Kickstart Tests ==========
+
+    #[test]
+    fn test_create_task_modal_default_auto_kickstart_enabled() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // CreateTaskMethod modal should have auto_kickstart enabled by default
+        match &state.modal {
+            Some(ModalType::CreateTaskMethod { auto_kickstart, .. }) => {
+                assert!(*auto_kickstart);
+            }
+            _ => panic!("Expected CreateTaskMethod modal"),
+        }
+    }
+
+    #[test]
+    fn test_toggle_modal_auto_kickstart_in_method_modal() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Initial state: auto_kickstart is true
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+
+        // Toggle it off
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        // Toggle it back on
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+    }
+
+    #[test]
+    fn test_auto_kickstart_preserved_from_method_to_create_task_modal() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Disable auto_kickstart in method selection modal
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        // Open manual create task modal (should preserve setting)
+        state.open_manual_create_task_modal();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        match &state.modal {
+            Some(ModalType::CreateTask { auto_kickstart, .. }) => {
+                assert!(!*auto_kickstart);
+            }
+            _ => panic!("Expected CreateTask modal"),
+        }
+    }
+
+    #[test]
+    fn test_auto_kickstart_preserved_from_method_to_issue_picker_modal() {
+        let mut state = AppState::new();
+        state.open_create_task_modal();
+
+        // Disable auto_kickstart in method selection modal
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        // Open issue picker modal (should preserve setting)
+        state.open_issue_picker_modal();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+
+        match &state.modal {
+            Some(ModalType::IssuePicker { auto_kickstart, .. }) => {
+                assert!(!*auto_kickstart);
+            }
+            _ => panic!("Expected IssuePicker modal"),
+        }
+    }
+
+    #[test]
+    fn test_toggle_auto_kickstart_in_create_task_modal() {
+        let mut state = AppState::new();
+        state.open_manual_create_task_modal();
+
+        // Default is true
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+
+        // Toggle it
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
+    }
+
+    #[test]
+    fn test_toggle_auto_kickstart_in_issue_picker_modal() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        // Default is true
+        assert_eq!(state.modal_auto_kickstart(), Some(true));
+
+        // Toggle it
+        state.toggle_modal_auto_kickstart();
+        assert_eq!(state.modal_auto_kickstart(), Some(false));
     }
 }
