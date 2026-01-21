@@ -708,7 +708,11 @@ impl AppState {
         const SCROLL_LINES: u16 = 5;
         let max_scroll =
             (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
-        self.preview_scroll_offset = (self.preview_scroll_offset + SCROLL_LINES).min(max_scroll);
+        // Use saturating_add to prevent overflow when preview_scroll_offset is u16::MAX (bottom sentinel)
+        self.preview_scroll_offset = self
+            .preview_scroll_offset
+            .saturating_add(SCROLL_LINES)
+            .min(max_scroll);
     }
 
     /// Scroll the preview up by a half page.
@@ -722,7 +726,11 @@ impl AppState {
         let scroll_amount = self.preview_visible_height / 2;
         let max_scroll =
             (self.preview_line_count as u16).saturating_sub(self.preview_visible_height);
-        self.preview_scroll_offset = (self.preview_scroll_offset + scroll_amount).min(max_scroll);
+        // Use saturating_add to prevent overflow when preview_scroll_offset is u16::MAX (bottom sentinel)
+        self.preview_scroll_offset = self
+            .preview_scroll_offset
+            .saturating_add(scroll_amount)
+            .min(max_scroll);
     }
 
     /// Reset preview scroll to the bottom (show most recent content).

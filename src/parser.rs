@@ -165,9 +165,8 @@ pub fn parse_status(content: &str) -> ParsedStatus {
         };
     }
 
-    // Issue #65: Check for active working pattern (verb + "…") FIRST
-    // e.g., "✳ Percolating…", "✽ Forging…" indicates active work
-    // This must come BEFORE prompt detection because active work takes precedence
+    // Issue #65: Check for active working pattern ("esc to interrupt") FIRST
+    // This is the most reliable indicator that Claude Code is actively working
     let tail_for_working = get_tail_lines(content, WORKING_DETECTION_LINES);
     if detect_active_working(&tail_for_working) {
         return ParsedStatus::Working {
@@ -175,24 +174,22 @@ pub fn parse_status(content: &str) -> ParsedStatus {
         };
     }
 
-    // Issue #65: Check for completion pattern (past tense + time)
-    // e.g., "✻ Churned for 2m 20s" indicates task is complete
-    // Check this before idle prompt because completed pattern is more specific
-    if detect_completion_pattern(&tail_for_approval) {
-        return ParsedStatus::Idle;
-    }
-
-    // Issue #65: Check for idle prompt (❯ at end, not UI hint)
-    // This comes AFTER active working and completion patterns because:
-    // - Active work (verb + "…") should always be Working
-    // - Completed sessions (past tense + time) should be Idle
-    // - Only then, if there's a prompt, it's Idle
+    // Issue #65: Check for idle prompt BEFORE legacy spinner detection
+    // If there's a clear command prompt (❯), the agent is waiting for input
+    // This prevents false Working detection from stale spinner characters
     let tail_for_prompt = get_tail_lines(content, 10);
     if detect_idle_prompt(&tail_for_prompt) {
         return ParsedStatus::Idle;
     }
 
+    // Issue #65: Check for completion pattern (past tense + time)
+    // e.g., "✻ Churned for 2m 20s" indicates task is complete
+    if detect_completion_pattern(&tail_for_approval) {
+        return ParsedStatus::Idle;
+    }
+
     // Check for spinner/working state in recent output (legacy detection)
+    // Note: This is low-confidence detection, only used if no idle prompt visible
     if let Some(task) = detect_working(&tail_for_working) {
         return ParsedStatus::Working { task: Some(task) };
     }
@@ -274,7 +271,13 @@ fn detect_button_ui(content: &str) -> bool {
 }
 
 /// Detect working/spinner state.
+/// Issue #65: Excludes completion patterns (past tense + time) to avoid
+/// misclassifying completed tasks as working.
 fn detect_working(content: &str) -> Option<String> {
+    // Don't match completion patterns (e.g., "✻ Churned for 2m 20s")
+    if COMPLETION_PATTERN.is_match(content) {
+        return None;
+    }
     if SPINNER_PATTERN.is_match(content) {
         // Try to extract task name from subagent pattern
         if let Some(caps) = SUBAGENT_PATTERN.captures(content) {
