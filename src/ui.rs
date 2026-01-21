@@ -342,10 +342,11 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         Style::default().fg(Color::DarkGray)
     };
 
-    // Issue #65: Disable wrap to fix scroll calculation.
-    // With Wrap enabled, long lines become multiple screen lines, causing
+    // Issue #65: Wrapping is intentionally disabled for correct scroll calculation.
+    // Ratatui's Paragraph does NOT wrap by default (wrap is opt-in via .wrap()).
+    // With wrap enabled, long lines become multiple screen lines, causing
     // scroll_offset (based on logical lines) to be incorrect.
-    // Long lines will be truncated at the preview edge instead of wrapping.
+    // By not calling .wrap(), long lines are truncated at the preview edge.
     let preview = Paragraph::new(text).scroll((scroll_offset, 0)).block(
         Block::default()
             .borders(Borders::ALL)
@@ -431,7 +432,7 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
             branch_name.clone()
         };
 
-        // Issue #65: Disable wrap for consistent scroll calculation
+        // Issue #65: Wrapping disabled (Ratatui default) for consistent scroll calculation
         let pane_widget = Paragraph::new(text)
             .scroll((scroll_offset, 0))
             .block(Block::default().borders(Borders::ALL).title(pane_title));

@@ -314,7 +314,7 @@ where
 
                             // Auto-kickstart: send initial command if enabled
                             if auto_kickstart {
-                                let command = "claude --print-architecture";
+                                let command = &self.config.auto_kickstart.manual_command;
                                 let _ = self.tmux.send_keys(&session_id, command, true);
                             }
 
@@ -408,13 +408,14 @@ where
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
 
-                            // Auto-kickstart: start Claude and send /fix command
+                            // Auto-kickstart: start Claude and send issue command
                             if auto_kickstart {
                                 // First, start Claude CLI
                                 let _ = self.tmux.send_keys(&session_id, "claude", true);
-                                // Then send /fix command after a brief delay for Claude to start
-                                // Note: The /fix command will be queued and processed once Claude is ready
-                                let command = format!("/fix {}", issue.number);
+                                // Then send issue command after a brief delay for Claude to start
+                                // Note: The command will be queued and processed once Claude is ready
+                                let command =
+                                    self.config.auto_kickstart.build_issue_command(issue.number);
                                 let _ = self.tmux.send_keys(&session_id, &command, true);
                             }
 
@@ -590,6 +591,9 @@ where
             let dashboard_session = TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
             if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
                 // Capture from underlying worktree sessions directly
+                // Note: We build both `pane_contents` (for grid UI) and `combined_preview`
+                // (for MCP API / single-view fallback). The UI uses `dashboard_panes`,
+                // while `pane_preview` is kept for potential MCP integration.
                 let mut pane_contents: Vec<(String, String)> = Vec::new();
                 let mut combined_preview = String::new();
 
