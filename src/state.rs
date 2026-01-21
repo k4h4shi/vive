@@ -501,6 +501,8 @@ impl AppState {
                 // Otherwise, stay at current position (at the end)
             }
         }
+        // Reset preview scroll to bottom when selection changes (Issue #65)
+        self.reset_preview_scroll();
         self.sync_sidebar_list_state();
     }
 
@@ -560,6 +562,8 @@ impl AppState {
                 }
             }
         }
+        // Reset preview scroll to bottom when selection changes (Issue #65)
+        self.reset_preview_scroll();
         self.sync_sidebar_list_state();
     }
 
