@@ -550,6 +550,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     pub fn capture_pane(&self, target: &str, lines: usize) -> Result<String> {
         let start_line = format!("-{lines}");
         // -e flag preserves ANSI escape sequences (colors)
+        // -E "" ensures we capture to the end of the pane content, not just to
+        // the cursor position. This fixes Issue #65 where preview showed stale
+        // data when the pane was scrolled or cursor was at a different position.
         let result = self.executor.execute(args![
             "capture-pane",
             "-t",
@@ -558,6 +561,8 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
             "-e",
             "-S",
             &start_line,
+            "-E",
+            "",
         ])?;
 
         if !result.success {
@@ -1356,6 +1361,8 @@ mod tests {
                         "-e",
                         "-S",
                         "-50",
+                        "-E",
+                        "",
                     ])
             })
             .returning(|_| {
@@ -1467,6 +1474,8 @@ mod tests {
                         "-e",
                         "-S",
                         "-100",
+                        "-E",
+                        "",
                     ])
             })
             .returning(|_| Ok(mock_success("Line 1\nLine 2\n")));
