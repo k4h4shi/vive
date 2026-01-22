@@ -12,7 +12,7 @@ vive — parallel AI fixer, **alive in the shell**
 
 </div>
 
-Vive（ヴァイヴ）は、**複数のAIエージェントによる並行開発**を管理・指揮するためのターミナルツールです。
+Vive（ヴァイヴ）は、**複数のAIエージェントによる並行開発**を管理・指揮するためのTUIツールです。
 Git Worktree、Tmux、そしてClaude Codeを一元管理し、複雑になりがちな「マルチタスク開発」をシンプルにします。
 
 ## 特徴 (Features)
