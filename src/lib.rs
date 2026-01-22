@@ -313,11 +313,16 @@ where
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
 
                             // Auto-kickstart: send initial command if enabled and configured
-                            if auto_kickstart {
-                                let command = &self.config.auto_kickstart.manual_command;
-                                if !command.is_empty() {
-                                    let _ = self.tmux.send_keys(&session_id, command, true);
-                                }
+                            if auto_kickstart
+                                && !self.config.auto_kickstart.manual_command.is_empty()
+                            {
+                                let command = self.config.auto_kickstart.build_manual_command_full(
+                                    &session_id,
+                                    &branch_name,
+                                    &project.name,
+                                    &worktree_path.to_string_lossy(),
+                                );
+                                let _ = self.tmux.send_keys(&session_id, &command, true);
                             }
 
                             self.state
@@ -410,16 +415,17 @@ where
                                 .ensure_session(&session_id, Some(&worktree_path_str));
                             let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
 
-                            // Auto-kickstart: start Claude and send issue command if configured
+                            // Auto-kickstart: execute the configured one-liner command
                             if auto_kickstart
                                 && !self.config.auto_kickstart.issue_command.is_empty()
                             {
-                                // First, start Claude CLI
-                                let _ = self.tmux.send_keys(&session_id, "claude", true);
-                                // Then send issue command after a brief delay for Claude to start
-                                // Note: The command will be queued and processed once Claude is ready
-                                let command =
-                                    self.config.auto_kickstart.build_issue_command(issue.number);
+                                let command = self.config.auto_kickstart.build_issue_command_full(
+                                    issue.number,
+                                    &session_id,
+                                    &branch_name,
+                                    &project.name,
+                                    &worktree_path.to_string_lossy(),
+                                );
                                 let _ = self.tmux.send_keys(&session_id, &command, true);
                             }
 

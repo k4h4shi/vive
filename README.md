@@ -59,9 +59,11 @@ enter = "ghostty -e tmux attach -t {session_id}"
 # タスク作成時の自動キックスタート設定
 [auto_kickstart]
 # 手動タスク作成時に実行するコマンド
+# 利用可能なプレースホルダー: {session_id}, {branch_name}, {project_name}, {worktree_path}
 manual_command = "claude"
-# Issue選択でタスク作成時に実行するコマンド
-issue_command = "/fix {issue_number}"
+# Issue選択でタスク作成時に実行するコマンド（ワンライナー形式）
+# 利用可能なプレースホルダー: {issue_number}, {session_id}, {branch_name}, {project_name}, {worktree_path}
+issue_command = "claude \"/fix {issue_number}\""
 ```
 
 ## ドキュメント

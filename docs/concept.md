@@ -63,9 +63,10 @@ n = "code {path}"
 1.  Git Worktree の作成（新しいディレクトリの確保）
 2.  新規ブランチの作成
 3.  専用Tmuxセッションの立ち上げ
-4.  **Auto-Kickstart**: Claude Codeの自動起動と初期コマンドの送信（デフォルト有効、Tabキーでトグル可能）
-    - Manual入力モード: `claude --print-architecture` を送信
-    - Issue Pickerモード: `/fix {issue_number}` を送信してIssueの修正を開始
+4.  **Auto-Kickstart**: 設定されたコマンドの自動実行（デフォルト有効、Tabキーでトグル可能）
+    - Manual入力モード: `manual_command` で設定されたコマンドを実行（例: `claude`）
+    - Issue Pickerモード: `issue_command` で設定されたワンライナーを実行（例: `claude "/fix {issue_number}"`）
+    - 利用可能なプレースホルダー: `{issue_number}`, `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
 
 ### 3. コンテキストの切り替え (Switching)
 タスクを選択して Enter を押すだけで、そのタスクのTmuxセッションに接続（Attach）します。
