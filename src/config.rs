@@ -51,26 +51,17 @@ pub struct TerminalConfig {
 }
 
 /// Auto-kickstart configuration for task creation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutoKickstartConfig {
     /// Command to send for manual task creation.
-    /// Default: "claude --print-architecture"
+    /// Default: empty (disabled)
     pub manual_command: String,
 
     /// Command to send for issue-based task creation.
     /// Use `{issue_number}` as placeholder for the issue number.
-    /// Default: "/fix {issue_number}"
+    /// Default: empty (disabled)
     pub issue_command: String,
-}
-
-impl Default for AutoKickstartConfig {
-    fn default() -> Self {
-        Self {
-            manual_command: String::new(),
-            issue_command: String::new(),
-        }
-    }
 }
 
 impl AutoKickstartConfig {
