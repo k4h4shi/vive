@@ -67,8 +67,8 @@ pub struct AutoKickstartConfig {
 impl Default for AutoKickstartConfig {
     fn default() -> Self {
         Self {
-            manual_command: "claude --print-architecture".to_string(),
-            issue_command: "/fix {issue_number}".to_string(),
+            manual_command: String::new(),
+            issue_command: String::new(),
         }
     }
 }
@@ -801,13 +801,16 @@ enter = "tmux switch-client -t {session_id}"
     #[test]
     fn test_auto_kickstart_default() {
         let config = AutoKickstartConfig::default();
-        assert_eq!(config.manual_command, "claude --print-architecture");
-        assert_eq!(config.issue_command, "/fix {issue_number}");
+        assert_eq!(config.manual_command, "");
+        assert_eq!(config.issue_command, "");
     }
 
     #[test]
     fn test_auto_kickstart_build_issue_command() {
-        let config = AutoKickstartConfig::default();
+        let config = AutoKickstartConfig {
+            manual_command: String::new(),
+            issue_command: "/fix {issue_number}".to_string(),
+        };
         assert_eq!(config.build_issue_command(42), "/fix 42");
         assert_eq!(config.build_issue_command(123), "/fix 123");
     }
@@ -825,9 +828,6 @@ enter = "tmux switch-client -t {session_id}"
     #[test]
     fn test_config_includes_auto_kickstart() {
         let config = Config::default();
-        assert_eq!(
-            config.auto_kickstart.manual_command,
-            "claude --print-architecture"
-        );
+        assert_eq!(config.auto_kickstart.manual_command, "");
     }
 }
