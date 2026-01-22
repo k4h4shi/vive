@@ -88,7 +88,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &mut AppState) {
             Block::default()
                 .borders(Borders::ALL)
                 .title("Projects")
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(Style::default().fg(Color::Gray)),
         )
         // Use empty highlight symbol to avoid interfering with item content
         .highlight_symbol("")
@@ -298,7 +298,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(Style::default().fg(Color::Gray)),
     );
     frame.render_widget(preview, area);
 }
@@ -384,7 +384,7 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
             Block::default()
                 .borders(Borders::ALL)
                 .title(pane_title)
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(Style::default().fg(Color::Gray)),
         );
         frame.render_widget(pane_widget, *chunk);
     }
