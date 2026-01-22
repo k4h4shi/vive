@@ -1,11 +1,16 @@
-# Vive
+<div align="center">
+  <picture>
+    <img src="./LOGO.png" height="128" style="border-radius: 50%;">
+  </picture>
 
-**The AI Development Orchestrator.**
+# vive
 
-> ⚠️ **Status: Under Active Development**
->
-> 現在、RustによるTUIアプリケーションとして全面的に再実装中です。
-> 旧シェルスクリプト版は非推奨となりました。
+vive — parallel AI fixer, **alive in the shell**
+
+[![GitHub](https://img.shields.io/badge/GitHub-k4h4shi%2Fvive-blue)](https://github.com/k4h4shi/vive)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+</div>
 
 Vive（ヴァイヴ）は、**複数のAIエージェントによる並行開発**を管理・指揮するためのターミナルツールです。
 Git Worktree、Tmux、そしてClaude Codeを一元管理し、複雑になりがちな「マルチタスク開発」をシンプルにします。
