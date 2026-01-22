@@ -10,6 +10,9 @@
 # Temp files
 *.tmp
 
+# Claude retrospectives
+.claude/retrospectives/
+
 
 # Added by cargo
 
