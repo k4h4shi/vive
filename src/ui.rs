@@ -8,9 +8,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthChar;
 
-use crate::state::{
-    AppState, CreateTaskMethod, FocusMode, FocusPane, ModalType, StatusMessageType,
-};
+use crate::state::{AppState, CreateTaskMethod, FocusMode, ModalType, StatusMessageType};
 
 /// Render the UI based on the current application state.
 pub fn render(frame: &mut Frame, state: &mut AppState) {
@@ -77,9 +75,6 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     ])
     .split(area);
 
-    // Cache layout info in state for mouse event handling
-    state.set_sidebar_width(content_chunks[0].width);
-
     render_sidebar(frame, content_chunks[0], state);
     render_preview(frame, content_chunks[1], state);
 }
@@ -88,21 +83,12 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // Build list items first (immutable borrow of state)
     let items = build_sidebar_items(state);
 
-    // Border style based on focus
-    let border_style = if state.focus_pane() == FocusPane::Sidebar {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
     let sidebar = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title("Projects")
-                .border_style(border_style),
+                .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         )
         // Use empty highlight symbol to avoid interfering with item content
         .highlight_symbol("")
@@ -304,54 +290,15 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
         (text, line_count)
     };
 
-    // Update line count in state for scroll calculations
-    state.set_preview_line_count(line_count);
+    // Calculate scroll offset - auto-scroll to bottom (show most recent content)
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let scroll_offset = line_count.saturating_sub(visible_height) as u16;
 
-    // Calculate scroll offset
-    // Account for borders (2 lines) when calculating visible height
-    let visible_height = area.height.saturating_sub(2);
-
-    // Cache visible height in state for scroll calculations in event handling
-    state.set_preview_visible_height(visible_height);
-
-    let visible_height = visible_height as usize;
-
-    // When sidebar is focused, auto-scroll to bottom (show most recent content)
-    // When preview is focused, use user's scroll offset
-    let scroll_offset = if state.is_preview_focused() {
-        // Use user's scroll offset, but ensure it's valid
-        let max_scroll = line_count.saturating_sub(visible_height) as u16;
-        let user_offset = state.preview_scroll_offset();
-        if user_offset == u16::MAX {
-            // User requested to go to bottom
-            max_scroll
-        } else {
-            user_offset.min(max_scroll)
-        }
-    } else {
-        // Auto-scroll to bottom when sidebar is focused
-        line_count.saturating_sub(visible_height) as u16
-    };
-
-    // Border style based on focus
-    let border_style = if state.focus_pane() == FocusPane::Preview {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    // Issue #65: Wrapping is intentionally disabled for correct scroll calculation.
-    // Ratatui's Paragraph does NOT wrap by default (wrap is opt-in via .wrap()).
-    // With wrap enabled, long lines become multiple screen lines, causing
-    // scroll_offset (based on logical lines) to be incorrect.
-    // By not calling .wrap(), long lines are truncated at the preview edge.
     let preview = Paragraph::new(text).scroll((scroll_offset, 0)).block(
         Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(border_style),
+            .border_style(Style::default().fg(Color::DarkGray)),
     );
     frame.render_widget(preview, area);
 }
@@ -445,41 +392,20 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState) -> Option<(u16
     let mut cursor_position = None;
 
     let content = match state.focus_mode {
-        FocusMode::Normal => {
-            // Show different help based on which pane is focused
-            match state.focus_pane() {
-                FocusPane::Sidebar => Line::from(vec![
-                    Span::styled("j/k", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Nav  "),
-                    Span::styled("Tab", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Switch  "),
-                    Span::styled("o", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Attach  "),
-                    Span::styled("n", Style::default().fg(Color::Yellow)),
-                    Span::raw(": New  "),
-                    Span::styled("d", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Del  "),
-                    Span::styled("f", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Fav  "),
-                    Span::styled("q", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Quit"),
-                ]),
-                FocusPane::Preview => Line::from(vec![
-                    Span::styled("j/k", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Scroll  "),
-                    Span::styled("^d/^u", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Page  "),
-                    Span::styled("g/G", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Top/Bot  "),
-                    Span::styled("Tab", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Switch  "),
-                    Span::styled("o", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Attach  "),
-                    Span::styled("q", Style::default().fg(Color::Yellow)),
-                    Span::raw(": Quit"),
-                ]),
-            }
-        }
+        FocusMode::Normal => Line::from(vec![
+            Span::styled("j/k", Style::default().fg(Color::Yellow)),
+            Span::raw(": Nav  "),
+            Span::styled("o", Style::default().fg(Color::Yellow)),
+            Span::raw(": Attach  "),
+            Span::styled("n", Style::default().fg(Color::Yellow)),
+            Span::raw(": New  "),
+            Span::styled("d", Style::default().fg(Color::Yellow)),
+            Span::raw(": Del  "),
+            Span::styled("f", Style::default().fg(Color::Yellow)),
+            Span::raw(": Fav  "),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::raw(": Quit"),
+        ]),
         FocusMode::Input => {
             // Split input_buffer at cursor position for display
             let chars: Vec<char> = state.input_buffer.chars().collect();
