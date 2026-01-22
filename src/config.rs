@@ -51,24 +51,92 @@ pub struct TerminalConfig {
 }
 
 /// Auto-kickstart configuration for task creation.
+///
+/// Supported placeholders for both `manual_command` and `issue_command`:
+/// - `{issue_number}` - The GitHub issue number (issue_command only)
+/// - `{session_id}` - The tmux session identifier (e.g., `vive__feature-issue-123`)
+/// - `{branch_name}` - The git branch name (e.g., `feature/issue-123`)
+/// - `{project_name}` - The project name (e.g., `vive`)
+/// - `{worktree_path}` - Absolute path to the worktree
+///
+/// Example configuration:
+/// ```toml
+/// [auto_kickstart]
+/// # Start claude directly with the fix command
+/// issue_command = "claude \"/fix {issue_number}\""
+///
+/// # Or use a custom wrapper script
+/// # issue_command = "~/.local/bin/start-agent.sh {session_id} {issue_number}"
+/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutoKickstartConfig {
     /// Command to send for manual task creation.
+    ///
+    /// Supports placeholders: `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
     /// Default: empty (disabled)
     pub manual_command: String,
 
     /// Command to send for issue-based task creation.
-    /// Use `{issue_number}` as placeholder for the issue number.
+    ///
+    /// Supports placeholders: `{issue_number}`, `{session_id}`, `{branch_name}`,
+    /// `{project_name}`, `{worktree_path}`
     /// Default: empty (disabled)
     pub issue_command: String,
 }
 
 impl AutoKickstartConfig {
     /// Build the issue command with issue number substituted.
+    ///
+    /// DEPRECATED: Use `build_issue_command_full` for full placeholder support.
     pub fn build_issue_command(&self, issue_number: u32) -> String {
         self.issue_command
             .replace("{issue_number}", &issue_number.to_string())
+    }
+
+    /// Build the issue command with all placeholders substituted.
+    ///
+    /// Supported placeholders:
+    /// - `{issue_number}` - The issue number
+    /// - `{session_id}` - The tmux session ID (e.g., "project__branch")
+    /// - `{branch_name}` - The git branch name
+    /// - `{project_name}` - The project name
+    /// - `{worktree_path}` - The absolute path to the worktree
+    pub fn build_issue_command_full(
+        &self,
+        issue_number: u32,
+        session_id: &str,
+        branch_name: &str,
+        project_name: &str,
+        worktree_path: &str,
+    ) -> String {
+        self.issue_command
+            .replace("{issue_number}", &issue_number.to_string())
+            .replace("{session_id}", session_id)
+            .replace("{branch_name}", branch_name)
+            .replace("{project_name}", project_name)
+            .replace("{worktree_path}", worktree_path)
+    }
+
+    /// Build the manual command with all placeholders substituted.
+    ///
+    /// Supported placeholders:
+    /// - `{session_id}` - The tmux session ID (e.g., "project__branch")
+    /// - `{branch_name}` - The git branch name
+    /// - `{project_name}` - The project name
+    /// - `{worktree_path}` - The absolute path to the worktree
+    pub fn build_manual_command_full(
+        &self,
+        session_id: &str,
+        branch_name: &str,
+        project_name: &str,
+        worktree_path: &str,
+    ) -> String {
+        self.manual_command
+            .replace("{session_id}", session_id)
+            .replace("{branch_name}", branch_name)
+            .replace("{project_name}", project_name)
+            .replace("{worktree_path}", worktree_path)
     }
 }
 
@@ -820,5 +888,117 @@ enter = "tmux switch-client -t {session_id}"
     fn test_config_includes_auto_kickstart() {
         let config = Config::default();
         assert_eq!(config.auto_kickstart.manual_command, "");
+    }
+
+    // ========================================================================
+    // TDD: Issue #76 - Configurable one-liner kickstart command
+    // ========================================================================
+
+    #[test]
+    fn test_build_issue_command_full_all_placeholders() {
+        let config = AutoKickstartConfig {
+            manual_command: String::new(),
+            issue_command: "claude \"/fix {issue_number}\" --session {session_id}".to_string(),
+        };
+        let result = config.build_issue_command_full(
+            42,
+            "myproject__feature-issue-42",
+            "feature/issue-42",
+            "myproject",
+            "/home/user/src/myproject/.worktrees/feature/issue-42",
+        );
+        assert_eq!(
+            result,
+            "claude \"/fix 42\" --session myproject__feature-issue-42"
+        );
+    }
+
+    #[test]
+    fn test_build_issue_command_full_with_worktree_path() {
+        let config = AutoKickstartConfig {
+            manual_command: String::new(),
+            issue_command: "cd {worktree_path} && claude \"/fix {issue_number}\"".to_string(),
+        };
+        let result = config.build_issue_command_full(
+            99,
+            "proj__issue-99",
+            "issue-99",
+            "proj",
+            "/path/to/worktree",
+        );
+        assert_eq!(result, "cd /path/to/worktree && claude \"/fix 99\"");
+    }
+
+    #[test]
+    fn test_build_issue_command_full_with_project_and_branch() {
+        let config = AutoKickstartConfig {
+            manual_command: String::new(),
+            issue_command: "echo {project_name}:{branch_name} && claude".to_string(),
+        };
+        let result = config.build_issue_command_full(
+            1,
+            "vive__feature-branch",
+            "feature-branch",
+            "vive",
+            "/tmp/worktree",
+        );
+        assert_eq!(result, "echo vive:feature-branch && claude");
+    }
+
+    #[test]
+    fn test_build_manual_command_full_with_placeholders() {
+        let config = AutoKickstartConfig {
+            manual_command: "claude --project {project_name} --cwd {worktree_path}".to_string(),
+            issue_command: String::new(),
+        };
+        let result =
+            config.build_manual_command_full("proj__branch", "branch", "proj", "/path/to/worktree");
+        assert_eq!(result, "claude --project proj --cwd /path/to/worktree");
+    }
+
+    #[test]
+    fn test_build_manual_command_full_with_session_id() {
+        let config = AutoKickstartConfig {
+            manual_command: "tmux send-keys -t {session_id} 'claude' Enter".to_string(),
+            issue_command: String::new(),
+        };
+        let result = config.build_manual_command_full(
+            "my-project__my-branch",
+            "my-branch",
+            "my-project",
+            "/home/user/project",
+        );
+        assert_eq!(
+            result,
+            "tmux send-keys -t my-project__my-branch 'claude' Enter"
+        );
+    }
+
+    #[test]
+    fn test_build_issue_command_full_simple_command() {
+        // Test the typical use case from issue #76
+        let config = AutoKickstartConfig {
+            manual_command: String::new(),
+            issue_command: "claude \"/fix {issue_number}\"".to_string(),
+        };
+        let result = config.build_issue_command_full(
+            76,
+            "vive__feature-issue-76",
+            "feature/issue-76",
+            "vive",
+            "/Users/user/src/vive/.worktrees/feature/issue-76",
+        );
+        assert_eq!(result, "claude \"/fix 76\"");
+    }
+
+    #[test]
+    fn test_build_issue_command_full_no_placeholders() {
+        // Empty placeholders should just return the template as-is
+        let config = AutoKickstartConfig {
+            manual_command: String::new(),
+            issue_command: "claude --interactive".to_string(),
+        };
+        let result = config.build_issue_command_full(42, "session", "branch", "project", "/path");
+        assert_eq!(result, "claude --interactive");
     }
 }

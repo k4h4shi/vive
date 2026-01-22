@@ -19,9 +19,10 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 - [x] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
     - **Manual**: ブランチ名を手動入力する。
     - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`feature/issue-{番号}` 形式でブランチを自動生成する。
-    - **Auto-Kickstart**: タスク作成後、自動的にClaude Codeを起動してコマンドを送信する（デフォルト有効、Tabキーでトグル可能）。
-        - Manual: `claude --print-architecture` を送信。
-        - Issue Picker: `/fix {issue_number}` を送信してIssueの修正を開始。
+    - **Auto-Kickstart**: タスク作成後、設定されたコマンドを自動実行する（デフォルト有効、Tabキーでトグル可能）。
+        - Manual: `manual_command` で設定されたコマンドを実行（例: `claude`）。
+        - Issue Picker: `issue_command` で設定されたワンライナーコマンドを実行（例: `claude "/fix {issue_number}"`）。
+        - 利用可能なプレースホルダー: `{issue_number}`, `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
 - [ ] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
 - [ ] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
 
