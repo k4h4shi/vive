@@ -88,7 +88,11 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &mut AppState) {
             Block::default()
                 .borders(Borders::ALL)
                 .title("Projects")
-                .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                .border_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         // Use empty highlight symbol to avoid interfering with item content
         .highlight_symbol("")
