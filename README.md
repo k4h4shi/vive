@@ -44,23 +44,24 @@ cd vive
 ## 設定 (Configuration)
 
 `~/.vive/config.toml` で挙動をカスタマイズできます。
-※ 旧 `[terminal]` 設定は非推奨となりました。今後は `[actions]` を使用してください。
 
 ```toml
 # プロジェクトのルートディレクトリ
 projects_root = "~/src/github"
 
-# アクション設定
-[actions]
+# キーバインド設定
+[keybindings]
 # Enterキーでタスクを開く時のコマンド (Ghosttyの例)
-open = "ghostty --target {session_id}"
+enter = "ghostty -e tmux attach -t {session_id}"
 # インラインで開く場合 (デフォルト)
-# open = "tmux attach -t {session_id}"
+# enter = "tmux switch-client -t {session_id}"
 
-# フック設定 (自動実行)
-[hooks]
-# タスク作成完了時に実行するコマンド
-post_create = "tmux send-keys -t {session_id} 'claude' C-m"
+# タスク作成時の自動キックスタート設定
+[auto_kickstart]
+# 手動タスク作成時に実行するコマンド
+manual_command = "claude"
+# Issue選択でタスク作成時に実行するコマンド
+issue_command = "/fix {issue_number}"
 ```
 
 ## ドキュメント
