@@ -88,11 +88,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &mut AppState) {
             Block::default()
                 .borders(Borders::ALL)
                 .title("Projects")
-                .border_style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                .border_style(Style::default().fg(Color::DarkGray)),
         )
         // Use empty highlight symbol to avoid interfering with item content
         .highlight_symbol("")
@@ -384,9 +380,12 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
         };
 
         // Issue #65: Wrapping disabled (Ratatui default) for consistent scroll calculation
-        let pane_widget = Paragraph::new(text)
-            .scroll((scroll_offset, 0))
-            .block(Block::default().borders(Borders::ALL).title(pane_title));
+        let pane_widget = Paragraph::new(text).scroll((scroll_offset, 0)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(pane_title)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
         frame.render_widget(pane_widget, *chunk);
     }
 }
