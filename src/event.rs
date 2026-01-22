@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
-use crate::state::{AppState, FocusMode, FocusPane};
+use crate::state::{AppState, FocusMode};
 
 /// Action to be performed by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,9 +62,6 @@ pub fn handle_key_event(key: KeyEvent, state: &mut AppState) -> Action {
 
 /// Handle a mouse event by updating the application state.
 /// Returns an Action that the main loop should perform.
-///
-/// Uses the cached sidebar_width and preview_visible_height from state
-/// (set during rendering) for layout-aware mouse handling.
 pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
     // Ignore mouse events when modal is open or in input mode
     if state.modal.is_some() || state.focus_mode == FocusMode::Input {
@@ -72,56 +69,15 @@ pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
     }
 
     match mouse.kind {
-        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-            // Click to switch focus between panes using cached sidebar_width
-            let sidebar_width = state.sidebar_width();
-            if sidebar_width > 0 {
-                state.clear_status_message();
-                if mouse.column < sidebar_width {
-                    state.focus_sidebar();
-                } else {
-                    state.focus_preview();
-                }
-            }
-            Action::None
-        }
         MouseEventKind::ScrollDown => {
-            // Apply debounce to prevent rapid scrolling
-            if !state.try_scroll() {
-                return Action::None;
-            }
             state.clear_status_message();
-
-            // Scroll behavior depends on focused pane
-            match state.focus_pane() {
-                FocusPane::Sidebar => {
-                    state.select_next();
-                    Action::RefreshPreview
-                }
-                FocusPane::Preview => {
-                    state.scroll_preview_down();
-                    Action::None
-                }
-            }
+            state.select_next();
+            Action::RefreshPreview
         }
         MouseEventKind::ScrollUp => {
-            // Apply debounce to prevent rapid scrolling
-            if !state.try_scroll() {
-                return Action::None;
-            }
             state.clear_status_message();
-
-            // Scroll behavior depends on focused pane
-            match state.focus_pane() {
-                FocusPane::Sidebar => {
-                    state.select_prev();
-                    Action::RefreshPreview
-                }
-                FocusPane::Preview => {
-                    state.scroll_preview_up();
-                    Action::None
-                }
-            }
+            state.select_prev();
+            Action::RefreshPreview
         }
         _ => Action::None,
     }
@@ -140,33 +96,11 @@ fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
             return Action::Quit;
         }
 
-        // Tab toggles focus between sidebar and preview
-        KeyCode::Tab => {
-            state.clear_status_message();
-            state.toggle_focus_pane();
-            return Action::None;
-        }
-
-        // h/l also switch focus panes (vim-style left/right)
-        KeyCode::Char('h') | KeyCode::Left => {
-            state.clear_status_message();
-            state.focus_sidebar();
-            return Action::None;
-        }
-        KeyCode::Char('l') | KeyCode::Right => {
-            state.clear_status_message();
-            state.focus_preview();
-            return Action::None;
-        }
-
         _ => {}
     }
 
-    // Dispatch to pane-specific handlers
-    match state.focus_pane() {
-        FocusPane::Sidebar => handle_sidebar_key_event(key, state),
-        FocusPane::Preview => handle_preview_key_event(key, state),
-    }
+    // Handle key events
+    handle_sidebar_key_event(key, state)
 }
 
 /// Handle key events when sidebar pane is focused.
@@ -238,60 +172,6 @@ fn handle_sidebar_key_event(key: KeyEvent, state: &mut AppState) -> Action {
                 state.set_error_message("Select a worktree to delete");
             }
             Action::None
-        }
-
-        _ => Action::None,
-    }
-}
-
-/// Handle key events when preview pane is focused.
-/// Scroll calculations use the cached preview_visible_height from state.
-fn handle_preview_key_event(key: KeyEvent, state: &mut AppState) -> Action {
-    match key.code {
-        // j/k scroll the preview content (1 line at a time)
-        KeyCode::Char('j') | KeyCode::Down => {
-            state.clear_status_message();
-            state.scroll_preview_down();
-            Action::None
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.clear_status_message();
-            state.scroll_preview_up();
-            Action::None
-        }
-
-        // Ctrl-d/Ctrl-u for half-page scroll
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.clear_status_message();
-            state.scroll_preview_page_down();
-            Action::None
-        }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.clear_status_message();
-            state.scroll_preview_page_up();
-            Action::None
-        }
-
-        // g/G for top/bottom (vim-style)
-        KeyCode::Char('g') => {
-            state.clear_status_message();
-            state.reset_preview_scroll_to_top();
-            Action::None
-        }
-        KeyCode::Char('G') => {
-            state.clear_status_message();
-            state.reset_preview_scroll();
-            Action::None
-        }
-
-        // Enter/o still attaches to session (useful when viewing preview)
-        KeyCode::Enter => {
-            state.clear_status_message();
-            Action::AttachSession("enter".to_string())
-        }
-        KeyCode::Char('o') => {
-            state.clear_status_message();
-            Action::AttachSession("o".to_string())
         }
 
         _ => Action::None,
@@ -770,9 +650,6 @@ mod tests {
         assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(action, Action::RefreshPreview);
 
-        // Reset debounce for next scroll test
-        state.reset_scroll_debounce();
-
         // Scroll down again (to worktree 1)
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
         assert_eq!(state.selected_project_idx(), Some(0));
@@ -796,23 +673,6 @@ mod tests {
         assert_eq!(state.selected_project_idx(), Some(1));
         assert_eq!(state.selected_worktree_idx(), None); // Project header
         assert_eq!(action, Action::RefreshPreview);
-    }
-
-    #[test]
-    fn test_mouse_scroll_debounce_blocks_rapid_scrolls() {
-        let mut state = create_test_state_with_projects();
-        // Starts at project header
-        assert_eq!(state.selected_worktree_idx(), None);
-
-        // First scroll should work (to worktree 0)
-        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(0));
-        assert_eq!(action, Action::RefreshPreview);
-
-        // Immediate second scroll should be blocked by debounce
-        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(state.selected_worktree_idx(), Some(0)); // Still at 0, not moved
-        assert_eq!(action, Action::None);
     }
 
     #[test]
@@ -1101,70 +961,11 @@ mod tests {
         // Note: The actual toggle happens in lib.rs handle_action, not here
     }
 
-    // ========== Focus Pane Key Event Tests ==========
+    // ========== Navigation Key Event Tests ==========
 
     #[test]
-    fn test_tab_toggles_focus_pane() {
+    fn test_j_navigates() {
         let mut state = create_test_state_with_projects();
-        assert!(state.is_sidebar_focused());
-
-        // Tab should toggle focus to preview
-        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
-        assert_eq!(action, Action::None);
-        assert!(state.is_preview_focused());
-
-        // Tab again should toggle back to sidebar
-        let action = handle_key_event(key_event(KeyCode::Tab), &mut state);
-        assert_eq!(action, Action::None);
-        assert!(state.is_sidebar_focused());
-    }
-
-    #[test]
-    fn test_h_key_focuses_sidebar() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        assert!(state.is_preview_focused());
-
-        let action = handle_key_event(key_event(KeyCode::Char('h')), &mut state);
-        assert_eq!(action, Action::None);
-        assert!(state.is_sidebar_focused());
-    }
-
-    #[test]
-    fn test_l_key_focuses_preview() {
-        let mut state = create_test_state_with_projects();
-        assert!(state.is_sidebar_focused());
-
-        let action = handle_key_event(key_event(KeyCode::Char('l')), &mut state);
-        assert_eq!(action, Action::None);
-        assert!(state.is_preview_focused());
-    }
-
-    #[test]
-    fn test_left_key_focuses_sidebar() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-
-        let action = handle_key_event(key_event(KeyCode::Left), &mut state);
-        assert_eq!(action, Action::None);
-        assert!(state.is_sidebar_focused());
-    }
-
-    #[test]
-    fn test_right_key_focuses_preview() {
-        let mut state = create_test_state_with_projects();
-
-        let action = handle_key_event(key_event(KeyCode::Right), &mut state);
-        assert_eq!(action, Action::None);
-        assert!(state.is_preview_focused());
-    }
-
-    // ========== Sidebar Focus Key Event Tests ==========
-
-    #[test]
-    fn test_j_navigates_when_sidebar_focused() {
-        let mut state = create_test_state_with_projects();
-        assert!(state.is_sidebar_focused());
         assert_eq!(state.selected_worktree_idx(), None); // At project header
 
         let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
@@ -1173,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn test_k_navigates_when_sidebar_focused() {
+    fn test_k_navigates() {
         let mut state = create_test_state_with_projects();
         state.select_next(); // Move to worktree 0
         assert_eq!(state.selected_worktree_idx(), Some(0));
@@ -1183,114 +984,11 @@ mod tests {
         assert_eq!(state.selected_worktree_idx(), None); // Back to project header
     }
 
-    // ========== Preview Focus Key Event Tests ==========
+    // ========== Mouse Scroll Tests ==========
 
     #[test]
-    fn test_j_scrolls_when_preview_focused() {
+    fn test_mouse_scroll_down_navigates() {
         let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        assert!(state.is_preview_focused());
-
-        let initial_offset = state.preview_scroll_offset();
-        let action = handle_key_event(key_event(KeyCode::Char('j')), &mut state);
-        assert_eq!(action, Action::None);
-        assert_eq!(state.preview_scroll_offset(), initial_offset + 5); // Scrolls 5 lines
-    }
-
-    #[test]
-    fn test_k_scrolls_when_preview_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-        state.scroll_preview_down(); // Move down first (+5)
-        let initial_offset = state.preview_scroll_offset();
-
-        let action = handle_key_event(key_event(KeyCode::Char('k')), &mut state);
-        assert_eq!(action, Action::None);
-        assert_eq!(
-            state.preview_scroll_offset(),
-            initial_offset.saturating_sub(5) // Scrolls 5 lines
-        );
-    }
-
-    #[test]
-    fn test_ctrl_d_scrolls_page_down_when_preview_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-
-        let action = handle_key_event(
-            key_event_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL),
-            &mut state,
-        );
-        assert_eq!(action, Action::None);
-        // Should scroll by half a page (10 lines)
-        assert!(state.preview_scroll_offset() > 0);
-    }
-
-    #[test]
-    fn test_ctrl_u_scrolls_page_up_when_preview_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-        // Scroll down first
-        for _ in 0..20 {
-            state.scroll_preview_down();
-        }
-        let initial_offset = state.preview_scroll_offset();
-
-        let action = handle_key_event(
-            key_event_with_modifiers(KeyCode::Char('u'), KeyModifiers::CONTROL),
-            &mut state,
-        );
-        assert_eq!(action, Action::None);
-        assert!(state.preview_scroll_offset() < initial_offset);
-    }
-
-    #[test]
-    fn test_g_scrolls_to_top_when_preview_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-        state.scroll_preview_down(); // Move down first
-
-        let action = handle_key_event(key_event(KeyCode::Char('g')), &mut state);
-        assert_eq!(action, Action::None);
-        assert_eq!(state.preview_scroll_offset(), 0);
-    }
-
-    #[test]
-    fn test_G_scrolls_to_bottom_when_preview_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-
-        let action = handle_key_event(key_event(KeyCode::Char('G')), &mut state);
-        assert_eq!(action, Action::None);
-        assert_eq!(state.preview_scroll_offset(), u16::MAX);
-    }
-
-    #[test]
-    fn test_enter_attaches_when_preview_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-
-        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
-        assert_eq!(action, Action::AttachSession("enter".to_string()));
-    }
-
-    // ========== Mouse Scroll Tests with Focus ==========
-
-    #[test]
-    fn test_mouse_scroll_down_navigates_sidebar_when_focused() {
-        let mut state = create_test_state_with_projects();
-        assert!(state.is_sidebar_focused());
         assert_eq!(state.selected_worktree_idx(), None);
 
         let action = handle_mouse_event(mouse_scroll_down(), &mut state);
@@ -1299,45 +997,14 @@ mod tests {
     }
 
     #[test]
-    fn test_mouse_scroll_down_scrolls_preview_when_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-        let initial_offset = state.preview_scroll_offset();
-
-        let action = handle_mouse_event(mouse_scroll_down(), &mut state);
-        assert_eq!(action, Action::None);
-        assert_eq!(state.preview_scroll_offset(), initial_offset + 5); // Scrolls 5 lines
-    }
-
-    #[test]
-    fn test_mouse_scroll_up_navigates_sidebar_when_focused() {
+    fn test_mouse_scroll_up_navigates() {
         let mut state = create_test_state_with_projects();
         state.select_next(); // Move to worktree 0
         assert_eq!(state.selected_worktree_idx(), Some(0));
-        state.reset_scroll_debounce();
 
         let action = handle_mouse_event(mouse_scroll_up(), &mut state);
         assert_eq!(action, Action::RefreshPreview);
         assert_eq!(state.selected_worktree_idx(), None);
-    }
-
-    #[test]
-    fn test_mouse_scroll_up_scrolls_preview_when_focused() {
-        let mut state = create_test_state_with_projects();
-        state.focus_preview();
-        state.set_preview_line_count(100);
-        state.set_preview_visible_height(20);
-        state.scroll_preview_down(); // Move down first (+5)
-        let initial_offset = state.preview_scroll_offset();
-
-        let action = handle_mouse_event(mouse_scroll_up(), &mut state);
-        assert_eq!(action, Action::None);
-        assert_eq!(
-            state.preview_scroll_offset(),
-            initial_offset.saturating_sub(5) // Scrolls 5 lines
-        );
     }
 
     // ========== Auto-Kickstart Key Event Tests ==========
