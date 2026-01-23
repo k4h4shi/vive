@@ -9,7 +9,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 
 use crate::discovery::Project;
@@ -251,9 +250,6 @@ pub struct AppState {
     /// Set of project names that are expanded (showing worktrees).
     /// Projects not in this set are collapsed.
     expanded_projects: HashSet<String>,
-    /// Cached preview area Rect for mouse hit testing.
-    /// Updated by UI during render to enable click coordinate mapping.
-    preview_area: Option<Rect>,
 }
 
 impl Default for AppState {
@@ -278,7 +274,6 @@ impl Default for AppState {
             favorites_modified: false,
             issue_title_cache: IssueTitleCache::new(),
             expanded_projects: HashSet::new(),
-            preview_area: None,
         }
     }
 }
@@ -951,16 +946,6 @@ impl AppState {
     /// Update the pane preview content.
     pub fn set_pane_preview(&mut self, content: String) {
         self.pane_preview = content;
-    }
-
-    /// Set the preview area Rect for mouse hit testing.
-    pub fn set_preview_area(&mut self, area: Rect) {
-        self.preview_area = Some(area);
-    }
-
-    /// Get the preview area Rect for mouse hit testing.
-    pub fn preview_area(&self) -> Option<Rect> {
-        self.preview_area
     }
 
     /// Update the dashboard pane contents for multi-pane preview.
