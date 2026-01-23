@@ -1,9 +1,12 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
 use crate::state::{AppState, FocusMode};
+use crate::url;
 
 /// Action to be performed by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +40,8 @@ pub enum Action {
     /// Create tasks from multiple selected issues (batch operation).
     /// Second parameter is whether to auto-kickstart (send initial command).
     CreateTasksFromIssues(Vec<crate::github::GitHubIssue>, bool),
+    /// Open a URL in the system default browser.
+    OpenUrl(String),
 }
 
 /// Poll for terminal events with a timeout.
@@ -82,8 +87,77 @@ pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
             state.select_prev();
             Action::RefreshPreview
         }
+        MouseEventKind::Down(MouseButton::Left) => {
+            handle_left_click(mouse.column, mouse.row, state)
+        }
         _ => Action::None,
     }
+}
+
+/// Handle left click events - detect URLs in preview pane.
+///
+/// If the click is within the preview area and on a URL, returns `Action::OpenUrl`.
+/// Otherwise returns `Action::None`.
+fn handle_left_click(column: u16, row: u16, state: &AppState) -> Action {
+    // Disable URL clicks in dashboard mode - the pane_preview content doesn't match
+    // the displayed grid layout, so coordinate mapping would be incorrect.
+    if state.is_dashboard_mode() {
+        return Action::None;
+    }
+
+    // Check if click is within preview area
+    let preview_area = match state.preview_area() {
+        Some(area) => area,
+        None => return Action::None,
+    };
+
+    // Check bounds (click must be inside preview content, not on border)
+    if column <= preview_area.x
+        || column >= preview_area.x + preview_area.width - 1
+        || row <= preview_area.y
+        || row >= preview_area.y + preview_area.height - 1
+    {
+        return Action::None;
+    }
+
+    // Convert click position to content coordinates
+    let content_col = (column - preview_area.x - 1) as usize; // -1 for left border
+    let content_row = (row - preview_area.y - 1) as usize; // -1 for top border
+
+    // Extract URL from preview content at the clicked position
+    if let Some(url) = extract_url_from_preview(state, content_row, content_col) {
+        Action::OpenUrl(url)
+    } else {
+        Action::None
+    }
+}
+
+/// Extract URL from preview content at the given row/col position.
+///
+/// Accounts for scroll offset (preview auto-scrolls to bottom).
+fn extract_url_from_preview(state: &AppState, row: usize, col: usize) -> Option<String> {
+    let content = &state.pane_preview;
+    if content.is_empty() {
+        return None;
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    let preview_area = state.preview_area()?;
+
+    // Calculate visible height (excluding borders)
+    let visible_height = preview_area.height.saturating_sub(2) as usize;
+
+    // Calculate scroll offset (same logic as render_preview in ui.rs)
+    let scroll_offset = lines.len().saturating_sub(visible_height);
+
+    // Map clicked row to actual line in content
+    let actual_line_idx = scroll_offset + row;
+    if actual_line_idx >= lines.len() {
+        return None;
+    }
+
+    let line = lines[actual_line_idx];
+    url::extract_url_at_position(line, col)
 }
 
 fn handle_normal_key_event(key: KeyEvent, state: &mut AppState) -> Action {
@@ -1035,6 +1109,176 @@ mod tests {
         let action = handle_mouse_event(mouse_scroll_up(), &mut state);
         assert_eq!(action, Action::RefreshPreview);
         assert_eq!(state.selected_worktree_idx(), None);
+    }
+
+    // ========== Mouse Left Click Tests (Issue #78) ==========
+
+    fn mouse_left_click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn test_left_click_no_preview_area_returns_none() {
+        let mut state = AppState::new();
+        // No preview_area set
+        let action = handle_mouse_event(mouse_left_click(50, 10), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_outside_preview_returns_none() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+
+        // Click outside preview area (to the left)
+        let action = handle_mouse_event(mouse_left_click(10, 10), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_on_border_returns_none() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+
+        // Click on left border (x = 40)
+        let action = handle_mouse_event(mouse_left_click(40, 10), &mut state);
+        assert_eq!(action, Action::None);
+
+        // Click on top border (y = 3)
+        let action = handle_mouse_event(mouse_left_click(50, 3), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_on_url_returns_open_url() {
+        let mut state = AppState::new();
+        // Preview area: x=40, y=3, width=60, height=20
+        // Content area starts at (41, 4) due to borders
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("https://example.com is the URL".to_string());
+
+        // Click on the URL at content position (0, 0)
+        // Terminal position: (41, 4) = (40+1, 3+1)
+        let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
+        assert_eq!(action, Action::OpenUrl("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn test_left_click_on_url_middle() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("Visit https://example.com for info".to_string());
+
+        // "Visit " = 6 chars, URL starts at col 6
+        // Terminal col = 41 + 10 = 51 (clicking in middle of URL)
+        let action = handle_mouse_event(mouse_left_click(51, 4), &mut state);
+        assert_eq!(action, Action::OpenUrl("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn test_left_click_no_url_returns_none() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("No URLs in this line".to_string());
+
+        // Click on text without URL
+        let action = handle_mouse_event(mouse_left_click(45, 4), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_empty_preview_returns_none() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview(String::new());
+
+        let action = handle_mouse_event(mouse_left_click(50, 10), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_with_scroll_offset() {
+        let mut state = AppState::new();
+        // Preview area: height=5 (3 visible content lines after border)
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 5));
+
+        // Content has 10 lines, so scroll_offset = 10 - 3 = 7
+        let content =
+            "line0\nline1\nline2\nline3\nline4\nline5\nline6\nhttps://scrolled.com\nline8\nline9";
+        state.set_pane_preview(content.to_string());
+
+        // First visible row (row=0) maps to line 7 (0-indexed) which has the URL
+        // Terminal position: (41, 4) = first content row
+        let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
+        assert_eq!(action, Action::OpenUrl("https://scrolled.com".to_string()));
+    }
+
+    #[test]
+    fn test_left_click_ignored_in_modal() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("https://example.com".to_string());
+        state.open_create_task_modal();
+
+        let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_ignored_in_input_mode() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("https://example.com".to_string());
+        state.enter_input_mode();
+
+        let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_ignored_in_dashboard_mode() {
+        use crate::discovery::{Project, Worktree};
+        use std::path::PathBuf;
+
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("https://example.com".to_string());
+
+        // Set up a project with worktrees but select project header (dashboard mode)
+        let project = Project {
+            name: "test-project".to_string(),
+            path: PathBuf::from("/test"),
+            worktrees: vec![Worktree {
+                path: PathBuf::from("/test/wt"),
+                commit: "abc123".to_string(),
+                branch: Some("main".to_string()),
+            }],
+        };
+        state.set_projects(vec![project]);
+        // After set_projects, we're on project header (dashboard mode)
+        assert!(state.is_dashboard_mode());
+
+        let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_url_with_ansi_codes() {
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        // URL wrapped in ANSI color codes
+        state.set_pane_preview("Check \x1b[32mhttps://example.com\x1b[0m here".to_string());
+
+        // After ANSI stripping: "Check https://example.com here"
+        // "Check " = 6 chars, URL starts at col 6
+        // Terminal col = 41 + 6 = 47
+        let action = handle_mouse_event(mouse_left_click(47, 4), &mut state);
+        assert_eq!(action, Action::OpenUrl("https://example.com".to_string()));
     }
 
     // ========== Auto-Kickstart Key Event Tests ==========
