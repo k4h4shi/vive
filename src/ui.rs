@@ -249,6 +249,9 @@ fn get_status_icon_and_color(status: &crate::state::AgentStatus) -> (&'static st
 }
 
 fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
+    // Store the preview area for mouse hit testing (Issue #78)
+    state.set_preview_area(area);
+
     let title = if let Some(project) = state.selected_project() {
         if let Some(worktree) = state.selected_worktree() {
             let branch = worktree.branch.as_deref().unwrap_or("(detached)");
