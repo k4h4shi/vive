@@ -54,7 +54,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
         ])
     } else {
         Line::from(Span::styled(
-            "Vive - Claude Code Cockpit",
+            "vive — parallel AI fixer, alive in the shell",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -1056,5 +1056,21 @@ mod tests {
         // max_title_len = 10, truncate at 10 - 3 = 7, so "日本語のイシュ..."
         assert!(result.ends_with("..."));
         assert_eq!(result.chars().count(), 10); // 7 chars + "..."
+    }
+
+    // ========== Header Catchphrase Tests (Issue #79) ==========
+
+    /// The default catchphrase displayed in the header when no status message is present.
+    /// This constant should match the README exactly.
+    pub const DEFAULT_HEADER_CATCHPHRASE: &str = "vive — parallel AI fixer, alive in the shell";
+
+    #[test]
+    fn test_header_default_catchphrase_matches_readme() {
+        // Issue #79: Verify the header catchphrase matches the README
+        // README uses: "vive — parallel AI fixer, alive in the shell"
+        assert_eq!(
+            DEFAULT_HEADER_CATCHPHRASE,
+            "vive — parallel AI fixer, alive in the shell"
+        );
     }
 }
