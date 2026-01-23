@@ -68,6 +68,13 @@ n = "code {path}"
     - Issue Pickerモード: `issue_command` で設定されたワンライナーを実行（例: `claude "/fix {issue_number}"`）
     - 利用可能なプレースホルダー: `{issue_number}`, `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
 
+#### バッチ作成機能 (Issue Picker)
+
+Issue Pickerでは複数のIssueを選択して、一括でタスクを作成できます。
+- `Space` キーでIssueを複数選択
+- `Enter` キーで選択した全Issueのタスクを一括作成
+- Auto-Kickstartが有効な場合、全タスクに対して自動実行
+
 ### 3. コンテキストの切り替え (Switching)
 タスクを選択して Enter を押すだけで、そのタスクのTmuxセッションに接続（Attach）します。
 作業が終われば Detach してViveに戻り、別のタスクに移る。この切り替えが瞬時に行えます。
