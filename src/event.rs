@@ -96,6 +96,12 @@ pub fn handle_mouse_event(mouse: MouseEvent, state: &mut AppState) -> Action {
 /// If the click is within the preview area and on a URL, returns `Action::OpenUrl`.
 /// Otherwise returns `Action::None`.
 fn handle_left_click(column: u16, row: u16, state: &AppState) -> Action {
+    // Disable URL clicks in dashboard mode - the pane_preview content doesn't match
+    // the displayed grid layout, so coordinate mapping would be incorrect.
+    if state.is_dashboard_mode() {
+        return Action::None;
+    }
+
     // Check if click is within preview area
     let preview_area = match state.preview_area() {
         Some(area) => area,
@@ -1199,6 +1205,33 @@ mod tests {
         state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
         state.set_pane_preview("https://example.com".to_string());
         state.enter_input_mode();
+
+        let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn test_left_click_ignored_in_dashboard_mode() {
+        use crate::discovery::{Project, Worktree};
+        use std::path::PathBuf;
+
+        let mut state = AppState::new();
+        state.set_preview_area(ratatui::layout::Rect::new(40, 3, 60, 20));
+        state.set_pane_preview("https://example.com".to_string());
+
+        // Set up a project with worktrees but select project header (dashboard mode)
+        let project = Project {
+            name: "test-project".to_string(),
+            path: PathBuf::from("/test"),
+            worktrees: vec![Worktree {
+                path: PathBuf::from("/test/wt"),
+                commit: "abc123".to_string(),
+                branch: Some("main".to_string()),
+            }],
+        };
+        state.set_projects(vec![project]);
+        // After set_projects, we're on project header (dashboard mode)
+        assert!(state.is_dashboard_mode());
 
         let action = handle_mouse_event(mouse_left_click(41, 4), &mut state);
         assert_eq!(action, Action::None);

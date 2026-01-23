@@ -8,8 +8,8 @@ use regex::Regex;
 
 /// Regex pattern for detecting URLs.
 /// Matches http:// and https:// URLs, stopping at whitespace and common delimiters.
-static URL_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"https?://[^\s<>\[\](){}"'`]+"#).unwrap());
+/// Allows `()[]` characters to support URLs like Wikipedia (e.g., Function_(mathematics)).
+static URL_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r#"https?://[^\s<>{}"'`]+"#).unwrap());
 
 /// ANSI escape sequence pattern for stripping terminal formatting.
 /// Matches both CSI sequences (e.g., color codes) and OSC sequences (e.g., hyperlinks).
@@ -57,21 +57,44 @@ pub fn extract_url_at_position(line: &str, char_pos: usize) -> Option<String> {
 ///
 /// URLs in text often have trailing punctuation that's part of the sentence
 /// but not the URL itself. This function removes common trailing characters
-/// like parentheses, brackets, commas, periods, etc.
+/// like commas, periods, etc.
+///
+/// For parentheses and brackets, it uses balanced matching: only removes
+/// trailing `)` if there are more `)` than `(` in the URL. This correctly
+/// handles URLs like `https://en.wikipedia.org/wiki/Function_(mathematics)`.
 fn clean_url_trailing(url: &str) -> String {
     let mut url = url.to_string();
-    // Remove trailing punctuation that's unlikely part of the URL
-    while url.ends_with(')')
-        || url.ends_with(']')
-        || url.ends_with(',')
-        || url.ends_with('.')
-        || url.ends_with(';')
-        || url.ends_with(':')
-        || url.ends_with('\'')
-        || url.ends_with('"')
-    {
-        url.pop();
+
+    while let Some(last_char) = url.chars().last() {
+        match last_char {
+            // Always remove these trailing punctuation marks
+            ',' | '.' | ';' | ':' | '\'' | '"' => {
+                url.pop();
+            }
+            // Only remove trailing ')' if unbalanced
+            ')' => {
+                let open = url.chars().filter(|&c| c == '(').count();
+                let close = url.chars().filter(|&c| c == ')').count();
+                if close > open {
+                    url.pop();
+                } else {
+                    break;
+                }
+            }
+            // Only remove trailing ']' if unbalanced
+            ']' => {
+                let open = url.chars().filter(|&c| c == '[').count();
+                let close = url.chars().filter(|&c| c == ']').count();
+                if close > open {
+                    url.pop();
+                } else {
+                    break;
+                }
+            }
+            _ => break,
+        }
     }
+
     url
 }
 
@@ -162,6 +185,51 @@ mod tests {
         assert_eq!(
             clean_url_trailing("https://example.com/path"),
             "https://example.com/path"
+        );
+    }
+
+    #[test]
+    fn test_clean_url_trailing_balanced_parentheses() {
+        // Wikipedia-style URLs with balanced parentheses should be preserved
+        assert_eq!(
+            clean_url_trailing("https://en.wikipedia.org/wiki/Function_(mathematics)"),
+            "https://en.wikipedia.org/wiki/Function_(mathematics)"
+        );
+    }
+
+    #[test]
+    fn test_clean_url_trailing_unbalanced_parentheses() {
+        // Unbalanced trailing parenthesis should be removed (e.g., "(see https://example.com)")
+        assert_eq!(
+            clean_url_trailing("https://example.com)"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn test_clean_url_trailing_balanced_brackets() {
+        // Balanced brackets should be preserved
+        assert_eq!(
+            clean_url_trailing("https://example.com/path[1]"),
+            "https://example.com/path[1]"
+        );
+    }
+
+    #[test]
+    fn test_clean_url_trailing_unbalanced_brackets() {
+        // Unbalanced trailing bracket should be removed
+        assert_eq!(
+            clean_url_trailing("https://example.com]"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn test_clean_url_trailing_nested_parentheses() {
+        // Multiple levels of parentheses
+        assert_eq!(
+            clean_url_trailing("https://example.com/page_(section_(sub))"),
+            "https://example.com/page_(section_(sub))"
         );
     }
 
@@ -287,6 +355,26 @@ mod tests {
         assert_eq!(
             extract_url_at_position(line, 10),
             Some("https://github.com/user/repo/pull/123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_url_wikipedia() {
+        // Wikipedia URLs with parentheses in the path
+        let line = "See https://en.wikipedia.org/wiki/Function_(mathematics) for details";
+        assert_eq!(
+            extract_url_at_position(line, 10),
+            Some("https://en.wikipedia.org/wiki/Function_(mathematics)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_url_in_parentheses() {
+        // URL wrapped in sentence parentheses - the outer ) should be removed
+        let line = "(see https://example.com)";
+        assert_eq!(
+            extract_url_at_position(line, 10),
+            Some("https://example.com".to_string())
         );
     }
 
