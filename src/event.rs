@@ -34,6 +34,9 @@ pub enum Action {
     /// Create a task from the selected issue.
     /// Second parameter is whether to auto-kickstart (send initial command).
     CreateTaskFromIssue(crate::github::GitHubIssue, bool),
+    /// Create tasks from multiple selected issues (batch operation).
+    /// Second parameter is whether to auto-kickstart (send initial command).
+    CreateTasksFromIssues(Vec<crate::github::GitHubIssue>, bool),
 }
 
 /// Poll for terminal events with a timeout.
@@ -279,16 +282,43 @@ fn handle_issue_picker_modal_key(key: KeyEvent, state: &mut AppState) -> Action 
             Action::None
         }
         KeyCode::Enter => {
-            if let Some(issue) = state.selected_issue().cloned() {
-                let auto_kickstart = state.modal_auto_kickstart().unwrap_or(true);
-                state.close_modal();
-                Action::CreateTaskFromIssue(issue, auto_kickstart)
+            let auto_kickstart = state.modal_auto_kickstart().unwrap_or(true);
+            let selected_count = state.selected_issues_count();
+
+            if selected_count == 0 {
+                // No explicit selection - use cursor position (existing behavior)
+                if let Some(issue) = state.selected_issue().cloned() {
+                    state.close_modal();
+                    Action::CreateTaskFromIssue(issue, auto_kickstart)
+                } else {
+                    Action::None
+                }
+            } else if selected_count == 1 {
+                // Single explicit selection - use CreateTaskFromIssue
+                let issues = state.selected_issues();
+                if let Some(issue) = issues.into_iter().next() {
+                    state.close_modal();
+                    Action::CreateTaskFromIssue(issue, auto_kickstart)
+                } else {
+                    Action::None
+                }
             } else {
-                Action::None
+                // Multiple selections - use batch action
+                let issues = state.selected_issues();
+                state.close_modal();
+                Action::CreateTasksFromIssues(issues, auto_kickstart)
             }
         }
         KeyCode::Tab => {
             state.toggle_modal_auto_kickstart();
+            Action::None
+        }
+        KeyCode::Char(' ') => {
+            // Space key toggles selection of current issue
+            if let Some(issue) = state.selected_issue() {
+                let issue_number = issue.number;
+                state.toggle_issue_selection(issue_number);
+            }
             Action::None
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -1106,6 +1136,169 @@ mod tests {
                 assert!(!auto_kickstart);
             }
             _ => panic!("Expected CreateTaskFromIssue action"),
+        }
+    }
+
+    // ========== Multi-select Space Key Tests ==========
+
+    #[test]
+    fn test_space_key_toggles_selection_of_current_issue_in_issue_picker() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ]);
+
+        // Initially issue 1 is at cursor and not selected
+        assert!(!state.is_issue_selected(1));
+
+        // Press Space to toggle selection
+        let action = handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.is_issue_selected(1));
+
+        // Press Space again to deselect
+        let action = handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(!state.is_issue_selected(1));
+    }
+
+    #[test]
+    fn test_space_key_toggles_selection_after_navigation() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+            GitHubIssue::new(3, "Third issue"),
+        ]);
+
+        // Navigate to second issue
+        state.issue_picker_select_next();
+        assert_eq!(state.selected_issue().map(|i| i.number), Some(2));
+
+        // Press Space to select issue 2
+        handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
+        assert!(state.is_issue_selected(2));
+        assert!(!state.is_issue_selected(1));
+        assert!(!state.is_issue_selected(3));
+    }
+
+    #[test]
+    fn test_enter_with_no_explicit_selection_uses_cursor_position() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ]);
+
+        // Navigate to second issue (cursor on issue 2, but no explicit selection)
+        state.issue_picker_select_next();
+        assert_eq!(state.selected_issues_count(), 0);
+
+        // Press Enter - should use cursor position (issue 2)
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        match action {
+            Action::CreateTaskFromIssue(issue, _) => {
+                assert_eq!(issue.number, 2);
+            }
+            _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_enter_with_one_explicit_selection_creates_single_task() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ]);
+
+        // Explicitly select issue 1 with Space
+        handle_key_event(key_event(KeyCode::Char(' ')), &mut state);
+        assert_eq!(state.selected_issues_count(), 1);
+
+        // Press Enter - should create single task from explicitly selected issue
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        match action {
+            Action::CreateTaskFromIssue(issue, _) => {
+                assert_eq!(issue.number, 1);
+            }
+            _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_enter_with_multiple_selections_creates_batch_action() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+            GitHubIssue::new(3, "Third issue"),
+        ]);
+
+        // Select multiple issues with Space
+        handle_key_event(key_event(KeyCode::Char(' ')), &mut state); // Select issue 1
+        state.issue_picker_select_next();
+        state.issue_picker_select_next();
+        handle_key_event(key_event(KeyCode::Char(' ')), &mut state); // Select issue 3
+
+        assert_eq!(state.selected_issues_count(), 2);
+
+        // Press Enter - should create batch action
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        match action {
+            Action::CreateTasksFromIssues(issues, auto_kickstart) => {
+                assert_eq!(issues.len(), 2);
+                let numbers: Vec<u32> = issues.iter().map(|i| i.number).collect();
+                assert!(numbers.contains(&1));
+                assert!(numbers.contains(&3));
+                assert!(auto_kickstart); // Default is true
+            }
+            _ => panic!("Expected CreateTasksFromIssues action, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_enter_with_multiple_selections_respects_auto_kickstart_setting() {
+        use crate::github::GitHubIssue;
+
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+        state.set_issue_picker_issues(vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ]);
+
+        // Select multiple issues
+        handle_key_event(key_event(KeyCode::Char(' ')), &mut state); // Select issue 1
+        state.issue_picker_select_next();
+        handle_key_event(key_event(KeyCode::Char(' ')), &mut state); // Select issue 2
+
+        // Toggle auto_kickstart off
+        state.toggle_modal_auto_kickstart();
+
+        // Press Enter
+        let action = handle_key_event(key_event(KeyCode::Enter), &mut state);
+        match action {
+            Action::CreateTasksFromIssues(_, auto_kickstart) => {
+                assert!(!auto_kickstart);
+            }
+            _ => panic!("Expected CreateTasksFromIssues action, got {:?}", action),
         }
     }
 }
