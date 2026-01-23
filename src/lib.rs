@@ -14,7 +14,6 @@ mod process;
 pub mod state;
 pub mod tmux;
 pub mod ui;
-pub mod url;
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -638,16 +637,6 @@ where
                     self.state.set_error_message("No project selected");
                 }
             }
-
-            Action::OpenUrl(url) => {
-                if let Err(e) = open_url(&url) {
-                    self.state
-                        .set_error_message(format!("Failed to open URL: {e}"));
-                } else {
-                    self.state
-                        .set_success_message(format!("Opened: {}", truncate_url(&url, 50)));
-                }
-            }
         }
 
         Ok(())
@@ -788,41 +777,6 @@ pub type ProductionApp<W> = App<
     RealProjectDiscovery,
     GhIssueFetcher,
 >;
-
-/// Open a URL in the system default browser.
-///
-/// Uses OS-specific commands: `open` on macOS, `xdg-open` on Linux, `start` on Windows.
-fn open_url(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open").arg(url).spawn()?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open").arg(url).spawn()?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()?;
-    }
-    Ok(())
-}
-
-/// Truncate a URL for display in status messages.
-///
-/// Uses character count (not byte count) to safely handle UTF-8 strings.
-fn truncate_url(url: &str, max_chars: usize) -> String {
-    let char_count = url.chars().count();
-    if char_count <= max_chars {
-        url.to_string()
-    } else {
-        let truncate_at = max_chars.saturating_sub(3);
-        let truncated: String = url.chars().take(truncate_at).collect();
-        format!("{truncated}...")
-    }
-}
 
 #[cfg(test)]
 mod tests {
