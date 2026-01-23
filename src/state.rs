@@ -180,6 +180,8 @@ pub enum ModalType {
         loading: bool,
         /// Whether to auto-kickstart after worktree creation.
         auto_kickstart: bool,
+        /// Set of selected issue numbers for batch operations.
+        selected_issues: HashSet<u32>,
     },
     /// Confirm deletion of a task/worktree.
     ConfirmDeletion { branch_name: String },
@@ -682,6 +684,7 @@ impl AppState {
             error: None,
             loading: true,
             auto_kickstart,
+            selected_issues: HashSet::new(),
         });
     }
 
@@ -834,6 +837,56 @@ impl AppState {
                         || issue.number.to_string().contains(&filter_lower)
                 })
                 .collect()
+        }
+    }
+
+    /// Toggle the selection state of an issue in the issue picker modal.
+    pub fn toggle_issue_selection(&mut self, issue_number: u32) {
+        if let Some(ModalType::IssuePicker {
+            selected_issues, ..
+        }) = &mut self.modal
+        {
+            if selected_issues.contains(&issue_number) {
+                selected_issues.remove(&issue_number);
+            } else {
+                selected_issues.insert(issue_number);
+            }
+        }
+    }
+
+    /// Check if an issue is selected in the issue picker modal.
+    pub fn is_issue_selected(&self, issue_number: u32) -> bool {
+        match &self.modal {
+            Some(ModalType::IssuePicker {
+                selected_issues, ..
+            }) => selected_issues.contains(&issue_number),
+            _ => false,
+        }
+    }
+
+    /// Get all selected issues from the issue picker modal.
+    pub fn selected_issues(&self) -> Vec<GitHubIssue> {
+        match &self.modal {
+            Some(ModalType::IssuePicker {
+                issues,
+                selected_issues,
+                ..
+            }) => issues
+                .iter()
+                .filter(|issue| selected_issues.contains(&issue.number))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Get the count of selected issues in the issue picker modal.
+    pub fn selected_issues_count(&self) -> usize {
+        match &self.modal {
+            Some(ModalType::IssuePicker {
+                selected_issues, ..
+            }) => selected_issues.len(),
+            _ => 0,
         }
     }
 
@@ -1108,6 +1161,74 @@ impl AppState {
 
         favorites.append(&mut non_favorites);
         favorites
+    }
+}
+
+/// Result tracker for batch task creation operations.
+///
+/// Tracks the progress and results of creating multiple tasks/worktrees
+/// from a list of GitHub issues.
+#[derive(Debug, Clone, Default)]
+pub struct BatchCreationResult {
+    /// Total number of tasks to create.
+    pub total: usize,
+    /// Number of tasks completed (either success or failure).
+    pub completed: usize,
+    /// Successful creations: issue_number -> branch_name.
+    pub successes: HashMap<u32, String>,
+    /// Failed creations: issue_number -> error_message.
+    pub failures: HashMap<u32, String>,
+}
+
+impl BatchCreationResult {
+    /// Create a new BatchCreationResult with the specified total count.
+    pub fn new(total: usize) -> Self {
+        Self {
+            total,
+            completed: 0,
+            successes: HashMap::new(),
+            failures: HashMap::new(),
+        }
+    }
+
+    /// Record a successful task creation.
+    pub fn record_success(&mut self, issue_number: u32, branch_name: String) {
+        self.successes.insert(issue_number, branch_name);
+        self.completed += 1;
+    }
+
+    /// Record a failed task creation.
+    pub fn record_failure(&mut self, issue_number: u32, error: String) {
+        self.failures.insert(issue_number, error);
+        self.completed += 1;
+    }
+
+    /// Check if all tasks have been processed.
+    pub fn is_complete(&self) -> bool {
+        self.completed >= self.total
+    }
+
+    /// Generate a human-readable summary of the batch creation results.
+    pub fn summary(&self) -> String {
+        let success_count = self.successes.len();
+        let failure_count = self.failures.len();
+
+        if failure_count == 0 {
+            format!(
+                "Batch creation complete: {} of {} tasks created successfully.",
+                success_count, self.total
+            )
+        } else if success_count == 0 {
+            format!(
+                "Batch creation failed: {} of {} tasks failed.",
+                failure_count, self.total
+            )
+        } else {
+            format!(
+                "Batch creation partial: {} succeeded, {} failed out of {} tasks.",
+                success_count, failure_count, self.total
+            )
+        }
     }
 }
 
@@ -2316,6 +2437,7 @@ mod tests {
                 error,
                 loading,
                 auto_kickstart,
+                selected_issues,
             }) => {
                 assert!(issues.is_empty());
                 assert_eq!(*selected_idx, 0);
@@ -2323,6 +2445,7 @@ mod tests {
                 assert!(error.is_none());
                 assert!(*loading);
                 assert!(*auto_kickstart); // Default is true
+                assert!(selected_issues.is_empty()); // selected_issues starts empty
             }
             _ => panic!("Expected IssuePicker modal"),
         }
@@ -2849,5 +2972,308 @@ mod tests {
         // Toggle it
         state.toggle_modal_auto_kickstart();
         assert_eq!(state.modal_auto_kickstart(), Some(false));
+    }
+
+    // ============================================================
+    // BatchCreationResult tests
+    // ============================================================
+
+    #[test]
+    fn test_batch_creation_result_new_initializes_correctly() {
+        let result = BatchCreationResult::new(5);
+
+        assert_eq!(result.total, 5);
+        assert_eq!(result.completed, 0);
+        assert!(result.successes.is_empty());
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_batch_creation_result_record_success() {
+        let mut result = BatchCreationResult::new(3);
+
+        result.record_success(42, "feature/issue-42".to_string());
+
+        assert_eq!(result.completed, 1);
+        assert_eq!(result.successes.len(), 1);
+        assert_eq!(
+            result.successes.get(&42),
+            Some(&"feature/issue-42".to_string())
+        );
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_batch_creation_result_record_failure() {
+        let mut result = BatchCreationResult::new(3);
+
+        result.record_failure(99, "Branch already exists".to_string());
+
+        assert_eq!(result.completed, 1);
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(
+            result.failures.get(&99),
+            Some(&"Branch already exists".to_string())
+        );
+        assert!(result.successes.is_empty());
+    }
+
+    #[test]
+    fn test_batch_creation_result_is_complete_when_all_processed() {
+        let mut result = BatchCreationResult::new(2);
+
+        assert!(!result.is_complete());
+
+        result.record_success(1, "feature/issue-1".to_string());
+        assert!(!result.is_complete());
+
+        result.record_failure(2, "Error".to_string());
+        assert!(result.is_complete());
+    }
+
+    #[test]
+    fn test_batch_creation_result_is_complete_returns_false_when_incomplete() {
+        let mut result = BatchCreationResult::new(5);
+
+        result.record_success(1, "feature/issue-1".to_string());
+        result.record_success(2, "feature/issue-2".to_string());
+
+        assert!(!result.is_complete());
+        assert_eq!(result.completed, 2);
+    }
+
+    #[test]
+    fn test_batch_creation_result_summary_all_success() {
+        let mut result = BatchCreationResult::new(3);
+
+        result.record_success(1, "feature/issue-1".to_string());
+        result.record_success(2, "feature/issue-2".to_string());
+        result.record_success(3, "feature/issue-3".to_string());
+
+        let summary = result.summary();
+        assert!(summary.contains("3 of 3"));
+        assert!(summary.contains("successfully"));
+        assert!(!summary.contains("failed"));
+    }
+
+    #[test]
+    fn test_batch_creation_result_summary_all_failure() {
+        let mut result = BatchCreationResult::new(2);
+
+        result.record_failure(1, "Error 1".to_string());
+        result.record_failure(2, "Error 2".to_string());
+
+        let summary = result.summary();
+        assert!(summary.contains("2 of 2"));
+        assert!(summary.contains("failed"));
+        assert!(!summary.contains("succeeded"));
+    }
+
+    #[test]
+    fn test_batch_creation_result_summary_partial_success_failure() {
+        let mut result = BatchCreationResult::new(4);
+
+        result.record_success(1, "feature/issue-1".to_string());
+        result.record_success(2, "feature/issue-2".to_string());
+        result.record_failure(3, "Error".to_string());
+        result.record_failure(4, "Another error".to_string());
+
+        let summary = result.summary();
+        assert!(summary.contains("2 succeeded"));
+        assert!(summary.contains("2 failed"));
+        assert!(summary.contains("4 tasks"));
+    }
+
+    // Tests for multi-select functionality in IssuePicker
+
+    #[test]
+    fn test_issue_picker_selected_issues_initially_empty() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        match &state.modal {
+            Some(ModalType::IssuePicker {
+                selected_issues, ..
+            }) => {
+                assert!(selected_issues.is_empty());
+            }
+            _ => panic!("Expected IssuePicker modal"),
+        }
+    }
+
+    #[test]
+    fn test_issue_picker_toggle_issue_selection_adds_issue() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // Initially not selected
+        assert!(!state.is_issue_selected(1));
+
+        // Toggle selection on
+        state.toggle_issue_selection(1);
+
+        // Now selected
+        assert!(state.is_issue_selected(1));
+    }
+
+    #[test]
+    fn test_issue_picker_toggle_issue_selection_removes_issue() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // Select issue
+        state.toggle_issue_selection(1);
+        assert!(state.is_issue_selected(1));
+
+        // Toggle selection off
+        state.toggle_issue_selection(1);
+
+        // Now not selected
+        assert!(!state.is_issue_selected(1));
+    }
+
+    #[test]
+    fn test_issue_picker_is_issue_selected_returns_false_for_unselected() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // No issues selected
+        assert!(!state.is_issue_selected(1));
+        assert!(!state.is_issue_selected(2));
+        assert!(!state.is_issue_selected(999)); // Non-existent issue
+    }
+
+    #[test]
+    fn test_issue_picker_selected_issues_returns_empty_when_none_selected() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        let selected = state.selected_issues();
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_issue_picker_selected_issues_returns_correct_issues() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+            GitHubIssue::new(3, "Third issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // Select issues 1 and 3
+        state.toggle_issue_selection(1);
+        state.toggle_issue_selection(3);
+
+        let selected = state.selected_issues();
+        assert_eq!(selected.len(), 2);
+
+        // Check that selected issues contain the right numbers
+        let selected_numbers: Vec<u32> = selected.iter().map(|i| i.number).collect();
+        assert!(selected_numbers.contains(&1));
+        assert!(selected_numbers.contains(&3));
+        assert!(!selected_numbers.contains(&2));
+    }
+
+    #[test]
+    fn test_issue_picker_selected_issues_count_returns_zero_when_none_selected() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        assert_eq!(state.selected_issues_count(), 0);
+    }
+
+    #[test]
+    fn test_issue_picker_selected_issues_count_returns_correct_count() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+            GitHubIssue::new(3, "Third issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        assert_eq!(state.selected_issues_count(), 0);
+
+        state.toggle_issue_selection(1);
+        assert_eq!(state.selected_issues_count(), 1);
+
+        state.toggle_issue_selection(3);
+        assert_eq!(state.selected_issues_count(), 2);
+
+        // Toggle off
+        state.toggle_issue_selection(1);
+        assert_eq!(state.selected_issues_count(), 1);
+    }
+
+    #[test]
+    fn test_issue_picker_multiple_selections_work() {
+        let mut state = AppState::new();
+        state.open_issue_picker_modal();
+
+        let issues = vec![
+            GitHubIssue::new(1, "First issue"),
+            GitHubIssue::new(2, "Second issue"),
+            GitHubIssue::new(3, "Third issue"),
+            GitHubIssue::new(4, "Fourth issue"),
+        ];
+        state.set_issue_picker_issues(issues);
+
+        // Select all issues
+        state.toggle_issue_selection(1);
+        state.toggle_issue_selection(2);
+        state.toggle_issue_selection(3);
+        state.toggle_issue_selection(4);
+
+        assert_eq!(state.selected_issues_count(), 4);
+        assert!(state.is_issue_selected(1));
+        assert!(state.is_issue_selected(2));
+        assert!(state.is_issue_selected(3));
+        assert!(state.is_issue_selected(4));
+
+        // Deselect some
+        state.toggle_issue_selection(2);
+        state.toggle_issue_selection(4);
+
+        assert_eq!(state.selected_issues_count(), 2);
+        assert!(state.is_issue_selected(1));
+        assert!(!state.is_issue_selected(2));
+        assert!(state.is_issue_selected(3));
+        assert!(!state.is_issue_selected(4));
     }
 }

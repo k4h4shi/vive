@@ -19,9 +19,13 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 - [x] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
     - **Manual**: ブランチ名を手動入力する。
     - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`feature/issue-{番号}` 形式でブランチを自動生成する。
+        - **Batch Creation**: Spaceキーで複数Issueを選択し、Enterキーで一括作成が可能。
+        - 選択されたIssueは `[x]` チェックボックスで表示され、選択件数がモーダル上部に表示される。
+        - 一部のタスク作成に失敗しても処理は継続し、完了後にサマリー（成功/失敗件数）を表示する。
     - **Auto-Kickstart**: タスク作成後、設定されたコマンドを自動実行する（デフォルト有効、Tabキーでトグル可能）。
         - Manual: `manual_command` で設定されたコマンドを実行（例: `claude`）。
         - Issue Picker: `issue_command` で設定されたワンライナーコマンドを実行（例: `claude "/fix {issue_number}"`）。
+        - Batch Creation時は、作成された全タスクに対してAuto-Kickstartを実行する。
         - 利用可能なプレースホルダー: `{issue_number}`, `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
 - [ ] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
 - [ ] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
@@ -114,9 +118,22 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | キー | 動作 | 備考 |
 | :--- | :--- | :--- |
 | `Tab` | **Auto-Kickstartトグル** | Auto-Kickstartの有効/無効を切り替え |
-| `Enter` | **決定** | 選択を確定 |
+| `Enter` | **決定** | 選択を確定（Issue Pickerでは選択中の全Issueでタスク作成） |
 | `Esc` | **キャンセル** | モーダルを閉じる |
 | `j` / `k` または `↓` / `↑` | **選択移動** | リスト内のカーソル移動 |
+| `Space` | **Issue選択トグル** | Issue Pickerでのみ有効。複数Issueを選択可能 |
+
+#### Issue Picker バッチ作成機能
+
+Issue Pickerモーダルでは、複数のIssueを選択して一括でタスクを作成できます。
+
+- **選択方法**: `Space` キーでIssueの選択/解除をトグル
+- **選択状態の表示**: 選択されたIssueは `[x]` チェックボックスで表示
+- **選択数の表示**: 1件以上選択時、モーダル上部に選択件数を表示
+- **一括作成**: `Enter` キーで選択中の全Issueのタスクを作成
+  - 選択なしの場合は、カーソル位置の1件のみ作成
+- **エラーハンドリング**: 一部のタスク作成に失敗しても処理は継続し、完了後にサマリーを表示
+- **Auto-Kickstart**: 有効な場合、作成された全タスクに対して自動キックスタートを実行
 
 #### マウス操作
 
@@ -178,7 +195,11 @@ struct GitHubIssue {
 enum ModalType {
     CreateTaskMethod { selected: CreateTaskMethod },  // Manual or Pick from Issue
     CreateTask { input: String },                     // Manual branch name input
-    IssuePicker { issues: Vec<GitHubIssue>, ... },   // Issue selection
+    IssuePicker {
+        issues: Vec<GitHubIssue>,
+        selected_indices: HashSet<usize>,  // Multi-select support
+        ...
+    },                                                // Issue selection (supports batch creation)
     ConfirmDeletion { branch_name: String },          // Delete confirmation
 }
 

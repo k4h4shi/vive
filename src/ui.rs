@@ -10,6 +10,10 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::state::{AppState, CreateTaskMethod, FocusMode, ModalType, StatusMessageType};
 
+/// The default catchphrase displayed in the header when no status message is present.
+/// This constant should match the README exactly.
+pub const DEFAULT_HEADER_CATCHPHRASE: &str = "vive — parallel AI fixer, alive in the shell";
+
 /// Render the UI based on the current application state.
 pub fn render(frame: &mut Frame, state: &mut AppState) {
     let area = frame.area();
@@ -54,7 +58,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
         ])
     } else {
         Line::from(Span::styled(
-            "Vive - Claude Code Cockpit",
+            DEFAULT_HEADER_CATCHPHRASE,
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -473,6 +477,7 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
             error,
             loading,
             auto_kickstart,
+            selected_issues,
         } => render_issue_picker_modal(
             frame,
             area,
@@ -482,6 +487,7 @@ fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalType) {
             error,
             *loading,
             *auto_kickstart,
+            selected_issues,
         ),
         ModalType::ConfirmDeletion { branch_name } => {
             render_confirm_deletion_modal(frame, area, branch_name)
@@ -578,6 +584,7 @@ fn render_issue_picker_modal(
     error: &Option<String>,
     loading: bool,
     auto_kickstart: bool,
+    selected_issues: &std::collections::HashSet<u32>,
 ) {
     // Center the modal
     let modal_width = 70.min(area.width.saturating_sub(4));
@@ -669,6 +676,7 @@ fn render_issue_picker_modal(
             for (display_idx, issue) in filtered_issues[start..end].iter().enumerate() {
                 let actual_idx = start + display_idx;
                 let is_selected = actual_idx == selected_idx;
+                let is_checked = selected_issues.contains(&issue.number);
 
                 let style = if is_selected {
                     Style::default()
@@ -678,9 +686,18 @@ fn render_issue_picker_modal(
                     Style::default().fg(Color::White)
                 };
 
+                // Checkbox styling: yellow if checked, dark gray if not
+                let checkbox = if is_checked { "[x]" } else { "[ ]" };
+                let checkbox_color = if is_checked {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                };
+
                 // Truncate title if too long
                 // Use saturating_sub to prevent underflow on narrow terminals
-                let max_title_len = (modal_width as usize).saturating_sub(12);
+                // Account for checkbox (4 chars) in the width calculation
+                let max_title_len = (modal_width as usize).saturating_sub(16);
                 let title = if max_title_len <= 3 {
                     // Too narrow to show any title, just show ellipsis
                     "...".to_string()
@@ -696,8 +713,9 @@ fn render_issue_picker_modal(
                 };
 
                 content.push(Line::from(vec![
+                    Span::styled(checkbox, Style::default().fg(checkbox_color)),
                     Span::styled(
-                        if is_selected { "> " } else { "  " },
+                        if is_selected { " > " } else { "   " },
                         Style::default().fg(Color::Green),
                     ),
                     Span::styled(
@@ -718,15 +736,32 @@ fn render_issue_picker_modal(
         }
     }
 
+    // Selection count display (only show if > 0)
+    let selection_count = selected_issues.len();
+    if selection_count > 0 {
+        content.push(Line::from(""));
+        content.push(Line::from(vec![
+            Span::styled(
+                format!("{selection_count} selected"),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Space", Style::default().fg(Color::DarkGray)),
+            Span::styled(": toggle", Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
     // Help line at the bottom
     content.push(Line::from(""));
     content.push(Line::from(vec![
         Span::styled("j/k", Style::default().fg(Color::DarkGray)),
         Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Tab", Style::default().fg(Color::DarkGray)),
+        Span::styled("Space", Style::default().fg(Color::DarkGray)),
         Span::styled(": Toggle  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Tab", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Auto-kick  ", Style::default().fg(Color::DarkGray)),
         Span::styled("Enter", Style::default().fg(Color::DarkGray)),
-        Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Create  ", Style::default().fg(Color::DarkGray)),
         Span::styled("Esc", Style::default().fg(Color::DarkGray)),
         Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
     ]));
@@ -1059,5 +1094,17 @@ mod tests {
         // max_title_len = 10, truncate at 10 - 3 = 7, so "日本語のイシュ..."
         assert!(result.ends_with("..."));
         assert_eq!(result.chars().count(), 10); // 7 chars + "..."
+    }
+
+    // ========== Header Catchphrase Tests (Issue #79) ==========
+
+    #[test]
+    fn test_header_default_catchphrase_matches_readme() {
+        // Issue #79: Verify the header catchphrase matches the README
+        // README uses: "vive — parallel AI fixer, alive in the shell"
+        assert_eq!(
+            super::DEFAULT_HEADER_CATCHPHRASE,
+            "vive — parallel AI fixer, alive in the shell"
+        );
     }
 }

@@ -462,6 +462,87 @@ where
                 self.state.toggle_expanded_selected();
             }
 
+            Action::CreateTasksFromIssues(issues, auto_kickstart) => {
+                if let Some(project) = self.state.selected_project().cloned() {
+                    let mut result = state::BatchCreationResult::new(issues.len());
+
+                    for issue in &issues {
+                        let branch_name = issue.branch_name();
+                        let worktree_path = project.path.join(".worktrees").join(&branch_name);
+
+                        let output = std::process::Command::new("git")
+                            .args([
+                                "worktree",
+                                "add",
+                                "-b",
+                                &branch_name,
+                                &worktree_path.to_string_lossy(),
+                            ])
+                            .current_dir(&project.path)
+                            .output();
+
+                        match output {
+                            Ok(output) if output.status.success() => {
+                                // Create tmux session
+                                let session_id = format!("{}__{}", project.name, branch_name);
+                                let worktree_path_str = worktree_path.to_string_lossy();
+                                let _ = self
+                                    .tmux
+                                    .ensure_session(&session_id, Some(&worktree_path_str));
+                                let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+
+                                // Auto-kickstart: execute the configured one-liner command
+                                if auto_kickstart
+                                    && !self.config.auto_kickstart.issue_command.is_empty()
+                                {
+                                    let command =
+                                        self.config.auto_kickstart.build_issue_command_full(
+                                            issue.number,
+                                            &session_id,
+                                            &branch_name,
+                                            &project.name,
+                                            &worktree_path.to_string_lossy(),
+                                        );
+                                    let _ = self.tmux.send_keys(&session_id, &command, true);
+                                }
+
+                                result.record_success(issue.number, branch_name);
+                            }
+                            Ok(output) => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                let error_msg = stderr.trim();
+                                if error_msg.is_empty() {
+                                    result
+                                        .record_failure(issue.number, "unknown error".to_string());
+                                } else {
+                                    result.record_failure(issue.number, error_msg.to_string());
+                                }
+                            }
+                            Err(e) => {
+                                result.record_failure(issue.number, format!("git command: {e}"));
+                            }
+                        }
+                    }
+
+                    // Refresh project list ONCE after all creations
+                    if let Ok(projects) = self
+                        .discovery
+                        .discover(&self.state.projects_root, &self.config.ignored_dirs)
+                    {
+                        self.state.set_projects(projects);
+                    }
+
+                    // Show summary message based on results
+                    if result.failures.is_empty() {
+                        self.state.set_success_message(result.summary());
+                    } else {
+                        self.state.set_error_message(result.summary());
+                    }
+                } else {
+                    self.state.set_error_message("No project selected");
+                }
+            }
+
             Action::DeleteTask(branch_name) => {
                 if let Some(project) = self.state.selected_project().cloned() {
                     let project_name = project.name.clone();
