@@ -10,6 +10,10 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::state::{AppState, CreateTaskMethod, FocusMode, ModalType, StatusMessageType};
 
+/// The default catchphrase displayed in the header when no status message is present.
+/// This constant should match the README exactly.
+pub const DEFAULT_HEADER_CATCHPHRASE: &str = "vive — parallel AI fixer, alive in the shell";
+
 /// Render the UI based on the current application state.
 pub fn render(frame: &mut Frame, state: &mut AppState) {
     let area = frame.area();
@@ -54,7 +58,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
         ])
     } else {
         Line::from(Span::styled(
-            "vive — parallel AI fixer, alive in the shell",
+            DEFAULT_HEADER_CATCHPHRASE,
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -1060,16 +1064,12 @@ mod tests {
 
     // ========== Header Catchphrase Tests (Issue #79) ==========
 
-    /// The default catchphrase displayed in the header when no status message is present.
-    /// This constant should match the README exactly.
-    pub const DEFAULT_HEADER_CATCHPHRASE: &str = "vive — parallel AI fixer, alive in the shell";
-
     #[test]
     fn test_header_default_catchphrase_matches_readme() {
         // Issue #79: Verify the header catchphrase matches the README
         // README uses: "vive — parallel AI fixer, alive in the shell"
         assert_eq!(
-            DEFAULT_HEADER_CATCHPHRASE,
+            super::DEFAULT_HEADER_CATCHPHRASE,
             "vive — parallel AI fixer, alive in the shell"
         );
     }
