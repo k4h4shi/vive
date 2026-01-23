@@ -511,10 +511,8 @@ where
                                 let stderr = String::from_utf8_lossy(&output.stderr);
                                 let error_msg = stderr.trim();
                                 if error_msg.is_empty() {
-                                    result.record_failure(
-                                        issue.number,
-                                        "unknown error".to_string(),
-                                    );
+                                    result
+                                        .record_failure(issue.number, "unknown error".to_string());
                                 } else {
                                     result.record_failure(issue.number, error_msg.to_string());
                                 }
