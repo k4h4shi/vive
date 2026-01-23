@@ -1,0 +1,86 @@
+name: Owner approval
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  owner-approval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require @k4h4shi approval for non-owner PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const OWNER = "k4h4shi";
+            const { owner, repo } = context.repo;
+
+            const prNumber =
+              context.payload.pull_request?.number ??
+              context.payload.review?.pull_request_url?.match(/\/pulls\/(\d+)$/)?.[1];
+
+            if (!prNumber) {
+              core.setFailed("Could not determine pull request number from event payload.");
+              return;
+            }
+
+            const pr = (
+              await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: Number(prNumber),
+              })
+            ).data;
+
+            const author = pr.user?.login;
+            const headSha = pr.head?.sha;
+
+            if (!author || !headSha) {
+              core.setFailed("Could not read PR author or head sha.");
+              return;
+            }
+
+            // Owner PRs can merge without approval.
+            if (author === OWNER) {
+              core.info(`PR author is ${OWNER}; skipping approval requirement.`);
+              return;
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: Number(prNumber),
+              per_page: 100,
+            });
+
+            const ownerReviews = reviews
+              .filter((r) => r.user?.login === OWNER && r.submitted_at)
+              .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime());
+
+            const last = ownerReviews.at(-1);
+
+            if (!last) {
+              core.setFailed(`@${OWNER} has not reviewed this PR yet.`);
+              return;
+            }
+
+            if (last.state !== "APPROVED") {
+              core.setFailed(`Latest review from @${OWNER} is '${last.state}', not APPROVED.`);
+              return;
+            }
+
+            // Ensure approval is for the current head commit (approval after last push)
+            if (last.commit_id !== headSha) {
+              core.setFailed(
+                `@${OWNER} approved commit ${last.commit_id}, but PR head is ${headSha}. Re-approve after latest push.`
+              );
+              return;
+            }
+
+            core.info(`@${OWNER} approval is present for current head (${headSha}).`);
+
