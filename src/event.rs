@@ -1210,7 +1210,7 @@ mod tests {
             Action::CreateTaskFromIssue(issue, _) => {
                 assert_eq!(issue.number, 2);
             }
-            _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
+            _ => panic!("Expected CreateTaskFromIssue action, got {action:?}"),
         }
     }
 
@@ -1235,7 +1235,7 @@ mod tests {
             Action::CreateTaskFromIssue(issue, _) => {
                 assert_eq!(issue.number, 1);
             }
-            _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
+            _ => panic!("Expected CreateTaskFromIssue action, got {action:?}"),
         }
     }
 
@@ -1269,7 +1269,7 @@ mod tests {
                 assert!(numbers.contains(&3));
                 assert!(auto_kickstart); // Default is true
             }
-            _ => panic!("Expected CreateTasksFromIssues action, got {:?}", action),
+            _ => panic!("Expected CreateTasksFromIssues action, got {action:?}"),
         }
     }
 
@@ -1298,7 +1298,7 @@ mod tests {
             Action::CreateTasksFromIssues(_, auto_kickstart) => {
                 assert!(!auto_kickstart);
             }
-            _ => panic!("Expected CreateTasksFromIssues action, got {:?}", action),
+            _ => panic!("Expected CreateTasksFromIssues action, got {action:?}"),
         }
     }
 }

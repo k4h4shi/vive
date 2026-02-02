@@ -105,3 +105,24 @@ n = "code {path}"
 *   キーごとに異なるアプリケーションで開く
 *   タスク作成直後に `npm install` を走らせる
 *   タスク作成直後に Claude Code を起動してプロンプトを流し込む
+
+### Base Branch (ベースブランチ)
+
+Worktree作成時のベースブランチを設定できます。
+
+#### 設定例
+
+```toml
+# Worktree作成時のベースブランチ (省略時は現在のHEADから作成)
+base_branch = "develop"
+```
+
+#### 動作
+
+- **設定あり**: `git worktree add -b <branch> <path> <base_branch>` で指定されたベースブランチから分岐
+- **設定なし**: `git worktree add -b <branch> <path>` で現在のHEADから分岐（デフォルト動作）
+
+#### ユースケース
+
+- `develop` ブランチをベースにしたい場合（例: mechanix）
+- プロジェクトごとに異なる開発フローに対応

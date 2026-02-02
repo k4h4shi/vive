@@ -283,14 +283,23 @@ where
             Action::CreateTask(branch_name, auto_kickstart) => {
                 if let Some(project) = self.state.selected_project().cloned() {
                     let worktree_path = project.path.join(".worktrees").join(&branch_name);
+
+                    // Build git worktree command with optional base branch
+                    let mut args = vec![
+                        "worktree".to_string(),
+                        "add".to_string(),
+                        "-b".to_string(),
+                        branch_name.clone(),
+                        worktree_path.to_string_lossy().to_string(),
+                    ];
+
+                    // Add base branch if configured
+                    if let Some(ref base) = self.config.base_branch {
+                        args.push(base.clone());
+                    }
+
                     let output = std::process::Command::new("git")
-                        .args([
-                            "worktree",
-                            "add",
-                            "-b",
-                            &branch_name,
-                            &worktree_path.to_string_lossy(),
-                        ])
+                        .args(&args)
                         .current_dir(&project.path)
                         .output();
 
@@ -386,14 +395,23 @@ where
                 // Reuse the CreateTask logic
                 if let Some(project) = self.state.selected_project().cloned() {
                     let worktree_path = project.path.join(".worktrees").join(&branch_name);
+
+                    // Build git worktree command with optional base branch
+                    let mut args = vec![
+                        "worktree".to_string(),
+                        "add".to_string(),
+                        "-b".to_string(),
+                        branch_name.clone(),
+                        worktree_path.to_string_lossy().to_string(),
+                    ];
+
+                    // Add base branch if configured
+                    if let Some(ref base) = self.config.base_branch {
+                        args.push(base.clone());
+                    }
+
                     let output = std::process::Command::new("git")
-                        .args([
-                            "worktree",
-                            "add",
-                            "-b",
-                            &branch_name,
-                            &worktree_path.to_string_lossy(),
-                        ])
+                        .args(&args)
                         .current_dir(&project.path)
                         .output();
 

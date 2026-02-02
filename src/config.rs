@@ -207,6 +207,15 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub auto_kickstart: AutoKickstartConfig,
+
+    /// Base branch for worktree creation.
+    /// If set, new worktrees will be created from this branch instead of the current HEAD.
+    ///
+    /// Example:
+    /// ```toml
+    /// base_branch = "develop"
+    /// ```
+    pub base_branch: Option<String>,
 }
 
 impl Default for Config {
@@ -218,6 +227,7 @@ impl Default for Config {
             terminal: TerminalConfig::default(),
             keybindings: HashMap::new(),
             auto_kickstart: AutoKickstartConfig::default(),
+            base_branch: None,
         }
     }
 }
@@ -287,6 +297,10 @@ ignored_dirs = [".git", "node_modules", ".worktrees", "target", "dist"]
 
 # Optional tmux prefix key override (e.g., "C-a" for Ctrl+a)
 # tmux_prefix = "C-a"
+
+# Base branch for worktree creation (defaults to current HEAD if not set)
+# If set, new worktrees will be created from this branch
+# base_branch = "develop"
 
 # Custom keybindings for opening sessions
 # Use {session_id} as placeholder for the target session name
@@ -1000,5 +1014,39 @@ enter = "tmux switch-client -t {session_id}"
         };
         let result = config.build_issue_command_full(42, "session", "branch", "project", "/path");
         assert_eq!(result, "claude --interactive");
+    }
+
+    // ========================================================================
+    // TDD: Issue #88 - Configurable base branch for worktree creation
+    // ========================================================================
+
+    #[test]
+    fn test_base_branch_default_is_none() {
+        let config = Config::default();
+        assert!(config.base_branch.is_none());
+    }
+
+    #[test]
+    fn test_parse_base_branch_from_toml() {
+        let toml_content = r#"
+base_branch = "develop"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.base_branch, Some("develop".to_string()));
+    }
+
+    #[test]
+    fn test_parse_base_branch_with_other_configs() {
+        let toml_content = r#"
+projects_root = "/home/user/projects"
+base_branch = "main"
+ignored_dirs = [".git"]
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.base_branch, Some("main".to_string()));
+        assert_eq!(
+            config.projects_root,
+            Some(PathBuf::from("/home/user/projects"))
+        );
     }
 }

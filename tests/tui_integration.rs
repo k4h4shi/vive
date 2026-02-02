@@ -2328,7 +2328,7 @@ fn test_issue_picker_select_creates_task() {
             assert_eq!(issue.branch_name(), "feature/issue-42");
             assert!(auto_kickstart); // Default is true
         }
-        _ => panic!("Expected CreateTaskFromIssue action, got {:?}", action),
+        _ => panic!("Expected CreateTaskFromIssue action, got {action:?}"),
     }
 
     // Modal should be closed
