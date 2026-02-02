@@ -53,6 +53,9 @@ cd vive
 # プロジェクトのルートディレクトリ
 projects_root = "~/src/github"
 
+# Worktree作成時のベースブランチ (省略時は現在のHEADから作成)
+# base_branch = "develop"
+
 # キーバインド設定
 [keybindings]
 # Enterキーでタスクを開く時のコマンド (Ghosttyの例)

@@ -1998,7 +1998,7 @@ mod tests {
         let text = status.status_text();
 
         // Should be truncated to max 20 chars + "..."
-        assert!(text.len() < format!("Working ({})", long_detail).len());
+        assert!(text.len() < format!("Working ({long_detail})").len());
         assert!(text.contains("..."));
         assert!(text.starts_with("Working ("));
         assert!(text.ends_with(")"));
@@ -2014,7 +2014,7 @@ mod tests {
         let text = status.status_text();
 
         // Should be truncated
-        assert!(text.len() < format!("Wait: {}", long_command).len());
+        assert!(text.len() < format!("Wait: {long_command}").len());
         assert!(text.contains("..."));
     }
 
