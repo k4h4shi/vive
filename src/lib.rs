@@ -589,7 +589,9 @@ where
                             // Check if the error is "not found" or "does not exist"
                             let is_not_found = stderr.contains("does not exist")
                                 || stderr.contains("not found")
-                                || stderr.contains("no such file");
+                                || stderr.contains("no such file")
+                                || stderr.contains("is not a working tree")
+                                || stderr.contains("not a working tree");
                             (false, if is_not_found { None } else { Some(stderr.to_string()) })
                         }
                         Err(e) => (false, Some(e.to_string())),
