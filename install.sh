@@ -62,6 +62,15 @@ maybe_sudo() {
     fi
 }
 
+# Run command with sudo if necessary for package managers
+maybe_sudo_pkg() {
+    if [[ "$(id -u)" -ne 0 ]]; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
 # Uninstall
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo "Uninstalling vive..."
@@ -146,20 +155,20 @@ install_packages() {
             brew install "$@"
             ;;
         apt)
-            maybe_sudo apt-get update -y
-            maybe_sudo apt-get install -y "$@"
+            maybe_sudo_pkg apt-get update -y
+            maybe_sudo_pkg apt-get install -y "$@"
             ;;
         dnf)
-            maybe_sudo dnf install -y "$@"
+            maybe_sudo_pkg dnf install -y "$@"
             ;;
         yum)
-            maybe_sudo yum install -y "$@"
+            maybe_sudo_pkg yum install -y "$@"
             ;;
         pacman)
-            maybe_sudo pacman -Sy --noconfirm "$@"
+            maybe_sudo_pkg pacman -Sy --noconfirm "$@"
             ;;
         apk)
-            maybe_sudo apk add --no-cache "$@"
+            maybe_sudo_pkg apk add --no-cache "$@"
             ;;
         *)
             return 1
