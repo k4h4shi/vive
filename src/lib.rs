@@ -592,7 +592,14 @@ where
                                 || stderr.contains("no such file")
                                 || stderr.contains("is not a working tree")
                                 || stderr.contains("not a working tree");
-                            (false, if is_not_found { None } else { Some(stderr.to_string()) })
+                            (
+                                false,
+                                if is_not_found {
+                                    None
+                                } else {
+                                    Some(stderr.to_string())
+                                },
+                            )
                         }
                         Err(e) => (false, Some(e.to_string())),
                     };
@@ -607,9 +614,8 @@ where
                     match branch_delete {
                         Ok(output) if output.status.success() => {
                             if worktree_removed {
-                                self.state.set_success_message(format!(
-                                    "Deleted task '{branch_name}'"
-                                ));
+                                self.state
+                                    .set_success_message(format!("Deleted task '{branch_name}'"));
                             } else if worktree_error.is_none() {
                                 self.state.set_success_message(format!(
                                     "Deleted branch '{branch_name}' (worktree was already removed)"
@@ -652,9 +658,8 @@ where
                                     "Worktree removed but failed to delete branch: {e}"
                                 ));
                             } else {
-                                self.state.set_error_message(format!(
-                                    "Failed to delete branch: {e}"
-                                ));
+                                self.state
+                                    .set_error_message(format!("Failed to delete branch: {e}"));
                             }
                         }
                     }
@@ -672,16 +677,13 @@ where
                                 .worktrees
                                 .iter()
                                 .filter_map(|wt| {
-                                    wt.session_id(&project_name).map(|id| {
-                                        (id, wt.path.to_string_lossy().to_string())
-                                    })
+                                    wt.session_id(&project_name)
+                                        .map(|id| (id, wt.path.to_string_lossy().to_string()))
                                 })
                                 .collect();
 
                             if !worktree_sessions.is_empty() {
-                                let _ = self
-                                    .tmux
-                                    .sync_dashboard(&project_name, &worktree_sessions);
+                                let _ = self.tmux.sync_dashboard(&project_name, &worktree_sessions);
                             }
                         }
 
