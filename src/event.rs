@@ -771,6 +771,23 @@ mod tests {
         assert!(state.modal.is_none());
     }
 
+    // ========== Issue #90: Delete without worktree Tests ==========
+
+    #[test]
+    fn test_d_key_allows_deletion_when_worktree_selected() {
+        // This test covers the case where a worktree exists in the list
+        // (whether or not the physical path exists is handled by lib.rs)
+        let mut state = create_test_state_with_projects();
+        // Navigate to feature worktree
+        state.select_next(); // worktree 0 (main)
+        state.select_next(); // worktree 1 (feature)
+
+        let action = handle_key_event(key_event(KeyCode::Char('d')), &mut state);
+        assert_eq!(action, Action::None);
+        assert!(state.modal.is_some()); // Modal should open
+        assert_eq!(state.deletion_branch_name(), Some("feature"));
+    }
+
     // ========== Create Task Method Modal Tests ==========
 
     #[test]

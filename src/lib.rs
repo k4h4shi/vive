@@ -570,9 +570,9 @@ where
                         let _ = self.tmux.kill_session(&session_id);
                     }
 
-                    // Remove worktree
+                    // Try to remove worktree (may fail if worktree doesn't exist)
                     let worktree_path = project.path.join(".worktrees").join(&branch_name);
-                    let worktree_remove = std::process::Command::new("git")
+                    let worktree_remove_result = std::process::Command::new("git")
                         .args([
                             "worktree",
                             "remove",
@@ -582,74 +582,108 @@ where
                         .current_dir(&project.path)
                         .output();
 
-                    match worktree_remove {
+                    let (worktree_removed, worktree_error) = match worktree_remove_result {
+                        Ok(output) if output.status.success() => (true, None),
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            // Check if the error is "not found" or "does not exist"
+                            let is_not_found = stderr.contains("does not exist")
+                                || stderr.contains("not found")
+                                || stderr.contains("no such file");
+                            (false, if is_not_found { None } else { Some(stderr.to_string()) })
+                        }
+                        Err(e) => (false, Some(e.to_string())),
+                    };
+
+                    // Always try to delete the branch, even if worktree removal failed
+                    // (Issue #90: support deletion when only session/branch exists)
+                    let branch_delete = std::process::Command::new("git")
+                        .args(["branch", "-D", &branch_name])
+                        .current_dir(&project.path)
+                        .output();
+
+                    match branch_delete {
                         Ok(output) if output.status.success() => {
-                            // Delete the branch
-                            let branch_delete = std::process::Command::new("git")
-                                .args(["branch", "-D", &branch_name])
-                                .current_dir(&project.path)
-                                .output();
-
-                            match branch_delete {
-                                Ok(output) if output.status.success() => {
-                                    self.state.set_success_message(format!(
-                                        "Deleted task '{branch_name}'"
-                                    ));
-                                }
-                                Ok(output) => {
-                                    let stderr = String::from_utf8_lossy(&output.stderr);
-                                    self.state.set_error_message(format!(
-                                        "Worktree removed but failed to delete branch: {}",
-                                        stderr.trim()
-                                    ));
-                                }
-                                Err(e) => {
-                                    self.state.set_error_message(format!(
-                                        "Worktree removed but failed to delete branch: {e}"
-                                    ));
-                                }
-                            }
-
-                            // Refresh project list
-                            if let Ok(projects) = self
-                                .discovery
-                                .discover(&self.state.projects_root, &self.config.ignored_dirs)
-                            {
-                                // Sync dashboard with updated worktrees before moving projects
-                                if let Some(updated_project) =
-                                    projects.iter().find(|p| p.name == project_name)
-                                {
-                                    let worktree_sessions: Vec<(String, String)> = updated_project
-                                        .worktrees
-                                        .iter()
-                                        .filter_map(|wt| {
-                                            wt.session_id(&project_name).map(|id| {
-                                                (id, wt.path.to_string_lossy().to_string())
-                                            })
-                                        })
-                                        .collect();
-
-                                    if !worktree_sessions.is_empty() {
-                                        let _ = self
-                                            .tmux
-                                            .sync_dashboard(&project_name, &worktree_sessions);
-                                    }
-                                }
-
-                                self.state.set_projects(projects);
+                            if worktree_removed {
+                                self.state.set_success_message(format!(
+                                    "Deleted task '{branch_name}'"
+                                ));
+                            } else if worktree_error.is_none() {
+                                self.state.set_success_message(format!(
+                                    "Deleted branch '{branch_name}' (worktree was already removed)"
+                                ));
+                            } else {
+                                self.state.set_error_message(format!(
+                                    "Deleted branch '{branch_name}', but worktree removal failed: {}",
+                                    worktree_error.unwrap().trim()
+                                ));
                             }
                         }
                         Ok(output) => {
                             let stderr = String::from_utf8_lossy(&output.stderr);
-                            self.state.set_error_message(format!(
-                                "Failed to remove worktree: {}",
-                                stderr.trim()
-                            ));
+                            if let Some(wt_error) = worktree_error {
+                                self.state.set_error_message(format!(
+                                    "Failed to delete: worktree removal failed ({}), branch deletion failed ({})",
+                                    wt_error.trim(),
+                                    stderr.trim()
+                                ));
+                            } else if worktree_removed {
+                                self.state.set_error_message(format!(
+                                    "Worktree removed but failed to delete branch: {}",
+                                    stderr.trim()
+                                ));
+                            } else {
+                                self.state.set_error_message(format!(
+                                    "Failed to delete branch: {}",
+                                    stderr.trim()
+                                ));
+                            }
                         }
                         Err(e) => {
-                            self.state
-                                .set_error_message(format!("Failed to run git command: {e}"));
+                            if let Some(wt_error) = worktree_error {
+                                self.state.set_error_message(format!(
+                                    "Failed to delete: worktree removal failed ({}), branch deletion failed ({e})",
+                                    wt_error.trim()
+                                ));
+                            } else if worktree_removed {
+                                self.state.set_error_message(format!(
+                                    "Worktree removed but failed to delete branch: {e}"
+                                ));
+                            } else {
+                                self.state.set_error_message(format!(
+                                    "Failed to delete branch: {e}"
+                                ));
+                            }
                         }
+                    }
+
+                    // Refresh project list regardless of worktree removal result
+                    if let Ok(projects) = self
+                        .discovery
+                        .discover(&self.state.projects_root, &self.config.ignored_dirs)
+                    {
+                        // Sync dashboard with updated worktrees before moving projects
+                        if let Some(updated_project) =
+                            projects.iter().find(|p| p.name == project_name)
+                        {
+                            let worktree_sessions: Vec<(String, String)> = updated_project
+                                .worktrees
+                                .iter()
+                                .filter_map(|wt| {
+                                    wt.session_id(&project_name).map(|id| {
+                                        (id, wt.path.to_string_lossy().to_string())
+                                    })
+                                })
+                                .collect();
+
+                            if !worktree_sessions.is_empty() {
+                                let _ = self
+                                    .tmux
+                                    .sync_dashboard(&project_name, &worktree_sessions);
+                            }
+                        }
+
+                        self.state.set_projects(projects);
                     }
                 } else {
                     self.state.set_error_message("No project selected");
