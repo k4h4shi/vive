@@ -27,8 +27,10 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
         - Issue Picker: `issue_command` で設定されたワンライナーコマンドを実行（例: `claude "/fix {issue_number}"`）。
         - Batch Creation時は、作成された全タスクに対してAuto-Kickstartを実行する。
         - 利用可能なプレースホルダー: `{issue_number}`, `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
-- [ ] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
-- [ ] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
+- [x] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
+    - Worktreeが存在しない場合でも、SessionやBranchのみが残っている場合は削除可能（Issue #90）。
+    - Worktree削除に失敗しても、BranchとSessionの削除を試行する。
+- [x] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
 
 ### 2.3 エージェント監視 (Monitoring)
 - [ ] **Status Detection**: Claude Codeのプロセス状態と出力を解析し、リアルタイムで状態を表示する。
@@ -98,7 +100,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 | :--- | :--- | :--- |
 | `j` / `k` | カーソル移動 | プロジェクト・タスク間を移動 |
 | `n` | **New Task** | タスク作成方法選択モーダルを開く（Manual / Pick from Issue） |
-| `D` (Shift+d) | **Delete Task** | タスク削除確認モーダルを開く |
+| `d` or `D` | **Delete Task** | タスク削除確認モーダルを開く（Session/Branch/Worktreeのいずれかが存在する場合に削除可能） |
 | `f` | **Favorite** | 選択中のプロジェクトをお気に入りトグル |
 | `i` | **Input** | コマンド入力モードへ移行 |
 | `Space` | **Expand/Collapse** | プロジェクトの展開/折りたたみ |
