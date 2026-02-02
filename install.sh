@@ -93,27 +93,150 @@ fi
 log "Installing vive..."
 log ""
 
-# Check for Rust toolchain
-if ! command -v cargo &> /dev/null; then
-    echo "Error: Rust toolchain (cargo) is required but not installed." >&2
-    echo "Install Rust with:" >&2
-    echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
-    exit 1
-fi
+has_cmd() {
+    command -v "$1" &> /dev/null
+}
+
+prompt_yes_no() {
+    local prompt="$1"
+    local default_yes="${2:-true}"
+
+    if [[ "$QUIET" == true ]]; then
+        return 0
+    fi
+
+    # If not running in a TTY, default to "no" unless explicitly forced.
+    if [[ ! -t 0 ]]; then
+        return 1
+    fi
+
+    local suffix="[Y/n]"
+    if [[ "$default_yes" != true ]]; then
+        suffix="[y/N]"
+    fi
+
+    while true; do
+        read -r -p "$prompt $suffix " answer
+        answer="${answer:-}"
+        if [[ -z "$answer" ]]; then
+            [[ "$default_yes" == true ]] && return 0 || return 1
+        fi
+        case "$answer" in
+            y|Y|yes|YES) return 0 ;;
+            n|N|no|NO) return 1 ;;
+        esac
+    done
+}
+
+detect_pkg_manager() {
+    if has_cmd brew; then echo "brew"; return; fi
+    if has_cmd apt-get; then echo "apt"; return; fi
+    if has_cmd dnf; then echo "dnf"; return; fi
+    if has_cmd yum; then echo "yum"; return; fi
+    if has_cmd pacman; then echo "pacman"; return; fi
+    if has_cmd apk; then echo "apk"; return; fi
+    echo "unknown"
+}
+
+install_packages() {
+    local pm
+    pm="$(detect_pkg_manager)"
+    case "$pm" in
+        brew)
+            brew install "$@"
+            ;;
+        apt)
+            maybe_sudo apt-get update -y
+            maybe_sudo apt-get install -y "$@"
+            ;;
+        dnf)
+            maybe_sudo dnf install -y "$@"
+            ;;
+        yum)
+            maybe_sudo yum install -y "$@"
+            ;;
+        pacman)
+            maybe_sudo pacman -Sy --noconfirm "$@"
+            ;;
+        apk)
+            maybe_sudo apk add --no-cache "$@"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+ensure_runtime_deps() {
+    local deps=("$@")
+    local missing=()
+    for cmd in "${deps[@]}"; do
+        if ! has_cmd "$cmd"; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    echo "Missing required dependencies: ${missing[*]}" >&2
+
+    if ! prompt_yes_no "Install missing dependencies now?" true; then
+        echo "Please install them and re-run:" >&2
+        echo "  ${missing[*]}" >&2
+        exit 1
+    fi
+
+    log "Installing dependencies: ${missing[*]} ..."
+    if ! install_packages "${missing[@]}"; then
+        echo "Error: Could not auto-install dependencies (no supported package manager found)." >&2
+        echo "Please install manually: ${missing[*]}" >&2
+        exit 1
+    fi
+}
+
+ensure_rust_toolchain() {
+    # If cargo exists but rustup has no default toolchain, configure one.
+    if has_cmd cargo; then
+        if has_cmd rustup; then
+            if ! rustup show active-toolchain &> /dev/null; then
+                log "Configuring rustup default toolchain (stable)..."
+                rustup toolchain install stable --profile minimal
+                rustup default stable
+            fi
+        fi
+        return 0
+    fi
+
+    # No cargo: install Rust via rustup (requires curl).
+    ensure_runtime_deps curl
+
+    if ! has_cmd rustup; then
+        log "Installing Rust toolchain via rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+    else
+        log "Installing Rust stable toolchain via rustup..."
+        rustup toolchain install stable --profile minimal
+        rustup default stable
+    fi
+
+    # Ensure this shell sees cargo.
+    if [[ -f "$HOME/.cargo/env" ]]; then
+        # shellcheck disable=SC1090
+        source "$HOME/.cargo/env"
+    fi
+
+    if ! has_cmd cargo; then
+        echo "Error: Rust toolchain (cargo) is required but could not be installed." >&2
+        exit 1
+    fi
+}
 
 # Check runtime dependencies
 log "Checking dependencies..."
-missing_deps=()
-for cmd in tmux git; do
-    if ! command -v "$cmd" &> /dev/null; then
-        missing_deps+=("$cmd")
-    fi
-done
-
-if [[ ${#missing_deps[@]} -gt 0 ]]; then
-    echo "Error: Missing required dependencies: ${missing_deps[*]}" >&2
-    exit 1
-fi
+ensure_runtime_deps tmux git
+ensure_rust_toolchain
 
 log "  ✓ All dependencies found"
 log ""
