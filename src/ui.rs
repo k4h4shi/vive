@@ -71,16 +71,21 @@ fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
-    // Split content into sidebar and preview
-    // Use 40% for sidebar to accommodate longer branch names
-    let content_chunks = Layout::horizontal([
-        Constraint::Percentage(40), // Sidebar
-        Constraint::Percentage(60), // Preview
-    ])
-    .split(area);
+    if state.list_only() {
+        // List-only mode: sidebar takes full width, no preview pane
+        render_sidebar(frame, area, state);
+    } else {
+        // Normal mode: split content into sidebar and preview
+        // Use 40% for sidebar to accommodate longer branch names
+        let content_chunks = Layout::horizontal([
+            Constraint::Percentage(40), // Sidebar
+            Constraint::Percentage(60), // Preview
+        ])
+        .split(area);
 
-    render_sidebar(frame, content_chunks[0], state);
-    render_preview(frame, content_chunks[1], state);
+        render_sidebar(frame, content_chunks[0], state);
+        render_preview(frame, content_chunks[1], state);
+    }
 }
 
 fn render_sidebar(frame: &mut Frame, area: Rect, state: &mut AppState) {

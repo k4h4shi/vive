@@ -22,14 +22,16 @@ use vive::{
 };
 
 fn main() -> Result<()> {
-    // Check for --mcp-server flag
+    // Check for flags
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--mcp-server") {
         return run_mcp_server_mode();
     }
 
+    let list_only = args.iter().any(|arg| arg == "--list-only" || arg == "-l");
+
     // Normal TUI mode
-    run_tui_mode()
+    run_tui_mode(list_only)
 }
 
 /// Run the application in MCP server mode.
@@ -61,7 +63,7 @@ fn run_mcp_server_mode() -> Result<()> {
 }
 
 /// Run the application in normal TUI mode.
-fn run_tui_mode() -> Result<()> {
+fn run_tui_mode(list_only: bool) -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -81,6 +83,11 @@ fn run_tui_mode() -> Result<()> {
         GhIssueFetcher,
         config.clone(),
     );
+
+    // Apply list-only mode
+    if list_only {
+        app.state_mut().set_list_only(true);
+    }
 
     // Run the application
     let result = run_with_terminal_control(&mut app, &config);

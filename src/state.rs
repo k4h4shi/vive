@@ -250,6 +250,8 @@ pub struct AppState {
     /// Set of project names that are expanded (showing worktrees).
     /// Projects not in this set are collapsed.
     expanded_projects: HashSet<String>,
+    /// Whether list-only mode is enabled (hide preview pane).
+    list_only: bool,
 }
 
 impl Default for AppState {
@@ -274,6 +276,7 @@ impl Default for AppState {
             favorites_modified: false,
             issue_title_cache: IssueTitleCache::new(),
             expanded_projects: HashSet::new(),
+            list_only: false,
         }
     }
 }
@@ -297,6 +300,16 @@ impl AppState {
 
     pub fn quit(&mut self) {
         self.should_quit = true;
+    }
+
+    /// Whether list-only mode is enabled (hide preview pane).
+    pub fn list_only(&self) -> bool {
+        self.list_only
+    }
+
+    /// Enable or disable list-only mode.
+    pub fn set_list_only(&mut self, list_only: bool) {
+        self.list_only = list_only;
     }
 
     /// Set the discovered projects.

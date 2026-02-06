@@ -2488,3 +2488,106 @@ fn test_issue_picker_error_state() {
     assert_buffer_contains(buffer, "Error:");
     assert_buffer_contains(buffer, "gh CLI not installed");
 }
+
+// ============================================================================
+// List-Only Mode Tests
+// ============================================================================
+
+/// Test: list_only defaults to false.
+#[test]
+fn test_list_only_default_is_false() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+    app.init().unwrap();
+
+    assert!(!app.state().list_only());
+}
+
+/// Test: list_only can be set to true.
+#[test]
+fn test_list_only_can_be_enabled() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+    app.init().unwrap();
+
+    app.state_mut().set_list_only(true);
+    assert!(app.state().list_only());
+}
+
+/// Test: In list-only mode, preview pane text is not rendered.
+#[test]
+fn test_list_only_hides_preview_pane() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+    app.init().unwrap();
+    expand_all_projects(&mut app);
+
+    // Enable list-only mode
+    app.state_mut().set_list_only(true);
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Preview pane placeholder should NOT be shown
+    assert_buffer_not_contains(buffer, "No active target");
+    // Sidebar content should still be present
+    assert_buffer_contains(buffer, "user/project-alpha");
+    assert_buffer_contains(buffer, "user/project-beta");
+}
+
+/// Test: Normal mode still shows preview pane.
+#[test]
+fn test_normal_mode_still_shows_preview() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+    app.init().unwrap();
+    expand_all_projects(&mut app);
+
+    // Navigate to worktree
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    // Preview pane should be shown
+    assert_buffer_contains(buffer, "No active target");
+}
+
+/// Test: list-only mode still renders header and footer.
+#[test]
+fn test_list_only_renders_header_and_footer() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+    app.init().unwrap();
+
+    app.state_mut().set_list_only(true);
+    app.render().unwrap();
+
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "Vive");
+    assert_buffer_contains(buffer, "Commands");
+}
+
+/// Test: Navigation still works in list-only mode.
+#[test]
+fn test_list_only_navigation_works() {
+    let projects = create_test_projects();
+    let mut app = create_test_app(projects, vec![]);
+    app.init().unwrap();
+    expand_all_projects(&mut app);
+
+    app.state_mut().set_list_only(true);
+
+    // Navigate down to worktree
+    let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+    let action = app.handle_key_event(key);
+    app.handle_action(action).unwrap();
+
+    // Verify worktree is selected
+    assert!(app.state().selected_worktree_idx().is_some());
+
+    app.render().unwrap();
+    let buffer = app.terminal().backend().buffer();
+    assert_buffer_contains(buffer, "user/project-alpha");
+}
