@@ -220,12 +220,22 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        let mut keybindings = HashMap::new();
+        keybindings.insert(
+            "enter".to_string(),
+            "tmux switch-client -t {session_id}".to_string(),
+        );
+        keybindings.insert(
+            "o".to_string(),
+            "tmux switch-client -t {session_id}".to_string(),
+        );
+
         Self {
             projects_root: None,
             ignored_dirs: DEFAULT_IGNORED_DIRS.iter().map(|s| s.to_string()).collect(),
             tmux_prefix: None,
             terminal: TerminalConfig::default(),
-            keybindings: HashMap::new(),
+            keybindings,
             auto_kickstart: AutoKickstartConfig::default(),
             base_branch: None,
         }
@@ -730,9 +740,16 @@ projects = ["user/project-a", "user/project-b"]
     // ========================================================================
 
     #[test]
-    fn test_keybindings_default_is_empty() {
+    fn test_keybindings_default_is_populated() {
         let config = Config::default();
-        assert!(config.keybindings.is_empty());
+        assert_eq!(
+            config.keybindings.get("enter"),
+            Some(&"tmux switch-client -t {session_id}".to_string())
+        );
+        assert_eq!(
+            config.keybindings.get("o"),
+            Some(&"tmux switch-client -t {session_id}".to_string())
+        );
     }
 
     #[test]
@@ -818,7 +835,7 @@ enter = "custom-command {session_id}"
     #[test]
     fn test_has_keybindings() {
         let config = Config::default();
-        assert!(!config.has_keybindings());
+        assert!(config.has_keybindings());
 
         let toml_content = r#"
 [keybindings]

@@ -92,7 +92,7 @@ n = "code {path}"
 
 #### デフォルト動作
 
-`[keybindings]` が設定されていない場合、デフォルトで `tmux switch-client -t {session_id}` と同等の動作（インライン切り替え）を行います。
+`[keybindings]` が未設定でも、デフォルトで `tmux switch-client -t {session_id}`（`enter`/`o`）が有効です。
 
 ### 移行について
 
