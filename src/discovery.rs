@@ -592,10 +592,7 @@ branch refs/heads/main"#;
 
     #[test]
     fn test_extract_issue_number_with_suffix() {
-        assert_eq!(
-            extract_issue_number("issue-42-add-dark-mode"),
-            Some(42)
-        );
+        assert_eq!(extract_issue_number("issue-42-add-dark-mode"), Some(42));
     }
 
     #[test]
@@ -615,11 +612,7 @@ branch refs/heads/main"#;
 
     #[test]
     fn test_worktree_issue_number() {
-        let wt = Worktree::new(
-            "/path/to/worktree",
-            "abc123",
-            Some("issue-54".to_string()),
-        );
+        let wt = Worktree::new("/path/to/worktree", "abc123", Some("issue-54".to_string()));
         assert_eq!(wt.issue_number(), Some(54));
 
         let wt_main = Worktree::new("/path/to/main", "def456", Some("main".to_string()));

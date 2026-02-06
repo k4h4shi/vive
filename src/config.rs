@@ -921,10 +921,7 @@ enter = "tmux switch-client -t {session_id}"
             "myproject",
             "/home/user/src/myproject/.worktrees/issue-42",
         );
-        assert_eq!(
-            result,
-            "claude \"/fix 42\" --session myproject:issue-42"
-        );
+        assert_eq!(result, "claude \"/fix 42\" --session myproject:issue-42");
     }
 
     #[test]

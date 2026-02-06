@@ -100,7 +100,9 @@ impl TmuxExecutor for MockTmuxExecutor {
                 let session = args.get(2).map(String::as_str).unwrap_or("");
                 let sessions = self.sessions.lock().unwrap();
                 let exists = sessions.contains_key(session)
-                    || sessions.keys().any(|k| k.starts_with(&format!("{session}:")));
+                    || sessions
+                        .keys()
+                        .any(|k| k.starts_with(&format!("{session}:")));
                 Ok(TmuxCommandResult {
                     success: exists,
                     stdout: String::new(),
@@ -765,7 +767,8 @@ fn test_preview_updates_from_tmux() {
 #[test]
 fn test_send_input_to_tmux() {
     let projects = create_test_projects();
-    let mut app = create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
 
     app.init().unwrap();
 
@@ -1252,8 +1255,11 @@ fn test_preview_scrolls_to_bottom() {
     lines.push("This is the most recent output".to_string());
     let content = lines.join("\n");
 
-    let mut app =
-        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", &content)]);
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![("user/project-alpha:main", &content)],
+    );
 
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to allow worktree navigation
@@ -1280,7 +1286,8 @@ fn test_preview_scrolls_to_bottom() {
 #[test]
 fn test_input_mode_typing_updates_buffer() {
     let projects = create_test_projects();
-    let mut app = create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
 
     app.init().unwrap();
 
@@ -1303,7 +1310,8 @@ fn test_input_mode_typing_updates_buffer() {
 #[test]
 fn test_input_mode_backspace_removes_char() {
     let projects = create_test_projects();
-    let mut app = create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
 
     app.init().unwrap();
 
@@ -1527,8 +1535,10 @@ fn test_status_waiting_other_icon() {
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to show worktrees
 
-    app.state_mut()
-        .set_status("user/project-alpha:main".to_string(), AgentStatus::WaitingOther);
+    app.state_mut().set_status(
+        "user/project-alpha:main".to_string(),
+        AgentStatus::WaitingOther,
+    );
 
     app.render().unwrap();
 

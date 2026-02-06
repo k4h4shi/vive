@@ -1225,18 +1225,24 @@ mod tests {
     fn create_test_projects() -> Vec<Project> {
         vec![
             Project::new("user/project-a", "/path/to/user/project-a").with_worktrees(vec![
-                Worktree::new("/path/to/user/project-a", "abc123", Some("main".to_string())),
+                Worktree::new(
+                    "/path/to/user/project-a",
+                    "abc123",
+                    Some("main".to_string()),
+                ),
                 Worktree::new(
                     "/path/to/user/project-a/.worktrees/feature-1",
                     "def456",
                     Some("feature-1".to_string()),
                 ),
             ]),
-            Project::new("user/project-b", "/path/to/user/project-b").with_worktrees(vec![Worktree::new(
-                "/path/to/user/project-b",
-                "ghi789",
-                Some("main".to_string()),
-            )]),
+            Project::new("user/project-b", "/path/to/user/project-b").with_worktrees(vec![
+                Worktree::new(
+                    "/path/to/user/project-b",
+                    "ghi789",
+                    Some("main".to_string()),
+                ),
+            ]),
         ]
     }
 
@@ -2981,10 +2987,7 @@ mod tests {
 
         assert_eq!(result.completed, 1);
         assert_eq!(result.successes.len(), 1);
-        assert_eq!(
-            result.successes.get(&42),
-            Some(&"issue-42".to_string())
-        );
+        assert_eq!(result.successes.get(&42), Some(&"issue-42".to_string()));
         assert!(result.failures.is_empty());
     }
 

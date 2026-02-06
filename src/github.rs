@@ -372,11 +372,8 @@ mod tests {
 
     #[test]
     fn test_format_worktree_display_name_with_title() {
-        let result = format_worktree_display_name(
-            "issue-123",
-            Some(123),
-            Some("Add dark mode toggle"),
-        );
+        let result =
+            format_worktree_display_name("issue-123", Some(123), Some("Add dark mode toggle"));
         assert_eq!(result, "#123 Add dark mode toggle");
     }
 

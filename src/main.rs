@@ -182,7 +182,8 @@ fn handle_dashboard_attach<W: Write>(
         .worktrees
         .iter()
         .filter_map(|wt| {
-            wt.window_name().map(|name| (name, wt.path.to_string_lossy().to_string()))
+            wt.window_name()
+                .map(|name| (name, wt.path.to_string_lossy().to_string()))
         })
         .collect();
 
@@ -194,12 +195,9 @@ fn handle_dashboard_attach<W: Write>(
 
     // Ensure project session and all worktree windows exist
     for (window_name, worktree_path) in &worktree_windows {
-        let _ = app.tmux.create_project_window(
-            project_name,
-            window_name,
-            worktree_path,
-            None,
-        );
+        let _ = app
+            .tmux
+            .create_project_window(project_name, window_name, worktree_path, None);
     }
 
     // Create or refresh dashboard session (ensures panes are properly attached)
@@ -245,12 +243,9 @@ fn handle_worktree_attach<W: Write>(
     let session_name = project_name.to_string();
     if let Some((window_name, worktree_path)) = window_info {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
-        let _ = app.tmux.create_project_window(
-            &session_name,
-            &window_name,
-            &worktree_path_str,
-            None,
-        );
+        let _ =
+            app.tmux
+                .create_project_window(&session_name, &window_name, &worktree_path_str, None);
 
         let target = format!("{session_name}:{window_name}");
         execute_launch(app, config, &target, Some(&worktree_path_str), key)?;

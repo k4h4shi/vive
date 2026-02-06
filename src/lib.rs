@@ -323,9 +323,7 @@ where
                                 &worktree_path_str,
                                 None,
                             );
-                            let _ = self
-                                .tmux
-                                .add_pane_to_dashboard(&project.name, &window_name);
+                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                             // Auto-kickstart: send initial command if enabled and configured
                             if auto_kickstart
@@ -442,9 +440,7 @@ where
                                 &worktree_path_str,
                                 None,
                             );
-                            let _ = self
-                                .tmux
-                                .add_pane_to_dashboard(&project.name, &window_name);
+                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                             // Auto-kickstart: execute the configured one-liner command
                             if auto_kickstart
@@ -524,9 +520,8 @@ where
                                     &worktree_path_str,
                                     None,
                                 );
-                                let _ = self
-                                    .tmux
-                                    .add_pane_to_dashboard(&project.name, &window_name);
+                                let _ =
+                                    self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                                 // Auto-kickstart: execute the configured one-liner command
                                 if auto_kickstart
@@ -702,9 +697,8 @@ where
                                 .worktrees
                                 .iter()
                                 .filter_map(|wt| {
-                                    wt.window_name().map(|name| {
-                                        (name, wt.path.to_string_lossy().to_string())
-                                    })
+                                    wt.window_name()
+                                        .map(|name| (name, wt.path.to_string_lossy().to_string()))
                                 })
                                 .collect();
 
@@ -783,11 +777,7 @@ where
                         if let Some(target) = worktree.tmux_target(&project.name) {
                             // Check if the worktree window exists before capturing
                             #[allow(clippy::collapsible_if)]
-                            if self
-                                .tmux
-                                .has_window(&project.name, branch)
-                                .unwrap_or(false)
-                            {
+                            if self.tmux.has_window(&project.name, branch).unwrap_or(false) {
                                 if let Ok(content) =
                                     self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
                                 {
