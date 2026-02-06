@@ -1244,9 +1244,11 @@ mod tests {
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
-        assert!(orchestrator
-            .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
-            .unwrap());
+        assert!(
+            orchestrator
+                .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1286,9 +1288,11 @@ mod tests {
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
-        assert!(!orchestrator
-            .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
-            .unwrap());
+        assert!(
+            !orchestrator
+                .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1317,9 +1321,11 @@ mod tests {
             .returning(|_| Ok(mock_success("")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
-        assert!(!orchestrator
-            .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
-            .unwrap());
+        assert!(
+            !orchestrator
+                .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
+                .unwrap()
+        );
     }
 
     #[test]
