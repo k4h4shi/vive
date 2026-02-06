@@ -231,7 +231,7 @@ pub struct AppState {
     input_cursor: usize,
     /// Captured pane content for preview.
     pub pane_preview: String,
-    /// Dashboard pane contents (for multi-pane preview): (branch_name, content).
+    /// Multi-pane preview contents: (branch_name, content).
     pub dashboard_panes: Vec<(String, String)>,
     /// Status message for user feedback.
     pub status_message: Option<StatusMessage>,
@@ -569,7 +569,7 @@ impl AppState {
     }
 
     /// Select a project header by name (no worktree selected).
-    /// This is used for project-level selection (dashboard view).
+    /// This is used for project-level selection (project header view).
     fn select_project_header_by_name(&mut self, name: &str) {
         if let Some(idx) = self.projects.iter().position(|p| p.name == name) {
             self.selected_project_idx = Some(idx);
@@ -961,18 +961,18 @@ impl AppState {
         self.pane_preview = content;
     }
 
-    /// Update the dashboard pane contents for multi-pane preview.
+    /// Update the multi-pane preview contents.
     /// Each tuple is (branch_name, content).
     pub fn set_dashboard_panes(&mut self, panes: Vec<(String, String)>) {
         self.dashboard_panes = panes;
     }
 
-    /// Clear the dashboard pane contents.
+    /// Clear the multi-pane preview contents.
     pub fn clear_dashboard_panes(&mut self) {
         self.dashboard_panes.clear();
     }
 
-    /// Check if we're in dashboard mode (project header selected, no worktree).
+    /// Check if we're in project-header mode (no worktree selected).
     pub fn is_dashboard_mode(&self) -> bool {
         self.selected_project_idx.is_some() && self.selected_worktree_idx.is_none()
     }
