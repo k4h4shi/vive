@@ -2063,19 +2063,6 @@ fn test_o_key_on_project_header_noop() {
     assert_eq!(action, Action::None);
 }
 
-/// Test: Dashboard session name uses double underscore delimiter.
-#[test]
-fn test_dashboard_session_name_delimiter() {
-    use vive::tmux::TmuxOrchestrator;
-
-    // Verify the dashboard session name format
-    let name = TmuxOrchestrator::<MockTmuxExecutor>::dashboard_session_name("my-project");
-    assert_eq!(name, "my-project__dashboard");
-
-    // Should not contain single colon (tmux delimiter)
-    assert!(!name.contains(':'));
-}
-
 /// Test: Create task modal opens when at project header.
 #[test]
 fn test_create_modal_opens_at_project_header() {

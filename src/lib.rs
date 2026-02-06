@@ -323,7 +323,6 @@ where
                                 &worktree_path_str,
                                 None,
                             );
-                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                             // Auto-kickstart: send initial command if enabled and configured
                             if auto_kickstart
@@ -440,7 +439,6 @@ where
                                 &worktree_path_str,
                                 None,
                             );
-                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                             // Auto-kickstart: execute the configured one-liner command
                             if auto_kickstart
@@ -520,8 +518,6 @@ where
                                     &worktree_path_str,
                                     None,
                                 );
-                                let _ =
-                                    self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                                 // Auto-kickstart: execute the configured one-liner command
                                 if auto_kickstart
@@ -578,8 +574,6 @@ where
 
             Action::DeleteTask(branch_name) => {
                 if let Some(project) = self.state.selected_project().cloned() {
-                    let project_name = project.name.clone();
-
                     // Kill tmux session if it exists
                     let session_name = project.name.clone();
                     if self
@@ -689,24 +683,6 @@ where
                         .discovery
                         .discover(&self.state.projects_root, &self.config.ignored_dirs)
                     {
-                        // Sync dashboard with updated worktrees before moving projects
-                        if let Some(updated_project) =
-                            projects.iter().find(|p| p.name == project_name)
-                        {
-                            let worktree_windows: Vec<(String, String)> = updated_project
-                                .worktrees
-                                .iter()
-                                .filter_map(|wt| {
-                                    wt.window_name()
-                                        .map(|name| (name, wt.path.to_string_lossy().to_string()))
-                                })
-                                .collect();
-
-                            if !worktree_windows.is_empty() {
-                                let _ = self.tmux.sync_dashboard(&project_name, &worktree_windows);
-                            }
-                        }
-
                         self.state.set_projects(projects);
                     }
                 } else {
@@ -754,51 +730,44 @@ where
             return;
         }
 
-        // Try dashboard mode (when project header is selected, no worktree)
+        // Project header selected: capture all worktree sessions for multi-pane preview.
         // Issue #65: Capture from underlying worktree sessions directly for full history.
         if let Some(project) = self.state.selected_project()
             && self.state.selected_worktree_idx().is_none()
         {
-            let dashboard_session = TmuxOrchestrator::<T>::dashboard_session_name(&project.name);
-            if self.tmux.has_session(&dashboard_session).unwrap_or(false) {
-                // Capture from underlying worktree sessions directly
-                // Note: We build both `pane_contents` (for grid UI) and `combined_preview`
-                // (for MCP API / single-view fallback). The UI uses `dashboard_panes`,
-                // while `pane_preview` is kept for potential MCP integration.
-                let mut pane_contents: Vec<(String, String)> = Vec::new();
-                let mut combined_preview = String::new();
+            // Capture from underlying worktree sessions directly
+            // Note: We build both `pane_contents` (for grid UI) and `combined_preview`
+            // (for MCP API / single-view fallback). The UI uses `dashboard_panes`,
+            // while `pane_preview` is kept for potential MCP integration.
+            let mut pane_contents: Vec<(String, String)> = Vec::new();
+            let mut combined_preview = String::new();
 
-                for worktree in &project.worktrees {
-                    if let Some(branch) = &worktree.branch {
-                        // Skip main/master branches from dashboard preview
-                        if branch == "main" || branch == "master" {
-                            continue;
-                        }
-                        if let Some(target) = worktree.tmux_target(&project.name) {
-                            // Check if the worktree window exists before capturing
-                            #[allow(clippy::collapsible_if)]
-                            if self.tmux.has_window(&project.name, branch).unwrap_or(false) {
-                                if let Ok(content) =
-                                    self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
-                                {
-                                    pane_contents.push((branch.clone(), content.clone()));
-                                    if !combined_preview.is_empty() {
-                                        combined_preview.push_str("\n--- ");
-                                        combined_preview.push_str(branch);
-                                        combined_preview.push_str(" ---\n");
-                                    }
-                                    combined_preview.push_str(&content);
-                                }
+            for worktree in &project.worktrees {
+                let Some(branch) = &worktree.branch else {
+                    continue;
+                };
+                if let Some(target) = worktree.tmux_target(&project.name) {
+                    // Check if the worktree window exists before capturing
+                    #[allow(clippy::collapsible_if)]
+                    if self.tmux.has_window(&project.name, branch).unwrap_or(false) {
+                        if let Ok(content) = self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
+                        {
+                            pane_contents.push((branch.clone(), content.clone()));
+                            if !combined_preview.is_empty() {
+                                combined_preview.push_str("\n--- ");
+                                combined_preview.push_str(branch);
+                                combined_preview.push_str(" ---\n");
                             }
+                            combined_preview.push_str(&content);
                         }
                     }
                 }
+            }
 
-                if !pane_contents.is_empty() {
-                    self.state.set_dashboard_panes(pane_contents);
-                    self.state.set_pane_preview(combined_preview);
-                    return;
-                }
+            if !pane_contents.is_empty() {
+                self.state.set_dashboard_panes(pane_contents);
+                self.state.set_pane_preview(combined_preview);
+                return;
             }
         }
 

@@ -272,7 +272,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
                 format!("{} - {}", project.name, branch)
             }
         } else {
-            format!("Dashboard - {}", project.name)
+            format!("Project - {}", project.name)
         }
     } else {
         "Preview".to_string()
@@ -312,7 +312,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
     frame.render_widget(preview, area);
 }
 
-/// Render split dashboard preview with summary and pane contents.
+/// Render split multi-pane preview with summary and pane contents.
 fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, title: &str) {
     let pane_count = state.dashboard_panes.len();
 
@@ -324,8 +324,7 @@ fn render_dashboard_preview(frame: &mut Frame, area: Rect, state: &AppState, tit
     .split(area);
 
     // Render summary
-    let summary_content =
-        format!("Active panes: {pane_count}  |  Press Enter to attach to dashboard");
+    let summary_content = format!("Active windows: {pane_count}");
     let summary = Paragraph::new(Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(summary_content, Style::default().fg(Color::Cyan)),

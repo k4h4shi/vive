@@ -155,10 +155,10 @@ fn handle_attach_session<W: Write>(
     if let Some(project) = app.state().selected_project() {
         let project_name = project.name.clone();
 
-        // Check if we're on project header (no worktree selected) -> dashboard mode
+        // Project header selected: no direct session attach
         if app.state().selected_worktree_idx().is_none() {
-            // Project-level selection: create/attach to dashboard session
-            handle_dashboard_attach(app, &project_name, config, key)?;
+            app.state_mut()
+                .set_info_message("Select a worktree to attach");
         } else {
             // Worktree-level selection: attach to specific worktree session
             handle_worktree_attach(app, &project_name, config, key)?;
@@ -166,64 +166,6 @@ fn handle_attach_session<W: Write>(
     } else {
         app.state_mut().set_error_message("No project selected");
     }
-
-    Ok(())
-}
-
-/// Handle attaching to a dashboard session for project-level selection.
-fn handle_dashboard_attach<W: Write>(
-    app: &mut ProductionApp<W>,
-    project_name: &str,
-    config: &Config,
-    key: &str,
-) -> Result<()> {
-    use vive::tmux::TmuxOrchestrator;
-
-    let project = app
-        .state()
-        .selected_project()
-        .expect("Project should exist");
-
-    // Collect all worktree window info
-    let worktree_windows: Vec<(String, String)> = project
-        .worktrees
-        .iter()
-        .filter_map(|wt| {
-            wt.window_name()
-                .map(|name| (name, wt.path.to_string_lossy().to_string()))
-        })
-        .collect();
-
-    if worktree_windows.is_empty() {
-        let project_path = project.path.to_string_lossy().to_string();
-        let _ = app.tmux.ensure_session(project_name, Some(&project_path));
-        execute_launch(app, config, project_name, Some(&project_path), key)?;
-        return Ok(());
-    }
-
-    // Ensure project session exists (use project root as start directory)
-    let project_path = project.path.to_string_lossy().to_string();
-    let _ = app.tmux.ensure_session(project_name, Some(&project_path));
-
-    // Ensure all worktree windows exist
-    for (window_name, worktree_path) in &worktree_windows {
-        let _ = app.tmux.ensure_session_with_window(
-            project_name,
-            window_name,
-            Some(worktree_path),
-            None,
-        );
-    }
-
-    // Create or refresh dashboard session (ensures panes are properly attached)
-    let dashboard_session =
-        TmuxOrchestrator::<vive::tmux::RealTmuxExecutor>::dashboard_session_name(project_name);
-    let _ = app
-        .tmux
-        .ensure_dashboard_session(project_name, &worktree_windows);
-
-    // For dashboard, path is the project root
-    execute_launch(app, config, &dashboard_session, Some(&project_path), key)?;
 
     Ok(())
 }
