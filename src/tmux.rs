@@ -767,7 +767,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
 
         // Apply tiled layout for even distribution
-        self.select_layout(target, "tiled")?;
+        self.select_layout(dashboard_target, "tiled")?;
 
         Ok(true)
     }
