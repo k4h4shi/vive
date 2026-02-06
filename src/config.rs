@@ -182,7 +182,7 @@ pub struct Config {
     pub terminal: TerminalConfig,
 
     /// Custom keybindings for session actions.
-    /// Keys are key names (e.g., "enter", "o", "n"), values are shell commands.
+    /// Keys are key names (e.g., "enter", "n"), values are shell commands.
     /// Use `{session_id}` as placeholder for the tmux target (session:window).
     /// Use `{path}` as placeholder for the worktree path.
     ///
@@ -190,7 +190,6 @@ pub struct Config {
     /// ```toml
     /// [keybindings]
     /// enter = "tmux switch-client -t {session_id}"
-    /// o = "ghostty -e tmux attach -t {session_id}"
     /// n = "code {path}"
     /// ```
     #[serde(default)]
@@ -225,10 +224,7 @@ impl Default for Config {
             "enter".to_string(),
             "tmux switch-client -t {session_id}".to_string(),
         );
-        keybindings.insert(
-            "o".to_string(),
-            "tmux switch-client -t {session_id}".to_string(),
-        );
+        // Default to a single, simple keybinding.
 
         Self {
             projects_root: None,
@@ -746,10 +742,7 @@ projects = ["user/project-a", "user/project-b"]
             config.keybindings.get("enter"),
             Some(&"tmux switch-client -t {session_id}".to_string())
         );
-        assert_eq!(
-            config.keybindings.get("o"),
-            Some(&"tmux switch-client -t {session_id}".to_string())
-        );
+        assert!(!config.keybindings.contains_key("o"));
     }
 
     #[test]

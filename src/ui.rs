@@ -280,7 +280,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
     }
 
     let (text, line_count) = if state.pane_preview.is_empty() {
-        let msg = "No active target. Press Enter to attach.\n\nSelect a worktree and press Enter/o to switch to that tmux window.";
+        let msg = "No active target. Press Enter to attach.\n\nSelect a worktree and press Enter to switch to that tmux window.";
         (Text::raw(msg), msg.lines().count())
     } else {
         // Clone pane_preview to avoid borrow conflicts

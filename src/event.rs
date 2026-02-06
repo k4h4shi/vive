@@ -128,7 +128,7 @@ fn handle_sidebar_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         }
         KeyCode::Char('o') => {
             state.clear_status_message();
-            Action::AttachSession("o".to_string())
+            Action::None
         }
 
         // Input mode
@@ -500,7 +500,7 @@ mod tests {
     fn test_attach_session_on_o() {
         let mut state = create_test_state_with_projects();
         let action = handle_key_event(key_event(KeyCode::Char('o')), &mut state);
-        assert_eq!(action, Action::AttachSession("o".to_string()));
+        assert_eq!(action, Action::None);
     }
 
     #[test]

@@ -39,7 +39,6 @@ Viveを使うことで、「タスクを作成する」という1つのアクシ
 ```toml
 [keybindings]
 enter = "tmux switch-client -t {session_id}"
-o = "ghostty -e tmux attach -t {session_id}"
 n = "code {path}"
 ```
 
@@ -47,7 +46,7 @@ n = "code {path}"
 - `{session_id}`: Tmuxターゲット（例: `project:issue-123`）
 - `{path}`: ワークツリーのパス（例: `/home/user/src/project/.worktrees/issue-123`）
 
-これにより、「VSCodeで開く」「Ghosttyの新しいタブで開く」「tmuxの別ウィンドウで開く」など、キーごとに異なる振る舞いを自由にカスタマイズできます。
+これにより、「VSCodeで開く」「tmuxの別ウィンドウで開く」など、キーごとに異なる振る舞いを自由にカスタマイズできます。
 
 ### 5. フック (Hook)
 ライフサイクルイベントに連動して実行される自動処理です。

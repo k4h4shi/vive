@@ -2046,7 +2046,7 @@ fn test_sidebar_selection_state_updates() {
 
 /// Test: 'o' key also triggers AttachSession on project header.
 #[test]
-fn test_o_key_on_project_header_triggers_attach() {
+fn test_o_key_on_project_header_noop() {
     let projects = create_test_projects();
     let mut app = create_test_app(projects, vec![]);
 
@@ -2060,7 +2060,7 @@ fn test_o_key_on_project_header_triggers_attach() {
     let action = app.handle_key_event(key);
 
     // Should trigger AttachSession action with "o" key
-    assert_eq!(action, Action::AttachSession("o".to_string()));
+    assert_eq!(action, Action::None);
 }
 
 /// Test: Dashboard session name uses double underscore delimiter.

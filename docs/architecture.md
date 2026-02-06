@@ -46,7 +46,7 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
     *   `git worktree add/remove` 等を実行し、物理的な作業ディレクトリを管理します。
 *   **Command Dispatcher**:
     *   ユーザー設定 (`config.toml`) の `[keybindings]` セクションに基づき、各キーに対応するコマンドを構築して実行します。
-    *   キーごとに異なるアクションを設定可能（例: `Enter` でtmux切り替え、`o` で新しいターミナルウィンドウを開く）。
+    *   キーごとに異なるアクションを設定可能（例: `Enter` でtmux切り替え、`n` でエディタを開く）。
 
 ## データフロー
 
@@ -65,7 +65,7 @@ Viveは「何を実行するか」をユーザー設定に委ねる設計にな�
 ### Keybindings (キーバインディング)
 
 タスクを開く際のコマンドは `config.toml` の `[keybindings]` セクションで定義可能です。
-各キー（`enter`, `o`, `n` など）に対して、実行するシェルコマンドを設定できます。
+各キー（`enter`, `n` など）に対して、実行するシェルコマンドを設定できます。
 
 #### プレースホルダー
 
@@ -83,16 +83,13 @@ Viveは「何を実行するか」をユーザー設定に委ねる設計にな�
 # Enter: 現在のターミナル内でtmuxターゲットを切り替え
 enter = "tmux switch-client -t {session_id}"
 
-# o: Ghosttyの新しいタブでターゲットを開く
-o = "ghostty -e tmux attach -t {session_id}"
-
 # n: VSCodeでワークツリーを開く
 n = "code {path}"
 ```
 
 #### デフォルト動作
 
-`[keybindings]` が未設定でも、デフォルトで `tmux switch-client -t {session_id}`（`enter`/`o`）が有効です。
+`[keybindings]` が未設定でも、デフォルトで `tmux switch-client -t {session_id}`（`enter`）が有効です。
 
 ### 移行について
 

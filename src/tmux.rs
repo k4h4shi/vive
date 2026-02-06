@@ -194,6 +194,50 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         Ok(())
     }
 
+    /// Create a new tmux session with a named initial window.
+    ///
+    /// # Arguments
+    /// * `session_name` - Name of the session to create
+    /// * `window_name` - Name of the initial window
+    /// * `start_directory` - Optional starting directory for the window
+    /// * `detached` - If true, create session in detached mode
+    pub fn new_session_with_window(
+        &self,
+        session_name: &str,
+        window_name: &str,
+        start_directory: Option<&str>,
+        detached: bool,
+    ) -> Result<()> {
+        let mut cmd_args = vec!["new-session".to_string()];
+
+        if detached {
+            cmd_args.push("-d".to_string());
+        }
+
+        cmd_args.push("-s".to_string());
+        cmd_args.push(session_name.to_string());
+        cmd_args.push("-n".to_string());
+        cmd_args.push(window_name.to_string());
+
+        if let Some(dir) = start_directory {
+            cmd_args.push("-c".to_string());
+            cmd_args.push(dir.to_string());
+        }
+
+        let result = self.executor.execute(cmd_args)?;
+
+        if !result.success {
+            anyhow::bail!(
+                "Failed to create session '{}' with window '{}': {}",
+                session_name,
+                window_name,
+                result.stderr.trim()
+            );
+        }
+
+        Ok(())
+    }
+
     /// Kill a tmux session.
     pub fn kill_session(&self, session_name: &str) -> Result<()> {
         let result = self
@@ -981,6 +1025,41 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         Ok(session_created)
     }
 
+    /// Ensure a session and a named window exist.
+    ///
+    /// If the session doesn't exist, creates it with the specified window name
+    /// and start directory. If the session exists, creates or selects the window.
+    pub fn ensure_session_with_window(
+        &self,
+        session_name: &str,
+        window_name: &str,
+        start_directory: Option<&str>,
+        initial_command: Option<&str>,
+    ) -> Result<bool> {
+        if !self.has_session(session_name)? {
+            self.new_session_with_window(session_name, window_name, start_directory, true)?;
+            if let Some(cmd) = initial_command {
+                let target = format!("{session_name}:{window_name}");
+                self.send_keys(&target, cmd, true)?;
+            }
+            return Ok(true);
+        }
+
+        if self.has_window(session_name, window_name)? {
+            self.select_window(session_name, window_name)?;
+            return Ok(false);
+        }
+
+        self.new_window(session_name, window_name, start_directory)?;
+
+        if let Some(cmd) = initial_command {
+            let target = format!("{session_name}:{window_name}");
+            self.send_keys(&target, cmd, true)?;
+        }
+
+        Ok(false)
+    }
+
     /// Load a tmux configuration file.
     pub fn source_file(&self, config_path: &str) -> Result<()> {
         let result = self.executor.execute(args!["source-file", config_path])?;
@@ -1097,6 +1176,31 @@ mod tests {
     }
 
     #[test]
+    fn test_new_session_with_window_and_directory() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "new-session",
+                        "-d",
+                        "-s",
+                        "my-session",
+                        "-n",
+                        "main",
+                        "-c",
+                        "/path/to/project",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        orchestrator
+            .new_session_with_window("my-session", "main", Some("/path/to/project"), true)
+            .unwrap();
+    }
+
+    #[test]
     fn test_ensure_session_creates_new() {
         let mut mock = MockTmuxExecutor::new();
 
@@ -1113,6 +1217,109 @@ mod tests {
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let created = orchestrator.ensure_session("my-session", None).unwrap();
         assert!(created);
+    }
+
+    #[test]
+    fn test_ensure_session_with_window_creates_session_and_window() {
+        let mut mock = MockTmuxExecutor::new();
+
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-session"]))
+            .returning(|_| Ok(mock_failure("session not found")));
+
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "new-session",
+                        "-d",
+                        "-s",
+                        "my-session",
+                        "-n",
+                        "main",
+                        "-c",
+                        "/path/to/project",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        assert!(orchestrator
+            .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
+            .unwrap());
+    }
+
+    #[test]
+    fn test_ensure_session_with_window_creates_window_when_missing() {
+        let mut mock = MockTmuxExecutor::new();
+
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-session"]))
+            .returning(|_| Ok(mock_success("")));
+
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "list-windows",
+                        "-t",
+                        "my-session",
+                        "-F",
+                        "#{window_index}:#{window_name}:#{window_active}",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("0:other:0")));
+
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "new-window",
+                        "-t",
+                        "my-session",
+                        "-n",
+                        "main",
+                        "-c",
+                        "/path/to/project",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        assert!(!orchestrator
+            .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
+            .unwrap());
+    }
+
+    #[test]
+    fn test_ensure_session_with_window_selects_existing_window() {
+        let mut mock = MockTmuxExecutor::new();
+
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["has-session", "-t", "my-session"]))
+            .returning(|_| Ok(mock_success("")));
+
+        mock.expect_execute()
+            .withf(|args| {
+                *args
+                    == to_strings(&[
+                        "list-windows",
+                        "-t",
+                        "my-session",
+                        "-F",
+                        "#{window_index}:#{window_name}:#{window_active}",
+                    ])
+            })
+            .returning(|_| Ok(mock_success("0:main:1")));
+
+        mock.expect_execute()
+            .withf(|args| *args == to_strings(&["select-window", "-t", "my-session:main"]))
+            .returning(|_| Ok(mock_success("")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        assert!(!orchestrator
+            .ensure_session_with_window("my-session", "main", Some("/path/to/project"), None)
+            .unwrap());
     }
 
     #[test]

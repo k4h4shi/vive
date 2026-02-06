@@ -49,7 +49,7 @@ Viveは、複数のGit Worktree、Tmuxウィンドウ（プロジェクトセッ
 - [ ] **User-Defined Actions**: `config.toml` に定義された任意のシェルコマンドを実行可能にする。
     - プレースホルダー（`{session_id}`, `{path}`, `{project_name}`）の置換をサポート。
 - [ ] **Command Bindings**: UI上の操作（Enterキーなど）に対して、実行するアクションを割り当てる。
-    - 例: Open Command (`Enter`) -> `actions.open` ("ghostty --target {session_id}")
+    - 例: Open Command (`Enter`) -> `actions.open` ("tmux switch-client -t {session_id}")
 - [ ] **Lifecycle Hooks**: 特定のイベント発生時に自動実行されるアクションを定義する。
     - `post_create_task`: タスク作成完了時に実行（例: `npm install`, `claude` 起動）。
 
@@ -91,7 +91,7 @@ Viveは、複数のGit Worktree、Tmuxウィンドウ（プロジェクトセッ
 | `Tab` | **フォーカス切り替え** | サイドバーとプレビュー間でフォーカスを切り替え |
 | `h` / `←` | **サイドバーへフォーカス** | 左ペイン（サイドバー）にフォーカスを移動 |
 | `l` / `→` | **プレビューへフォーカス** | 右ペイン（プレビュー）にフォーカスを移動 |
-| `Enter` / `o` | **Open/Attach** | 選択中のタスクを開く（設定されたコマンドを実行）。 |
+| `Enter` | **Open/Attach** | 選択中のタスクを開く（設定されたコマンドを実行）。 |
 | `q` | **Quit** | Viveを終了する |
 
 #### サイドバーフォーカス時

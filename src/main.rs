@@ -188,16 +188,24 @@ fn handle_dashboard_attach<W: Write>(
         .collect();
 
     if worktree_windows.is_empty() {
-        app.state_mut()
-            .set_error_message("No worktrees with branches found");
+        let project_path = project.path.to_string_lossy().to_string();
+        let _ = app.tmux.ensure_session(project_name, Some(&project_path));
+        execute_launch(app, config, project_name, Some(&project_path), key)?;
         return Ok(());
     }
 
-    // Ensure project session and all worktree windows exist
+    // Ensure project session exists (use project root as start directory)
+    let project_path = project.path.to_string_lossy().to_string();
+    let _ = app.tmux.ensure_session(project_name, Some(&project_path));
+
+    // Ensure all worktree windows exist
     for (window_name, worktree_path) in &worktree_windows {
-        let _ = app
-            .tmux
-            .create_project_window(project_name, window_name, worktree_path, None);
+        let _ = app.tmux.ensure_session_with_window(
+            project_name,
+            window_name,
+            Some(worktree_path),
+            None,
+        );
     }
 
     // Create or refresh dashboard session (ensures panes are properly attached)
@@ -208,7 +216,6 @@ fn handle_dashboard_attach<W: Write>(
         .ensure_dashboard_session(project_name, &worktree_windows);
 
     // For dashboard, path is the project root
-    let project_path = project.path.to_string_lossy().to_string();
     execute_launch(app, config, &dashboard_session, Some(&project_path), key)?;
 
     Ok(())
@@ -243,9 +250,12 @@ fn handle_worktree_attach<W: Write>(
     let session_name = project_name.to_string();
     if let Some((window_name, worktree_path)) = window_info {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
-        let _ =
-            app.tmux
-                .create_project_window(&session_name, &window_name, &worktree_path_str, None);
+        let _ = app.tmux.ensure_session_with_window(
+            &session_name,
+            &window_name,
+            Some(&worktree_path_str),
+            None,
+        );
 
         let target = format!("{session_name}:{window_name}");
         execute_launch(app, config, &target, Some(&worktree_path_str), key)?;
