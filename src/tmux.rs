@@ -746,23 +746,23 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         let _ = self.set_option(&dashboard_session, "aggressive-resize", "on");
 
         // Create panes for each worktree
-        // Use session name only as target (tmux selects active window automatically)
+        // Use dashboard session as target (tmux selects active window automatically)
         // This avoids issues with base-index settings (window could be 0 or 1)
-        let target = &dashboard_session;
+        let dashboard_target = &dashboard_session;
 
         for (idx, (window_name, _path)) in worktree_windows.iter().enumerate() {
-            let target = format!("{project_name}:{window_name}");
+            let worktree_target = format!("{project_name}:{window_name}");
             let attach_cmd = format!(
-                "unset TMUX; tmux attach -t {target} 2>/dev/null || echo 'Target not found: {target}'"
+                "unset TMUX; tmux attach -t {worktree_target} 2>/dev/null || echo 'Target not found: {worktree_target}'"
             );
 
             if idx == 0 {
                 // First pane: use send_keys since the session was just created with a shell
-                self.send_keys(&target, &attach_cmd, true)?;
+                self.send_keys(dashboard_target, &attach_cmd, true)?;
             } else {
                 // Additional panes: split with command directly
                 // This runs the attach command immediately in the new pane
-                self.split_window_horizontal(&target, None, Some(&attach_cmd))?;
+                self.split_window_horizontal(dashboard_target, None, Some(&attach_cmd))?;
             }
         }
 
