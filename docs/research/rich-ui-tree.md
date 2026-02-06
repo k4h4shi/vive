@@ -66,7 +66,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &AppState) {
             let is_last = i == project.worktrees.len() - 1;
             let prefix = if is_last { "└─" } else { "├─" };
             
-            let status = state.get_status(&wt.session_id);
+            let status = state.get_status(&wt.tmux_target);
             let icon = status.icon(); // ⚙, ✎, etc.
             let detail = status.detail(); // "Fixing..." or "Edit src/main.rs"
             

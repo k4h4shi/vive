@@ -9,7 +9,7 @@
 //!
 //! - `vive://projects` - All projects and their worktrees
 //! - `vive://status` - Agent statuses for all sessions
-//! - `vive://logs/{session_id}` - Pane preview for a specific session
+//! - `vive://logs/{session_id}` - Pane preview for a specific tmux target
 //!
 //! ## Usage
 //!
@@ -68,8 +68,8 @@ pub struct WorktreeSnapshot {
     pub commit: String,
     /// Branch name (None for detached HEAD).
     pub branch: Option<String>,
-    /// Session ID for this worktree.
-    pub session_id: Option<String>,
+    /// Tmux target for this worktree (session:window).
+    pub tmux_target: Option<String>,
 }
 
 /// A serializable snapshot of agent status.
@@ -103,7 +103,7 @@ impl WorktreeSnapshot {
             path: worktree.path.to_string_lossy().to_string(),
             commit: worktree.commit.clone(),
             branch: worktree.branch.clone(),
-            session_id: worktree.session_id(project_name),
+            tmux_target: worktree.tmux_target(project_name),
         }
     }
 }
@@ -215,7 +215,7 @@ impl ServerHandler for ViveMcpServer {
             uri_template: "vive://logs/{session_id}".to_string(),
             name: "Session Logs".to_string(),
             description: Some(
-                "Pane preview content for a specific session. Use session_id in format 'project__branch'".to_string(),
+                "Pane preview content for a specific tmux target. Use session_id in format 'project:branch'".to_string(),
             ),
             mime_type: Some("text/plain".to_string()),
         }
@@ -246,12 +246,12 @@ impl ServerHandler for ViveMcpServer {
                 McpError::internal_error(format!("Failed to serialize statuses: {e}"), None)
             })?
         } else if let Some(session_id) = uri.strip_prefix("vive://logs/") {
-            // Return pane preview for the specified session
+            // Return pane preview for the specified tmux target
             state
                 .pane_previews
                 .get(session_id)
                 .cloned()
-                .unwrap_or_else(|| format!("No logs available for session: {session_id}"))
+                .unwrap_or_else(|| format!("No logs available for target: {session_id}"))
         } else {
             return Err(McpError::resource_not_found(
                 format!("Unknown resource URI: {uri}"),
@@ -275,11 +275,11 @@ impl ServerHandler for ViveMcpServer {
 /// * `shared_state` - The shared state used by the MCP server.
 /// * `app_state` - Reference to the application state.
 /// * `pane_preview` - Optional pane preview content for the current session.
-/// * `current_session_id` - Optional current session ID.
+/// * `pane_preview` - Optional pane preview content for the current tmux target.
 pub fn update_shared_state(
     shared_state: &SharedState,
     app_state: &crate::state::AppState,
-    pane_preview: Option<(&str, &str)>, // (session_id, content)
+    pane_preview: Option<(&str, &str)>, // (tmux_target, content)
 ) {
     let mut state = shared_state.write().unwrap();
 
@@ -346,7 +346,7 @@ mod tests {
     fn create_test_state() -> ViveStateSnapshot {
         let mut statuses = HashMap::new();
         statuses.insert(
-            "project-a__main".to_string(),
+            "user/project-a:main".to_string(),
             AgentStatusSnapshot {
                 status: "Working".to_string(),
                 icon: "⚙".to_string(),
@@ -354,7 +354,7 @@ mod tests {
             },
         );
         statuses.insert(
-            "project-a__feature-1".to_string(),
+            "user/project-a:feature-1".to_string(),
             AgentStatusSnapshot {
                 status: "Idle".to_string(),
                 icon: "•".to_string(),
@@ -364,26 +364,26 @@ mod tests {
 
         let mut pane_previews = HashMap::new();
         pane_previews.insert(
-            "project-a__main".to_string(),
+            "user/project-a:main".to_string(),
             "Some terminal output...".to_string(),
         );
 
         ViveStateSnapshot {
             projects: vec![ProjectSnapshot {
-                name: "project-a".to_string(),
-                path: "/path/to/project-a".to_string(),
+                name: "user/project-a".to_string(),
+                path: "/path/to/user/project-a".to_string(),
                 worktrees: vec![
                     WorktreeSnapshot {
-                        path: "/path/to/project-a".to_string(),
+                        path: "/path/to/user/project-a".to_string(),
                         commit: "abc123".to_string(),
                         branch: Some("main".to_string()),
-                        session_id: Some("project-a__main".to_string()),
+                        tmux_target: Some("user/project-a:main".to_string()),
                     },
                     WorktreeSnapshot {
-                        path: "/path/to/project-a/.worktrees/feature-1".to_string(),
+                        path: "/path/to/user/project-a/.worktrees/feature-1".to_string(),
                         commit: "def456".to_string(),
                         branch: Some("feature-1".to_string()),
-                        session_id: Some("project-a__feature-1".to_string()),
+                        tmux_target: Some("user/project-a:feature-1".to_string()),
                     },
                 ],
             }],
@@ -396,7 +396,7 @@ mod tests {
     fn test_vive_state_snapshot_serialization() {
         let state = create_test_state();
         let json = serde_json::to_string(&state).expect("Should serialize");
-        assert!(json.contains("project-a"));
+        assert!(json.contains("user/project-a"));
         assert!(json.contains("Working"));
     }
 
@@ -464,8 +464,8 @@ mod tests {
         assert_eq!(snapshot.worktrees.len(), 2);
         assert_eq!(snapshot.worktrees[0].branch, Some("main".to_string()));
         assert_eq!(
-            snapshot.worktrees[0].session_id,
-            Some("test-project__main".to_string())
+            snapshot.worktrees[0].tmux_target,
+            Some("test-project:main".to_string())
         );
     }
 
@@ -474,7 +474,7 @@ mod tests {
         let worktree = Worktree::new("/path", "abc123", None);
         let snapshot = WorktreeSnapshot::from_worktree(&worktree, "project");
         assert_eq!(snapshot.branch, None);
-        assert_eq!(snapshot.session_id, None);
+        assert_eq!(snapshot.tmux_target, None);
     }
 
     #[test]

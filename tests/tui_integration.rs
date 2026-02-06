@@ -98,7 +98,11 @@ impl TmuxExecutor for MockTmuxExecutor {
         match cmd {
             "has-session" => {
                 let session = args.get(2).map(String::as_str).unwrap_or("");
-                let exists = self.sessions.lock().unwrap().contains_key(session);
+                let sessions = self.sessions.lock().unwrap();
+                let exists = sessions.contains_key(session)
+                    || sessions
+                        .keys()
+                        .any(|k| k.starts_with(&format!("{session}:")));
                 Ok(TmuxCommandResult {
                     success: exists,
                     stdout: String::new(),
@@ -110,19 +114,21 @@ impl TmuxExecutor for MockTmuxExecutor {
                 })
             }
             "capture-pane" => {
-                let session = args.get(2).map(String::as_str).unwrap_or("");
-                let content = self
-                    .sessions
-                    .lock()
-                    .unwrap()
-                    .get(session)
-                    .cloned()
-                    .unwrap_or_default();
-                Ok(TmuxCommandResult {
-                    success: true,
-                    stdout: content,
-                    stderr: String::new(),
-                })
+                let target = args.get(2).map(String::as_str).unwrap_or("");
+                let sessions = self.sessions.lock().unwrap();
+                if let Some(content) = sessions.get(target) {
+                    Ok(TmuxCommandResult {
+                        success: true,
+                        stdout: content.clone(),
+                        stderr: String::new(),
+                    })
+                } else {
+                    Ok(TmuxCommandResult {
+                        success: false,
+                        stdout: String::new(),
+                        stderr: "target not found".to_string(),
+                    })
+                }
             }
             "send-keys" => {
                 let target = args.get(2).map(String::as_str).unwrap_or("").to_string();
@@ -139,6 +145,27 @@ impl TmuxExecutor for MockTmuxExecutor {
                 stdout: String::new(),
                 stderr: String::new(),
             }),
+            "list-windows" => {
+                let session = args.get(2).map(String::as_str).unwrap_or("");
+                let sessions = self.sessions.lock().unwrap();
+                let mut windows: Vec<String> = sessions
+                    .keys()
+                    .filter_map(|key| key.strip_prefix(&format!("{session}:")))
+                    .map(|window| window.to_string())
+                    .collect();
+                windows.sort();
+                let stdout = windows
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, name)| format!("{idx}:{name}:{}", if idx == 0 { 1 } else { 0 }))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(TmuxCommandResult {
+                    success: true,
+                    stdout,
+                    stderr: String::new(),
+                })
+            }
             _ => Ok(TmuxCommandResult {
                 success: true,
                 stdout: String::new(),
@@ -187,9 +214,9 @@ fn test_preview_title_shows_issue_title_and_branch() {
     // Create project with issue-numbered branch
     let projects = vec![
         Project::new("test-project", "/path/to/test").with_worktrees(vec![Worktree::new(
-            "/path/to/test/.worktrees/feature/issue-42",
+            "/path/to/test/.worktrees/issue-42",
             "abc123",
-            Some("feature/issue-42".to_string()),
+            Some("issue-42".to_string()),
         )]),
     ];
     let mut app = create_test_app(projects, vec![]);
@@ -210,7 +237,7 @@ fn test_preview_title_shows_issue_title_and_branch() {
     // Preview title should contain Issue title
     assert_buffer_contains(buffer, "Mock Issue Title #42");
     // Preview title should also contain branch name
-    assert_buffer_contains(buffer, "feature/issue-42");
+    assert_buffer_contains(buffer, "issue-42");
 }
 
 // ============================================================================
@@ -272,7 +299,7 @@ pub fn create_test_app_with_tmux(
 /// Helper function to create test projects.
 pub fn create_test_projects() -> Vec<Project> {
     vec![
-        Project::new("project-alpha", "/path/to/alpha").with_worktrees(vec![
+        Project::new("user/project-alpha", "/path/to/alpha").with_worktrees(vec![
             Worktree::new("/path/to/alpha", "abc123", Some("main".to_string())),
             Worktree::new(
                 "/path/to/alpha/.worktrees/feature-1",
@@ -280,7 +307,7 @@ pub fn create_test_projects() -> Vec<Project> {
                 Some("feature-1".to_string()),
             ),
         ]),
-        Project::new("project-beta", "/path/to/beta").with_worktrees(vec![Worktree::new(
+        Project::new("user/project-beta", "/path/to/beta").with_worktrees(vec![Worktree::new(
             "/path/to/beta",
             "ghi789",
             Some("main".to_string()),
@@ -355,8 +382,8 @@ fn test_startup_renders_project_list() {
 
     // Check the buffer contains project names
     let buffer = app.terminal().backend().buffer();
-    assert_buffer_contains(buffer, "project-alpha");
-    assert_buffer_contains(buffer, "project-beta");
+    assert_buffer_contains(buffer, "user/project-alpha");
+    assert_buffer_contains(buffer, "user/project-beta");
 
     // Check worktrees are shown
     assert_buffer_contains(buffer, "main");
@@ -465,7 +492,7 @@ fn test_navigation_crosses_projects() {
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to allow worktree navigation
 
-    // project-alpha has 2 worktrees, project-beta has 1
+    // user/project-alpha has 2 worktrees, user/project-beta has 1
     // Start: project 0, header (worktree_idx = None)
     assert_eq!(app.state().selected_project_idx(), Some(0));
     assert_eq!(app.state().selected_worktree_idx(), None);
@@ -678,7 +705,7 @@ fn test_status_update_changes_icon() {
 
     // Set a session status to Working
     app.state_mut().set_status(
-        "project-alpha__main".to_string(),
+        "user/project-alpha:main".to_string(),
         AgentStatus::Working { detail: None },
     );
 
@@ -699,7 +726,7 @@ fn test_status_waiting_icon() {
     expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut().set_status(
-        "project-alpha__main".to_string(),
+        "user/project-alpha:main".to_string(),
         AgentStatus::WaitingEdit { path: None },
     );
 
@@ -717,7 +744,7 @@ fn test_preview_updates_from_tmux() {
         projects,
         vec![],
         vec![(
-            "project-alpha__main",
+            "user/project-alpha:main",
             "Claude Code >\nAnalyzing your code...",
         )],
     );
@@ -740,7 +767,8 @@ fn test_preview_updates_from_tmux() {
 #[test]
 fn test_send_input_to_tmux() {
     let projects = create_test_projects();
-    let mut app = create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", "")]);
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
 
     app.init().unwrap();
 
@@ -873,7 +901,7 @@ fn test_preview_placeholder_no_session() {
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    assert_buffer_contains(buffer, "No active session");
+    assert_buffer_contains(buffer, "No active target");
 }
 
 // ============================================================================
@@ -892,11 +920,11 @@ fn test_favorites_toggle_on_f() {
     app.state_mut()
         .set_favorites(std::collections::HashSet::new());
 
-    // No favorites initially (after clearing) - starts at project-alpha header
-    assert!(!app.state().favorites().contains("project-alpha"));
+    // No favorites initially (after clearing) - starts at user/project-alpha header
+    assert!(!app.state().favorites().contains("user/project-alpha"));
     assert_eq!(
         app.state().selected_project().unwrap().name,
-        "project-alpha"
+        "user/project-alpha"
     );
 
     // Press 'f' to toggle favorite
@@ -904,12 +932,12 @@ fn test_favorites_toggle_on_f() {
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // Now project-alpha should be a favorite
-    assert!(app.state().favorites().contains("project-alpha"));
-    // Selection should still be on project-alpha (first in sorted order as favorite)
+    // Now user/project-alpha should be a favorite
+    assert!(app.state().favorites().contains("user/project-alpha"));
+    // Selection should still be on user/project-alpha (first in sorted order as favorite)
     assert_eq!(
         app.state().selected_project().unwrap().name,
-        "project-alpha"
+        "user/project-alpha"
     );
 
     // Toggle again to remove
@@ -917,8 +945,8 @@ fn test_favorites_toggle_on_f() {
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // project-alpha should no longer be a favorite
-    assert!(!app.state().favorites().contains("project-alpha"));
+    // user/project-alpha should no longer be a favorite
+    assert!(!app.state().favorites().contains("user/project-alpha"));
 }
 
 /// Test: Favorites display - favorite projects show star icon.
@@ -933,7 +961,7 @@ fn test_favorites_show_star_icon() {
     app.state_mut()
         .set_favorites(std::collections::HashSet::new());
 
-    // Toggle favorite to add project-alpha
+    // Toggle favorite to add user/project-alpha
     let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
@@ -1100,7 +1128,7 @@ fn test_status_error_icon() {
     expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut()
-        .set_status("project-alpha__main".to_string(), AgentStatus::Error);
+        .set_status("user/project-alpha:main".to_string(), AgentStatus::Error);
 
     app.render().unwrap();
 
@@ -1119,11 +1147,11 @@ fn test_multiple_project_statuses() {
 
     // Set different statuses for different sessions
     app.state_mut().set_status(
-        "project-alpha__main".to_string(),
+        "user/project-alpha:main".to_string(),
         AgentStatus::Working { detail: None },
     );
     app.state_mut().set_status(
-        "project-beta__main".to_string(),
+        "user/project-beta:main".to_string(),
         AgentStatus::WaitingEdit { path: None },
     );
 
@@ -1189,7 +1217,7 @@ fn test_preview_shows_spinner_content() {
         projects,
         vec![],
         vec![(
-            "project-alpha__main",
+            "user/project-alpha:main",
             "⠋ Working on task...\nAnalyzing code...",
         )],
     );
@@ -1227,8 +1255,11 @@ fn test_preview_scrolls_to_bottom() {
     lines.push("This is the most recent output".to_string());
     let content = lines.join("\n");
 
-    let mut app =
-        create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", &content)]);
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![],
+        vec![("user/project-alpha:main", &content)],
+    );
 
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to allow worktree navigation
@@ -1255,7 +1286,8 @@ fn test_preview_scrolls_to_bottom() {
 #[test]
 fn test_input_mode_typing_updates_buffer() {
     let projects = create_test_projects();
-    let mut app = create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", "")]);
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
 
     app.init().unwrap();
 
@@ -1278,7 +1310,8 @@ fn test_input_mode_typing_updates_buffer() {
 #[test]
 fn test_input_mode_backspace_removes_char() {
     let projects = create_test_projects();
-    let mut app = create_test_app_with_tmux(projects, vec![], vec![("project-alpha__main", "")]);
+    let mut app =
+        create_test_app_with_tmux(projects, vec![], vec![("user/project-alpha:main", "")]);
 
     app.init().unwrap();
 
@@ -1438,7 +1471,7 @@ fn test_status_text_inline_display() {
 
     // Set a working status with detail
     app.state_mut().set_status(
-        "project-alpha__main".to_string(),
+        "user/project-alpha:main".to_string(),
         AgentStatus::Working {
             detail: Some("Exploring".to_string()),
         },
@@ -1462,7 +1495,7 @@ fn test_status_success_icon() {
     expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut()
-        .set_status("project-alpha__main".to_string(), AgentStatus::Success);
+        .set_status("user/project-alpha:main".to_string(), AgentStatus::Success);
 
     app.render().unwrap();
 
@@ -1481,7 +1514,7 @@ fn test_status_waiting_shell_icon() {
     expand_all_projects(&mut app); // Expand to show worktrees
 
     app.state_mut().set_status(
-        "project-alpha__main".to_string(),
+        "user/project-alpha:main".to_string(),
         AgentStatus::WaitingShell {
             command: Some("cargo build".to_string()),
         },
@@ -1502,8 +1535,10 @@ fn test_status_waiting_other_icon() {
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to show worktrees
 
-    app.state_mut()
-        .set_status("project-alpha__main".to_string(), AgentStatus::WaitingOther);
+    app.state_mut().set_status(
+        "user/project-alpha:main".to_string(),
+        AgentStatus::WaitingOther,
+    );
 
     app.render().unwrap();
 
@@ -1551,7 +1586,7 @@ fn test_padding_dots_between_branch_and_status() {
 #[test]
 fn test_multiple_status_types() {
     let projects = vec![
-        Project::new("multi-status", "/path/to/multi").with_worktrees(vec![
+        Project::new("user/multi-status", "/path/to/multi").with_worktrees(vec![
             Worktree::new("/path/to/multi", "abc123", Some("main".to_string())),
             Worktree::new(
                 "/path/to/multi/.worktrees/working",
@@ -1572,15 +1607,15 @@ fn test_multiple_status_types() {
 
     // Set different statuses
     app.state_mut().set_status(
-        "multi-status__main".to_string(),
+        "user/multi-status:main".to_string(),
         AgentStatus::Working { detail: None },
     );
     app.state_mut().set_status(
-        "multi-status__working".to_string(),
+        "user/multi-status:working".to_string(),
         AgentStatus::WaitingEdit { path: None },
     );
     app.state_mut()
-        .set_status("multi-status__error".to_string(), AgentStatus::Error);
+        .set_status("user/multi-status:error".to_string(), AgentStatus::Error);
 
     app.render().unwrap();
 
@@ -1754,7 +1789,7 @@ fn test_navigate_to_next_project_header() {
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to allow worktree navigation
 
-    // project-alpha: header -> worktree 0 -> worktree 1 -> project-beta header
+    // user/project-alpha: header -> worktree 0 -> worktree 1 -> user/project-beta header
     // Navigate: header -> w0 -> w1
     for _ in 0..2 {
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
@@ -1762,16 +1797,16 @@ fn test_navigate_to_next_project_header() {
         app.handle_action(action).unwrap();
     }
 
-    // At project-alpha, worktree 1
+    // At user/project-alpha, worktree 1
     assert_eq!(app.state().selected_project_idx(), Some(0));
     assert_eq!(app.state().selected_worktree_idx(), Some(1));
 
-    // Move to project-beta header
+    // Move to user/project-beta header
     let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // At project-beta header
+    // At user/project-beta header
     assert_eq!(app.state().selected_project_idx(), Some(1));
     assert_eq!(app.state().selected_worktree_idx(), None);
 }
@@ -1785,30 +1820,30 @@ fn test_navigate_to_prev_project_worktree() {
     app.init().unwrap();
     expand_all_projects(&mut app); // Expand to allow worktree navigation
 
-    // Navigate to project-beta header
+    // Navigate to user/project-beta header
     for _ in 0..3 {
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
         let action = app.handle_key_event(key);
         app.handle_action(action).unwrap();
     }
 
-    // At project-beta header
+    // At user/project-beta header
     assert_eq!(app.state().selected_project_idx(), Some(1));
     assert_eq!(app.state().selected_worktree_idx(), None);
 
-    // Move back to project-alpha's last worktree
+    // Move back to user/project-alpha's last worktree
     let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // At project-alpha, worktree 1 (last worktree)
+    // At user/project-alpha, worktree 1 (last worktree)
     assert_eq!(app.state().selected_project_idx(), Some(0));
     assert_eq!(app.state().selected_worktree_idx(), Some(1));
 }
 
-/// Test: selected_session_id returns None when at project header.
+/// Test: selected_tmux_target returns None when at project header.
 #[test]
-fn test_session_id_none_at_project_header() {
+fn test_tmux_target_none_at_project_header() {
     let projects = create_test_projects();
     let mut app = create_test_app(projects, vec![]);
 
@@ -1816,12 +1851,12 @@ fn test_session_id_none_at_project_header() {
 
     // At project header
     assert_eq!(app.state().selected_worktree_idx(), None);
-    assert!(app.state().selected_session_id().is_none());
+    assert!(app.state().selected_tmux_target().is_none());
 }
 
-/// Test: selected_session_id returns session ID when at worktree.
+/// Test: selected_tmux_target returns tmux target when at worktree.
 #[test]
-fn test_session_id_present_at_worktree() {
+fn test_tmux_target_present_at_worktree() {
     let projects = create_test_projects();
     let mut app = create_test_app(projects, vec![]);
 
@@ -1833,11 +1868,11 @@ fn test_session_id_present_at_worktree() {
     let action = app.handle_key_event(key);
     app.handle_action(action).unwrap();
 
-    // Should have session ID
-    assert!(app.state().selected_session_id().is_some());
+    // Should have tmux target
+    assert!(app.state().selected_tmux_target().is_some());
     assert_eq!(
-        app.state().selected_session_id(),
-        Some("project-alpha__main".to_string())
+        app.state().selected_tmux_target(),
+        Some("user/project-alpha:main".to_string())
     );
 }
 
@@ -1912,11 +1947,11 @@ fn test_full_navigation_cycle() {
 
     // Expected path:
     // (0, None) -> (0, 0) -> (0, 1) -> (1, None) -> (1, 0)
-    assert_eq!(path[0], (Some(0), None)); // project-alpha header
-    assert_eq!(path[1], (Some(0), Some(0))); // project-alpha worktree 0
-    assert_eq!(path[2], (Some(0), Some(1))); // project-alpha worktree 1
-    assert_eq!(path[3], (Some(1), None)); // project-beta header
-    assert_eq!(path[4], (Some(1), Some(0))); // project-beta worktree 0
+    assert_eq!(path[0], (Some(0), None)); // user/project-alpha header
+    assert_eq!(path[1], (Some(0), Some(0))); // user/project-alpha worktree 0
+    assert_eq!(path[2], (Some(0), Some(1))); // user/project-alpha worktree 1
+    assert_eq!(path[3], (Some(1), None)); // user/project-beta header
+    assert_eq!(path[4], (Some(1), Some(0))); // user/project-beta worktree 0
 }
 
 /// Test: Single project with multiple worktrees navigation.
@@ -1967,8 +2002,8 @@ fn test_project_header_renders_project_name() {
     app.render().unwrap();
 
     let buffer = app.terminal().backend().buffer();
-    assert_buffer_contains(buffer, "project-alpha");
-    assert_buffer_contains(buffer, "project-beta");
+    assert_buffer_contains(buffer, "user/project-alpha");
+    assert_buffer_contains(buffer, "user/project-beta");
 }
 
 /// Test: Preview pane shows placeholder when at project header.
@@ -1986,7 +2021,7 @@ fn test_preview_placeholder_at_project_header() {
 
     let buffer = app.terminal().backend().buffer();
     // Should show placeholder since no session is selected
-    assert_buffer_contains(buffer, "No active session");
+    assert_buffer_contains(buffer, "No active target");
 }
 
 /// Test: Navigation updates sidebar selection state correctly.
@@ -2011,7 +2046,7 @@ fn test_sidebar_selection_state_updates() {
 
 /// Test: 'o' key also triggers AttachSession on project header.
 #[test]
-fn test_o_key_on_project_header_triggers_attach() {
+fn test_o_key_on_project_header_noop() {
     let projects = create_test_projects();
     let mut app = create_test_app(projects, vec![]);
 
@@ -2025,7 +2060,7 @@ fn test_o_key_on_project_header_triggers_attach() {
     let action = app.handle_key_event(key);
 
     // Should trigger AttachSession action with "o" key
-    assert_eq!(action, Action::AttachSession("o".to_string()));
+    assert_eq!(action, Action::None);
 }
 
 /// Test: Dashboard session name uses double underscore delimiter.
@@ -2325,7 +2360,7 @@ fn test_issue_picker_select_creates_task() {
     match action {
         Action::CreateTaskFromIssue(issue, auto_kickstart) => {
             assert_eq!(issue.number, 42);
-            assert_eq!(issue.branch_name(), "feature/issue-42");
+            assert_eq!(issue.branch_name(), "issue-42");
             assert!(auto_kickstart); // Default is true
         }
         _ => panic!("Expected CreateTaskFromIssue action, got {action:?}"),
@@ -2407,7 +2442,7 @@ fn test_full_issue_picker_flow() {
     match action {
         Action::CreateTaskFromIssue(issue, auto_kickstart) => {
             assert_eq!(issue.number, 200);
-            assert_eq!(issue.branch_name(), "feature/issue-200");
+            assert_eq!(issue.branch_name(), "issue-200");
             assert!(auto_kickstart); // Default is true
         }
         _ => panic!("Expected CreateTaskFromIssue action"),

@@ -274,9 +274,9 @@ where
                 if let (Some(project), Some(worktree)) = (
                     self.state.selected_project(),
                     self.state.selected_worktree(),
-                ) && let Some(session_id) = worktree.session_id(&project.name)
+                ) && let Some(target) = worktree.tmux_target(&project.name)
                 {
-                    let _ = self.tmux.send_keys(&session_id, &input, true);
+                    let _ = self.tmux.send_keys(&target, &input, true);
                 }
             }
 
@@ -313,25 +313,30 @@ where
                                 self.state.set_projects(projects);
                             }
 
-                            // Add pane to dashboard if it exists
-                            let session_id = format!("{}__{}", project.name, branch_name);
+                            // Ensure project session and window exist
+                            let session_name = project.name.clone();
+                            let window_name = branch_name.clone();
                             let worktree_path_str = worktree_path.to_string_lossy();
-                            let _ = self
-                                .tmux
-                                .ensure_session(&session_id, Some(&worktree_path_str));
-                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+                            let _ = self.tmux.create_project_window(
+                                &session_name,
+                                &window_name,
+                                &worktree_path_str,
+                                None,
+                            );
+                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                             // Auto-kickstart: send initial command if enabled and configured
                             if auto_kickstart
                                 && !self.config.auto_kickstart.manual_command.is_empty()
                             {
+                                let target = format!("{session_name}:{window_name}");
                                 let command = self.config.auto_kickstart.build_manual_command_full(
-                                    &session_id,
+                                    &target,
                                     &branch_name,
                                     &project.name,
                                     &worktree_path.to_string_lossy(),
                                 );
-                                let _ = self.tmux.send_keys(&session_id, &command, true);
+                                let _ = self.tmux.send_keys(&target, &command, true);
                             }
 
                             self.state
@@ -425,26 +430,31 @@ where
                                 self.state.set_projects(projects);
                             }
 
-                            // Add pane to dashboard if it exists
-                            let session_id = format!("{}__{}", project.name, branch_name);
+                            // Ensure project session and window exist
+                            let session_name = project.name.clone();
+                            let window_name = branch_name.clone();
                             let worktree_path_str = worktree_path.to_string_lossy();
-                            let _ = self
-                                .tmux
-                                .ensure_session(&session_id, Some(&worktree_path_str));
-                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+                            let _ = self.tmux.create_project_window(
+                                &session_name,
+                                &window_name,
+                                &worktree_path_str,
+                                None,
+                            );
+                            let _ = self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                             // Auto-kickstart: execute the configured one-liner command
                             if auto_kickstart
                                 && !self.config.auto_kickstart.issue_command.is_empty()
                             {
+                                let target = format!("{session_name}:{window_name}");
                                 let command = self.config.auto_kickstart.build_issue_command_full(
                                     issue.number,
-                                    &session_id,
+                                    &target,
                                     &branch_name,
                                     &project.name,
                                     &worktree_path.to_string_lossy(),
                                 );
-                                let _ = self.tmux.send_keys(&session_id, &command, true);
+                                let _ = self.tmux.send_keys(&target, &command, true);
                             }
 
                             self.state.set_success_message(format!(
@@ -500,27 +510,33 @@ where
 
                         match output {
                             Ok(output) if output.status.success() => {
-                                // Create tmux session
-                                let session_id = format!("{}__{}", project.name, branch_name);
+                                // Ensure project session and window exist
+                                let session_name = project.name.clone();
+                                let window_name = branch_name.clone();
                                 let worktree_path_str = worktree_path.to_string_lossy();
-                                let _ = self
-                                    .tmux
-                                    .ensure_session(&session_id, Some(&worktree_path_str));
-                                let _ = self.tmux.add_pane_to_dashboard(&project.name, &session_id);
+                                let _ = self.tmux.create_project_window(
+                                    &session_name,
+                                    &window_name,
+                                    &worktree_path_str,
+                                    None,
+                                );
+                                let _ =
+                                    self.tmux.add_pane_to_dashboard(&project.name, &window_name);
 
                                 // Auto-kickstart: execute the configured one-liner command
                                 if auto_kickstart
                                     && !self.config.auto_kickstart.issue_command.is_empty()
                                 {
+                                    let target = format!("{session_name}:{window_name}");
                                     let command =
                                         self.config.auto_kickstart.build_issue_command_full(
                                             issue.number,
-                                            &session_id,
+                                            &target,
                                             &branch_name,
                                             &project.name,
                                             &worktree_path.to_string_lossy(),
                                         );
-                                    let _ = self.tmux.send_keys(&session_id, &command, true);
+                                    let _ = self.tmux.send_keys(&target, &command, true);
                                 }
 
                                 result.record_success(issue.number, branch_name);
@@ -565,9 +581,13 @@ where
                     let project_name = project.name.clone();
 
                     // Kill tmux session if it exists
-                    let session_id = format!("{}__{}", project.name, branch_name);
-                    if self.tmux.has_session(&session_id).unwrap_or(false) {
-                        let _ = self.tmux.kill_session(&session_id);
+                    let session_name = project.name.clone();
+                    if self
+                        .tmux
+                        .has_window(&session_name, &branch_name)
+                        .unwrap_or(false)
+                    {
+                        let _ = self.tmux.kill_window(&session_name, &branch_name);
                     }
 
                     // Try to remove worktree (may fail if worktree doesn't exist)
@@ -673,17 +693,17 @@ where
                         if let Some(updated_project) =
                             projects.iter().find(|p| p.name == project_name)
                         {
-                            let worktree_sessions: Vec<(String, String)> = updated_project
+                            let worktree_windows: Vec<(String, String)> = updated_project
                                 .worktrees
                                 .iter()
                                 .filter_map(|wt| {
-                                    wt.session_id(&project_name)
-                                        .map(|id| (id, wt.path.to_string_lossy().to_string()))
+                                    wt.window_name()
+                                        .map(|name| (name, wt.path.to_string_lossy().to_string()))
                                 })
                                 .collect();
 
-                            if !worktree_sessions.is_empty() {
-                                let _ = self.tmux.sync_dashboard(&project_name, &worktree_sessions);
+                            if !worktree_windows.is_empty() {
+                                let _ = self.tmux.sync_dashboard(&project_name, &worktree_windows);
                             }
                         }
 
@@ -707,25 +727,29 @@ where
         if let (Some(project), Some(worktree)) = (
             self.state.selected_project(),
             self.state.selected_worktree(),
-        ) && let Some(session_id) = worktree.session_id(&project.name)
-            && self.tmux.has_session(&session_id).unwrap_or(false)
-            && let Ok(content) = self.tmux.capture_pane(&session_id, DEFAULT_PREVIEW_LINES)
+        ) && let Some(window_name) = worktree.window_name()
+            && self
+                .tmux
+                .has_window(&project.name, &window_name)
+                .unwrap_or(false)
+            && let Some(target) = worktree.tmux_target(&project.name)
+            && let Ok(content) = self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
         {
             // Parse the content to detect agent status
             let parsed = parser::parse_status(&content);
             let raw_status = state::AgentStatus::from_parsed(&parsed);
 
             // Get pane title and combine with parsed status
-            let pane_title = self.tmux.get_pane_title(&session_id).ok().flatten();
+            let pane_title = self.tmux.get_pane_title(&target).ok().flatten();
             let title_combined =
                 monitor::combine_status_with_title(raw_status, pane_title.as_deref());
 
             // Apply hysteresis to smooth out transitions
             let final_status = self
                 .status_monitor
-                .apply_hysteresis(&session_id, title_combined);
+                .apply_hysteresis(&target, title_combined);
 
-            self.state.set_status(session_id.clone(), final_status);
+            self.state.set_status(target.clone(), final_status);
             self.state.set_pane_preview(content);
             return;
         }
@@ -750,12 +774,12 @@ where
                         if branch == "main" || branch == "master" {
                             continue;
                         }
-                        if let Some(sid) = worktree.session_id(&project.name) {
-                            // Check if the worktree session exists before capturing
+                        if let Some(target) = worktree.tmux_target(&project.name) {
+                            // Check if the worktree window exists before capturing
                             #[allow(clippy::collapsible_if)]
-                            if self.tmux.has_session(&sid).unwrap_or(false) {
+                            if self.tmux.has_window(&project.name, branch).unwrap_or(false) {
                                 if let Ok(content) =
-                                    self.tmux.capture_pane(&sid, DEFAULT_PREVIEW_LINES)
+                                    self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
                                 {
                                     pane_contents.push((branch.clone(), content.clone()));
                                     if !combined_preview.is_empty() {
@@ -786,7 +810,7 @@ where
     /// This allows status indicators to update even for non-selected items.
     pub fn update_all_statuses(&mut self) {
         // Collect session info to avoid borrow conflicts
-        let sessions_to_check: Vec<String> = self
+        let targets_to_check: Vec<String> = self
             .state
             .projects
             .iter()
@@ -794,32 +818,32 @@ where
                 project
                     .worktrees
                     .iter()
-                    .filter_map(|worktree| worktree.session_id(&project.name))
+                    .filter_map(|worktree| worktree.tmux_target(&project.name))
             })
             .collect();
 
-        for session_id in sessions_to_check {
-            // Skip if session doesn't exist
-            if !self.tmux.has_session(&session_id).unwrap_or(false) {
+        for target in targets_to_check {
+            // Skip if target doesn't exist
+            if self.tmux.capture_pane(&target, 1).is_err() {
                 continue;
             }
 
             // Capture a small amount of content for status detection (faster)
-            if let Ok(content) = self.tmux.capture_pane(&session_id, 30) {
+            if let Ok(content) = self.tmux.capture_pane(&target, 30) {
                 let parsed = parser::parse_status(&content);
                 let raw_status = state::AgentStatus::from_parsed(&parsed);
 
                 // Get pane title and combine with parsed status
-                let pane_title = self.tmux.get_pane_title(&session_id).ok().flatten();
+                let pane_title = self.tmux.get_pane_title(&target).ok().flatten();
                 let title_combined =
                     monitor::combine_status_with_title(raw_status, pane_title.as_deref());
 
                 // Apply hysteresis to smooth out transitions
                 let final_status = self
                     .status_monitor
-                    .apply_hysteresis(&session_id, title_combined);
+                    .apply_hysteresis(&target, title_combined);
 
-                self.state.set_status(session_id, final_status);
+                self.state.set_status(target, final_status);
             }
         }
     }

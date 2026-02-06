@@ -19,7 +19,7 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
 *   **Task Discovery**:
     *   各リポジトリで `git worktree list` を実行し、存在するワークツリー（タスク）を洗い出します。
 *   **Process Monitor**:
-    *   バックグラウンドで `ps` コマンド等を使用し、各タスク（Tmuxセッション）内で動いているプロセスを監視します。
+*   バックグラウンドで `ps` コマンド等を使用し、各タスク（Tmuxウィンドウ）内で動いているプロセスを監視します。
     *   エージェントの状態（実行中、入力待ち、終了）を判定し、UIに通知します。
 
 ### 2. 表示 (TUI Layer)
@@ -40,13 +40,13 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
 ユーザーの操作を具体的なシステムコマンドに変換して実行します。
 ユーザーがカスタマイズ可能な「フック」や「コマンド設定」はここで処理されます。
 
-*   **Session Manager**:
-    *   `tmux new-session`, `tmux kill-session` 等を発行し、タスクに対応するセッションを管理します。
+*   **Session/Window Manager**:
+    *   `tmux new-session`, `tmux new-window`, `tmux kill-window` 等を発行し、プロジェクトセッションとタスク用ウィンドウを管理します。
 *   **Git Wrapper**:
     *   `git worktree add/remove` 等を実行し、物理的な作業ディレクトリを管理します。
 *   **Command Dispatcher**:
     *   ユーザー設定 (`config.toml`) の `[keybindings]` セクションに基づき、各キーに対応するコマンドを構築して実行します。
-    *   キーごとに異なるアクションを設定可能（例: `Enter` でtmux切り替え、`o` で新しいターミナルウィンドウを開く）。
+    *   キーごとに異なるアクションを設定可能（例: `Enter` でtmux切り替え、`n` でエディタを開く）。
 
 ## データフロー
 
@@ -55,7 +55,7 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
     *   **Monitor**: 各タスクのプロセス状態とログを更新。
     *   **TUI**: `AppState` の内容を描画。
 3.  **アクション**:
-    *   ユーザーが「作成」→ `git worktree add` → `tmux new-session` → `AppState`更新。
+    *   ユーザーが「作成」→ `git worktree add` → `tmux new-session/new-window` → `AppState`更新。
     *   ユーザーが「開く」→ 設定されたキーバインディングに基づきコマンドを実行（端末切り替え）。
 
 ## カスタマイズ設計
@@ -65,7 +65,7 @@ Viveは「何を実行するか」をユーザー設定に委ねる設計にな�
 ### Keybindings (キーバインディング)
 
 タスクを開く際のコマンドは `config.toml` の `[keybindings]` セクションで定義可能です。
-各キー（`enter`, `o`, `n` など）に対して、実行するシェルコマンドを設定できます。
+各キー（`enter`, `n` など）に対して、実行するシェルコマンドを設定できます。
 
 #### プレースホルダー
 
@@ -73,18 +73,15 @@ Viveは「何を実行するか」をユーザー設定に委ねる設計にな�
 
 | プレースホルダー | 説明 |
 | :--- | :--- |
-| `{session_id}` | 対象タスクのTmuxセッション名 (例: `project__feature-issue-123`) |
-| `{path}` | 対象タスクのワークツリーパス (例: `/home/user/src/project/.worktrees/feature/issue-123`) |
+| `{session_id}` | 対象タスクのTmuxターゲット (例: `project:issue-123`) |
+| `{path}` | 対象タスクのワークツリーパス (例: `/home/user/src/project/.worktrees/issue-123`) |
 
 #### 設定例
 
 ```toml
 [keybindings]
-# Enter: 現在のターミナル内でtmuxセッションを切り替え
+# Enter: 現在のターミナル内でtmuxターゲットを切り替え
 enter = "tmux switch-client -t {session_id}"
-
-# o: Ghosttyの新しいタブでセッションを開く
-o = "ghostty -e tmux attach -t {session_id}"
 
 # n: VSCodeでワークツリーを開く
 n = "code {path}"
@@ -92,7 +89,7 @@ n = "code {path}"
 
 #### デフォルト動作
 
-`[keybindings]` が設定されていない場合、デフォルトで `tmux switch-client -t {session_id}` と同等の動作（インライン切り替え）を行います。
+`[keybindings]` が未設定でも、デフォルトで `tmux switch-client -t {session_id}`（`enter`）が有効です。
 
 ### 移行について
 

@@ -206,7 +206,7 @@ impl GitHubIssue {
 
     /// Generate a branch name from this issue.
     pub fn branch_name(&self) -> String {
-        format!("feature/issue-{}", self.number)
+        format!("issue-{}", self.number)
     }
 }
 
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn test_github_issue_branch_name() {
         let issue = GitHubIssue::new(123, "Add feature");
-        assert_eq!(issue.branch_name(), "feature/issue-123");
+        assert_eq!(issue.branch_name(), "issue-123");
     }
 
     #[test]
@@ -372,26 +372,23 @@ mod tests {
 
     #[test]
     fn test_format_worktree_display_name_with_title() {
-        let result = format_worktree_display_name(
-            "feature/issue-123",
-            Some(123),
-            Some("Add dark mode toggle"),
-        );
+        let result =
+            format_worktree_display_name("issue-123", Some(123), Some("Add dark mode toggle"));
         assert_eq!(result, "#123 Add dark mode toggle");
     }
 
     #[test]
     fn test_format_worktree_display_name_with_long_title() {
         let long_title = "This is a very long issue title that exceeds the maximum length";
-        let result = format_worktree_display_name("feature/issue-456", Some(456), Some(long_title));
+        let result = format_worktree_display_name("issue-456", Some(456), Some(long_title));
         assert!(result.contains("..."));
         assert!(result.starts_with("#456 "));
     }
 
     #[test]
     fn test_format_worktree_display_name_without_title() {
-        let result = format_worktree_display_name("feature/issue-789", Some(789), None);
-        assert_eq!(result, "#789 (feature/issue-789)");
+        let result = format_worktree_display_name("issue-789", Some(789), None);
+        assert_eq!(result, "#789 (issue-789)");
     }
 
     #[test]

@@ -82,14 +82,14 @@ impl Project {
 /// Extracts the Issue number from a branch name.
 ///
 /// Supported formats:
-/// - `feature/issue-123` -> Some(123)
+/// - `issue-123` -> Some(123)
 /// - `fix/issue-456` -> Some(456)
-/// - `feature/issue-42-add-dark-mode` -> Some(42)
+/// - `issue-42-add-dark-mode` -> Some(42)
 /// - `issue-789` -> Some(789)
 /// - `feature/123` -> Some(123)
 /// - `main` / `master` / `develop` -> None
 pub fn extract_issue_number(branch_name: &str) -> Option<u32> {
-    // Pattern 1: issue-NUM (e.g., "feature/issue-123" or "issue-42-suffix")
+    // Pattern 1: issue-NUM (e.g., "issue-123" or "issue-42-suffix")
     if let Some(issue_pos) = branch_name.find("issue-") {
         let after_issue = &branch_name[issue_pos + 6..];
         let num_str: String = after_issue
@@ -139,16 +139,26 @@ impl Worktree {
         self.branch.as_ref().and_then(|b| extract_issue_number(b))
     }
 
-    /// Generates a unique Tmux session ID for this worktree.
+    /// Returns the tmux session name for this worktree (project-level session).
     ///
-    /// The format is `project_name__branch_name` (e.g., `mechanix__fix-bug-123`).
-    /// We use double underscore as separator because tmux interprets `:` as
-    /// session:window.pane delimiter, which would cause "can't find window" errors.
     /// Returns `None` if the worktree has no branch (detached HEAD).
-    pub fn session_id(&self, project_name: &str) -> Option<String> {
-        self.branch
-            .as_ref()
-            .map(|branch_name| format!("{project_name}__{branch_name}"))
+    pub fn session_name(&self, project_name: &str) -> Option<String> {
+        self.branch.as_ref().map(|_| project_name.to_string())
+    }
+
+    /// Returns the tmux window name for this worktree (branch name).
+    ///
+    /// Returns `None` if the worktree has no branch (detached HEAD).
+    pub fn window_name(&self) -> Option<String> {
+        self.branch.clone()
+    }
+
+    /// Returns the tmux target for this worktree in `session:window` format.
+    ///
+    /// Returns `None` if the worktree has no branch (detached HEAD).
+    pub fn tmux_target(&self, project_name: &str) -> Option<String> {
+        self.window_name()
+            .map(|window_name| format!("{project_name}:{window_name}"))
     }
 }
 
@@ -281,11 +291,7 @@ pub fn discover_projects(root: &Path, ignored_dirs: &[String]) -> Result<Vec<Pro
 
     let mut projects = Vec::new();
     for repo_path in repo_paths {
-        let name = repo_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let name = derive_project_name(root, &repo_path);
 
         let worktrees = discover_worktrees(&repo_path).unwrap_or_default();
 
@@ -293,6 +299,29 @@ pub fn discover_projects(root: &Path, ignored_dirs: &[String]) -> Result<Vec<Pro
     }
 
     Ok(projects)
+}
+
+fn derive_project_name(root: &Path, repo_path: &Path) -> String {
+    let rel = repo_path.strip_prefix(root).ok();
+    let components: Vec<String> = rel
+        .map(|path| {
+            path.components()
+                .filter_map(|c| c.as_os_str().to_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if components.len() >= 2 {
+        let user = &components[components.len() - 2];
+        let repo = &components[components.len() - 1];
+        format!("{user}/{repo}")
+    } else {
+        repo_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    }
 }
 
 #[cfg(test)]
@@ -314,22 +343,25 @@ mod tests {
     }
 
     #[test]
-    fn test_worktree_session_id() {
+    fn test_worktree_session_name() {
         let wt = Worktree::new(
             "/path/to/worktree",
             "abc123",
             Some("fix-bug-123".to_string()),
         );
+        assert_eq!(wt.session_name("mechanix"), Some("mechanix".to_string()));
         assert_eq!(
-            wt.session_id("mechanix"),
-            Some("mechanix__fix-bug-123".to_string())
+            wt.tmux_target("mechanix"),
+            Some("mechanix:fix-bug-123".to_string())
         );
     }
 
     #[test]
-    fn test_worktree_session_id_detached_head() {
+    fn test_worktree_session_name_detached_head() {
         let wt = Worktree::new("/path/to/worktree", "abc123", None);
-        assert_eq!(wt.session_id("mechanix"), None);
+        assert_eq!(wt.session_name("mechanix"), None);
+        assert_eq!(wt.window_name(), None);
+        assert_eq!(wt.tmux_target("mechanix"), None);
     }
 
     #[test]
@@ -550,7 +582,7 @@ branch refs/heads/main"#;
 
     #[test]
     fn test_extract_issue_number_feature_branch() {
-        assert_eq!(extract_issue_number("feature/issue-123"), Some(123));
+        assert_eq!(extract_issue_number("issue-123"), Some(123));
     }
 
     #[test]
@@ -560,10 +592,7 @@ branch refs/heads/main"#;
 
     #[test]
     fn test_extract_issue_number_with_suffix() {
-        assert_eq!(
-            extract_issue_number("feature/issue-42-add-dark-mode"),
-            Some(42)
-        );
+        assert_eq!(extract_issue_number("issue-42-add-dark-mode"), Some(42));
     }
 
     #[test]
@@ -583,11 +612,7 @@ branch refs/heads/main"#;
 
     #[test]
     fn test_worktree_issue_number() {
-        let wt = Worktree::new(
-            "/path/to/worktree",
-            "abc123",
-            Some("feature/issue-54".to_string()),
-        );
+        let wt = Worktree::new("/path/to/worktree", "abc123", Some("issue-54".to_string()));
         assert_eq!(wt.issue_number(), Some(54));
 
         let wt_main = Worktree::new("/path/to/main", "def456", Some("main".to_string()));
@@ -595,5 +620,22 @@ branch refs/heads/main"#;
 
         let wt_detached = Worktree::new("/path/to/detached", "ghi789", None);
         assert_eq!(wt_detached.issue_number(), None);
+    }
+
+    #[test]
+    fn test_derive_project_name_github_style() {
+        let root = Path::new("/Users/user/src/github");
+        let repo_path = Path::new("/Users/user/src/github/example/vive");
+        assert_eq!(
+            derive_project_name(root, repo_path),
+            "example/vive".to_string()
+        );
+    }
+
+    #[test]
+    fn test_derive_project_name_fallback_to_repo() {
+        let root = Path::new("/Users/user/src/github");
+        let repo_path = Path::new("/Users/user/src/github/vive");
+        assert_eq!(derive_project_name(root, repo_path), "vive".to_string());
     }
 }

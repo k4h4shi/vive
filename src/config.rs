@@ -45,7 +45,7 @@ pub struct TerminalConfig {
     pub command: Option<String>,
 
     /// Arguments for the spawn command.
-    /// Use `{session_id}` as placeholder for the target session name.
+    /// Use `{session_id}` as placeholder for the tmux target (session:window).
     #[serde(default)]
     pub args: Vec<String>,
 }
@@ -54,8 +54,8 @@ pub struct TerminalConfig {
 ///
 /// Supported placeholders for both `manual_command` and `issue_command`:
 /// - `{issue_number}` - The GitHub issue number (issue_command only)
-/// - `{session_id}` - The tmux session identifier (e.g., `vive__feature-issue-123`)
-/// - `{branch_name}` - The git branch name (e.g., `feature/issue-123`)
+/// - `{session_id}` - The tmux target (e.g., `vive:issue-123`)
+/// - `{branch_name}` - The git branch name (e.g., `issue-123`)
 /// - `{project_name}` - The project name (e.g., `vive`)
 /// - `{worktree_path}` - Absolute path to the worktree
 ///
@@ -98,7 +98,7 @@ impl AutoKickstartConfig {
     ///
     /// Supported placeholders:
     /// - `{issue_number}` - The issue number
-    /// - `{session_id}` - The tmux session ID (e.g., "project__branch")
+    /// - `{session_id}` - The tmux target (e.g., "project:branch")
     /// - `{branch_name}` - The git branch name
     /// - `{project_name}` - The project name
     /// - `{worktree_path}` - The absolute path to the worktree
@@ -121,7 +121,7 @@ impl AutoKickstartConfig {
     /// Build the manual command with all placeholders substituted.
     ///
     /// Supported placeholders:
-    /// - `{session_id}` - The tmux session ID (e.g., "project__branch")
+    /// - `{session_id}` - The tmux target (e.g., "project:branch")
     /// - `{branch_name}` - The git branch name
     /// - `{project_name}` - The project name
     /// - `{worktree_path}` - The absolute path to the worktree
@@ -182,15 +182,14 @@ pub struct Config {
     pub terminal: TerminalConfig,
 
     /// Custom keybindings for session actions.
-    /// Keys are key names (e.g., "enter", "o", "n"), values are shell commands.
-    /// Use `{session_id}` as placeholder for the target session name.
+    /// Keys are key names (e.g., "enter", "n"), values are shell commands.
+    /// Use `{session_id}` as placeholder for the tmux target (session:window).
     /// Use `{path}` as placeholder for the worktree path.
     ///
     /// Example:
     /// ```toml
     /// [keybindings]
     /// enter = "tmux switch-client -t {session_id}"
-    /// o = "ghostty -e tmux attach -t {session_id}"
     /// n = "code {path}"
     /// ```
     #[serde(default)]
@@ -220,12 +219,19 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        let mut keybindings = HashMap::new();
+        keybindings.insert(
+            "enter".to_string(),
+            "tmux switch-client -t {session_id}".to_string(),
+        );
+        // Default to a single, simple keybinding.
+
         Self {
             projects_root: None,
             ignored_dirs: DEFAULT_IGNORED_DIRS.iter().map(|s| s.to_string()).collect(),
             tmux_prefix: None,
             terminal: TerminalConfig::default(),
-            keybindings: HashMap::new(),
+            keybindings,
             auto_kickstart: AutoKickstartConfig::default(),
             base_branch: None,
         }
@@ -303,7 +309,7 @@ ignored_dirs = [".git", "node_modules", ".worktrees", "target", "dist"]
 # base_branch = "develop"
 
 # Custom keybindings for opening sessions
-# Use {session_id} as placeholder for the target session name
+# Use {session_id} as placeholder for the tmux target (session:window)
 # Use {path} as placeholder for the worktree path
 [keybindings]
 # Default behavior (inline tmux switch) - uncomment to customize:
@@ -670,50 +676,50 @@ projects_root = "/home/user/projects"
     fn test_favorites_add_remove() {
         let mut favorites = Favorites::default();
 
-        favorites.add("project-a");
-        assert!(favorites.is_favorite("project-a"));
-        assert!(!favorites.is_favorite("project-b"));
+        favorites.add("user/project-a");
+        assert!(favorites.is_favorite("user/project-a"));
+        assert!(!favorites.is_favorite("user/project-b"));
 
-        favorites.add("project-b");
-        assert!(favorites.is_favorite("project-a"));
-        assert!(favorites.is_favorite("project-b"));
+        favorites.add("user/project-b");
+        assert!(favorites.is_favorite("user/project-a"));
+        assert!(favorites.is_favorite("user/project-b"));
 
-        favorites.remove("project-a");
-        assert!(!favorites.is_favorite("project-a"));
-        assert!(favorites.is_favorite("project-b"));
+        favorites.remove("user/project-a");
+        assert!(!favorites.is_favorite("user/project-a"));
+        assert!(favorites.is_favorite("user/project-b"));
     }
 
     #[test]
     fn test_favorites_toggle() {
         let mut favorites = Favorites::default();
 
-        favorites.toggle("project-a");
-        assert!(favorites.is_favorite("project-a"));
+        favorites.toggle("user/project-a");
+        assert!(favorites.is_favorite("user/project-a"));
 
-        favorites.toggle("project-a");
-        assert!(!favorites.is_favorite("project-a"));
+        favorites.toggle("user/project-a");
+        assert!(!favorites.is_favorite("user/project-a"));
     }
 
     #[test]
     fn test_favorites_parse() {
         let toml_content = r#"
-projects = ["project-a", "project-b"]
+projects = ["user/project-a", "user/project-b"]
 "#;
         let favorites: Favorites = toml::from_str(toml_content).unwrap();
-        assert!(favorites.is_favorite("project-a"));
-        assert!(favorites.is_favorite("project-b"));
+        assert!(favorites.is_favorite("user/project-a"));
+        assert!(favorites.is_favorite("user/project-b"));
         assert!(!favorites.is_favorite("project-c"));
     }
 
     #[test]
     fn test_favorites_serialize() {
         let mut favorites = Favorites::default();
-        favorites.add("project-a");
-        favorites.add("project-b");
+        favorites.add("user/project-a");
+        favorites.add("user/project-b");
 
         let serialized = toml::to_string(&favorites).unwrap();
-        assert!(serialized.contains("project-a"));
-        assert!(serialized.contains("project-b"));
+        assert!(serialized.contains("user/project-a"));
+        assert!(serialized.contains("user/project-b"));
     }
 
     #[test]
@@ -730,9 +736,13 @@ projects = ["project-a", "project-b"]
     // ========================================================================
 
     #[test]
-    fn test_keybindings_default_is_empty() {
+    fn test_keybindings_default_is_populated() {
         let config = Config::default();
-        assert!(config.keybindings.is_empty());
+        assert_eq!(
+            config.keybindings.get("enter"),
+            Some(&"tmux switch-client -t {session_id}".to_string())
+        );
+        assert!(!config.keybindings.contains_key("o"));
     }
 
     #[test]
@@ -762,8 +772,8 @@ n = "tmux new-window -t {session_id}"
     #[test]
     fn test_keybinding_substitute_session_id() {
         let command = "tmux switch-client -t {session_id}";
-        let result = substitute_session_id(command, "myproject__feature");
-        assert_eq!(result, "tmux switch-client -t myproject__feature");
+        let result = substitute_session_id(command, "myproject:feature");
+        assert_eq!(result, "tmux switch-client -t myproject:feature");
     }
 
     #[test]
@@ -818,7 +828,7 @@ enter = "custom-command {session_id}"
     #[test]
     fn test_has_keybindings() {
         let config = Config::default();
-        assert!(!config.has_keybindings());
+        assert!(config.has_keybindings());
 
         let toml_content = r#"
 [keybindings]
@@ -916,15 +926,12 @@ enter = "tmux switch-client -t {session_id}"
         };
         let result = config.build_issue_command_full(
             42,
-            "myproject__feature-issue-42",
-            "feature/issue-42",
+            "myproject:issue-42",
+            "issue-42",
             "myproject",
-            "/home/user/src/myproject/.worktrees/feature/issue-42",
+            "/home/user/src/myproject/.worktrees/issue-42",
         );
-        assert_eq!(
-            result,
-            "claude \"/fix 42\" --session myproject__feature-issue-42"
-        );
+        assert_eq!(result, "claude \"/fix 42\" --session myproject:issue-42");
     }
 
     #[test]
@@ -935,7 +942,7 @@ enter = "tmux switch-client -t {session_id}"
         };
         let result = config.build_issue_command_full(
             99,
-            "proj__issue-99",
+            "proj:issue-99",
             "issue-99",
             "proj",
             "/path/to/worktree",
@@ -951,7 +958,7 @@ enter = "tmux switch-client -t {session_id}"
         };
         let result = config.build_issue_command_full(
             1,
-            "vive__feature-branch",
+            "vive:feature-branch",
             "feature-branch",
             "vive",
             "/tmp/worktree",
@@ -966,7 +973,7 @@ enter = "tmux switch-client -t {session_id}"
             issue_command: String::new(),
         };
         let result =
-            config.build_manual_command_full("proj__branch", "branch", "proj", "/path/to/worktree");
+            config.build_manual_command_full("proj:branch", "branch", "proj", "/path/to/worktree");
         assert_eq!(result, "claude --project proj --cwd /path/to/worktree");
     }
 
@@ -977,14 +984,14 @@ enter = "tmux switch-client -t {session_id}"
             issue_command: String::new(),
         };
         let result = config.build_manual_command_full(
-            "my-project__my-branch",
+            "my-project:my-branch",
             "my-branch",
             "my-project",
             "/home/user/project",
         );
         assert_eq!(
             result,
-            "tmux send-keys -t my-project__my-branch 'claude' Enter"
+            "tmux send-keys -t my-project:my-branch 'claude' Enter"
         );
     }
 
@@ -997,10 +1004,10 @@ enter = "tmux switch-client -t {session_id}"
         };
         let result = config.build_issue_command_full(
             76,
-            "vive__feature-issue-76",
-            "feature/issue-76",
+            "vive:issue-76",
+            "issue-76",
             "vive",
-            "/Users/user/src/vive/.worktrees/feature/issue-76",
+            "/Users/user/src/vive/.worktrees/issue-76",
         );
         assert_eq!(result, "claude \"/fix 76\"");
     }

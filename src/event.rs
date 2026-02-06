@@ -128,7 +128,7 @@ fn handle_sidebar_key_event(key: KeyEvent, state: &mut AppState) -> Action {
         }
         KeyCode::Char('o') => {
             state.clear_status_message();
-            Action::AttachSession("o".to_string())
+            Action::None
         }
 
         // Input mode
@@ -408,19 +408,19 @@ mod tests {
     fn create_test_state_with_projects() -> AppState {
         let mut state = AppState::new();
         state.set_projects(vec![
-            Project::new("project-a", "/path/to/a").with_worktrees(vec![
+            Project::new("user/project-a", "/path/to/a").with_worktrees(vec![
                 Worktree::new("/path/to/a", "abc", Some("main".to_string())),
                 Worktree::new("/path/to/a/feature", "def", Some("feature".to_string())),
             ]),
-            Project::new("project-b", "/path/to/b").with_worktrees(vec![Worktree::new(
+            Project::new("user/project-b", "/path/to/b").with_worktrees(vec![Worktree::new(
                 "/path/to/b",
                 "ghi",
                 Some("main".to_string()),
             )]),
         ]);
         // Expand both projects for tests that expect worktree navigation
-        state.toggle_expanded("project-a");
-        state.toggle_expanded("project-b");
+        state.toggle_expanded("user/project-a");
+        state.toggle_expanded("user/project-b");
         state
     }
 
@@ -500,7 +500,7 @@ mod tests {
     fn test_attach_session_on_o() {
         let mut state = create_test_state_with_projects();
         let action = handle_key_event(key_event(KeyCode::Char('o')), &mut state);
-        assert_eq!(action, Action::AttachSession("o".to_string()));
+        assert_eq!(action, Action::None);
     }
 
     #[test]
@@ -690,15 +690,15 @@ mod tests {
     #[test]
     fn test_mouse_scroll_up_moves_one_item() {
         let mut state = create_test_state_with_projects();
-        // Move to project-b worktree
+        // Move to user/project-b worktree
         state.select_next(); // worktree 0
         state.select_next(); // worktree 1
-        state.select_next(); // project-b header
-        state.select_next(); // project-b worktree 0
+        state.select_next(); // user/project-b header
+        state.select_next(); // user/project-b worktree 0
         assert_eq!(state.selected_project_idx(), Some(1));
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        // Scroll up should move exactly one item (to project-b header)
+        // Scroll up should move exactly one item (to user/project-b header)
         let action = handle_mouse_event(mouse_scroll_up(), &mut state);
         assert_eq!(state.selected_project_idx(), Some(1));
         assert_eq!(state.selected_worktree_idx(), None); // Project header
@@ -992,15 +992,15 @@ mod tests {
         // Use fresh state (not the helper that expands projects)
         let mut state = AppState::new();
         state.set_projects(vec![
-            Project::new("project-a", "/path/to/a").with_worktrees(vec![Worktree::new(
+            Project::new("user/project-a", "/path/to/a").with_worktrees(vec![Worktree::new(
                 "/path/to/a",
                 "abc",
                 Some("main".to_string()),
             )]),
         ]);
 
-        // Initially project-a is collapsed (non-favorite)
-        assert!(!state.is_expanded("project-a"));
+        // Initially user/project-a is collapsed (non-favorite)
+        assert!(!state.is_expanded("user/project-a"));
 
         // Press space returns ToggleExpanded action
         let action = handle_key_event(key_event(KeyCode::Char(' ')), &mut state);

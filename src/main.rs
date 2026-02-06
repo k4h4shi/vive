@@ -177,25 +177,35 @@ fn handle_dashboard_attach<W: Write>(
         .selected_project()
         .expect("Project should exist");
 
-    // Collect all worktree session info
-    let worktree_sessions: Vec<(String, String)> = project
+    // Collect all worktree window info
+    let worktree_windows: Vec<(String, String)> = project
         .worktrees
         .iter()
         .filter_map(|wt| {
-            wt.session_id(project_name)
-                .map(|id| (id, wt.path.to_string_lossy().to_string()))
+            wt.window_name()
+                .map(|name| (name, wt.path.to_string_lossy().to_string()))
         })
         .collect();
 
-    if worktree_sessions.is_empty() {
-        app.state_mut()
-            .set_error_message("No worktrees with branches found");
+    if worktree_windows.is_empty() {
+        let project_path = project.path.to_string_lossy().to_string();
+        let _ = app.tmux.ensure_session(project_name, Some(&project_path));
+        execute_launch(app, config, project_name, Some(&project_path), key)?;
         return Ok(());
     }
 
-    // Ensure all worktree sessions exist first
-    for (session_id, worktree_path) in &worktree_sessions {
-        let _ = app.tmux.ensure_session(session_id, Some(worktree_path));
+    // Ensure project session exists (use project root as start directory)
+    let project_path = project.path.to_string_lossy().to_string();
+    let _ = app.tmux.ensure_session(project_name, Some(&project_path));
+
+    // Ensure all worktree windows exist
+    for (window_name, worktree_path) in &worktree_windows {
+        let _ = app.tmux.ensure_session_with_window(
+            project_name,
+            window_name,
+            Some(worktree_path),
+            None,
+        );
     }
 
     // Create or refresh dashboard session (ensures panes are properly attached)
@@ -203,10 +213,9 @@ fn handle_dashboard_attach<W: Write>(
         TmuxOrchestrator::<vive::tmux::RealTmuxExecutor>::dashboard_session_name(project_name);
     let _ = app
         .tmux
-        .ensure_dashboard_session(project_name, &worktree_sessions);
+        .ensure_dashboard_session(project_name, &worktree_windows);
 
     // For dashboard, path is the project root
-    let project_path = project.path.to_string_lossy().to_string();
     execute_launch(app, config, &dashboard_session, Some(&project_path), key)?;
 
     Ok(())
@@ -224,32 +233,36 @@ fn handle_worktree_attach<W: Write>(
         .selected_project()
         .expect("Project should exist");
 
-    // Session info resolution with fallback chain:
-    // 1. Try selected worktree -> use its session_id (project__branch format)
-    // 2. Fall back to default worktree (main/master) -> use its session_id
-    // 3. Final fallback: use project name as session_id with project root path
-    let session_info = app
+    // Window resolution with fallback chain:
+    // 1. Try selected worktree -> use its window name
+    // 2. Fall back to default worktree (main/master) -> use its window name
+    // 3. Final fallback: attach to project session with project root
+    let window_info = app
         .state()
         .selected_worktree()
-        .and_then(|wt| wt.session_id(project_name).map(|id| (id, wt.path.clone())))
+        .and_then(|wt| wt.window_name().map(|name| (name, wt.path.clone())))
         .or_else(|| {
-            // Fallback to default worktree (main or master branch)
             project
                 .default_worktree()
-                .and_then(|wt| wt.session_id(project_name).map(|id| (id, wt.path.clone())))
-        })
-        .or_else(|| {
-            // Final fallback: use project name as session with project root
-            Some((project_name.to_string(), project.path.clone()))
+                .and_then(|wt| wt.window_name().map(|name| (name, wt.path.clone())))
         });
 
-    if let Some((session_id, worktree_path)) = session_info {
+    let session_name = project_name.to_string();
+    if let Some((window_name, worktree_path)) = window_info {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
-        let _ = app
-            .tmux
-            .ensure_session(&session_id, Some(&worktree_path_str));
+        let _ = app.tmux.ensure_session_with_window(
+            &session_name,
+            &window_name,
+            Some(&worktree_path_str),
+            None,
+        );
 
-        execute_launch(app, config, &session_id, Some(&worktree_path_str), key)?;
+        let target = format!("{session_name}:{window_name}");
+        execute_launch(app, config, &target, Some(&worktree_path_str), key)?;
+    } else {
+        let project_path = project.path.to_string_lossy().to_string();
+        let _ = app.tmux.ensure_session(&session_name, Some(&project_path));
+        execute_launch(app, config, &session_name, Some(&project_path), key)?;
     }
 
     Ok(())
