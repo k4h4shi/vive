@@ -716,19 +716,19 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
     /// Create a dashboard session for a project.
     ///
-    /// The dashboard session shows all worktree sessions in a tiled layout.
-    /// Each pane attaches to a worktree session using nested tmux.
+    /// The dashboard session shows all worktree windows in a tiled layout.
+    /// Each pane attaches to a worktree window using nested tmux.
     ///
     /// # Arguments
     /// * `project_name` - Name of the project
-    /// * `worktree_sessions` - List of (session_id, worktree_path) for each worktree
+    /// * `worktree_windows` - List of (window_name, worktree_path) for each worktree
     ///
     /// # Returns
     /// `Ok(true)` if the dashboard session was created, `Ok(false)` if it already existed.
     pub fn create_dashboard_session(
         &self,
         project_name: &str,
-        worktree_sessions: &[(String, String)],
+        worktree_windows: &[(String, String)],
     ) -> Result<bool> {
         let dashboard_session = format!("{project_name}__dashboard");
 
@@ -739,7 +739,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
         // Create the dashboard session (detached)
         // Use the first worktree's path as the starting directory
-        let start_dir = worktree_sessions.first().map(|(_, path)| path.as_str());
+        let start_dir = worktree_windows.first().map(|(_, path)| path.as_str());
         self.new_session(&dashboard_session, start_dir, true)?;
 
         // Set aggressive-resize for proper nested tmux behavior
@@ -750,18 +750,19 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         // This avoids issues with base-index settings (window could be 0 or 1)
         let target = &dashboard_session;
 
-        for (idx, (session_id, _path)) in worktree_sessions.iter().enumerate() {
+        for (idx, (window_name, _path)) in worktree_windows.iter().enumerate() {
+            let target = format!("{project_name}:{window_name}");
             let attach_cmd = format!(
-                "unset TMUX; tmux attach -t {session_id} 2>/dev/null || echo 'Session not found: {session_id}'"
+                "unset TMUX; tmux attach -t {target} 2>/dev/null || echo 'Target not found: {target}'"
             );
 
             if idx == 0 {
                 // First pane: use send_keys since the session was just created with a shell
-                self.send_keys(target, &attach_cmd, true)?;
+                self.send_keys(&target, &attach_cmd, true)?;
             } else {
                 // Additional panes: split with command directly
                 // This runs the attach command immediately in the new pane
-                self.split_window_horizontal(target, None, Some(&attach_cmd))?;
+                self.split_window_horizontal(&target, None, Some(&attach_cmd))?;
             }
         }
 
@@ -784,11 +785,11 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     ///
     /// # Arguments
     /// * `project_name` - Name of the project
-    /// * `session_id` - Session ID for the new worktree
+    /// * `window_name` - Window name for the new worktree
     ///
     /// # Returns
     /// `Ok(true)` if the pane was added, `Ok(false)` if dashboard doesn't exist.
-    pub fn add_pane_to_dashboard(&self, project_name: &str, session_id: &str) -> Result<bool> {
+    pub fn add_pane_to_dashboard(&self, project_name: &str, window_name: &str) -> Result<bool> {
         let dashboard_session = Self::dashboard_session_name(project_name);
 
         // Check if dashboard exists
@@ -800,8 +801,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         let target = &dashboard_session;
 
         // Build attach command
+        let target_name = format!("{project_name}:{window_name}");
         let attach_cmd = format!(
-            "unset TMUX; tmux attach -t {session_id} 2>/dev/null || echo 'Session not found: {session_id}'"
+            "unset TMUX; tmux attach -t {target_name} 2>/dev/null || echo 'Target not found: {target_name}'"
         );
 
         // Split window with command to attach to worktree session directly
@@ -820,14 +822,14 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     ///
     /// # Arguments
     /// * `project_name` - Name of the project
-    /// * `worktree_sessions` - Current list of (session_id, worktree_path)
+    /// * `worktree_windows` - Current list of (window_name, worktree_path)
     ///
     /// # Returns
     /// `Ok(true)` if the dashboard was synced, `Ok(false)` if dashboard didn't exist.
     pub fn sync_dashboard(
         &self,
         project_name: &str,
-        worktree_sessions: &[(String, String)],
+        worktree_windows: &[(String, String)],
     ) -> Result<bool> {
         let dashboard_session = Self::dashboard_session_name(project_name);
 
@@ -838,7 +840,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
         // Kill the old dashboard and recreate it
         self.kill_session(&dashboard_session)?;
-        self.create_dashboard_session(project_name, worktree_sessions)?;
+        self.create_dashboard_session(project_name, worktree_windows)?;
 
         Ok(true)
     }
@@ -922,11 +924,11 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
     ///
     /// # Arguments
     /// * `project_name` - Name of the project
-    /// * `worktree_sessions` - List of (session_id, worktree_path) for each worktree
+    /// * `worktree_windows` - List of (window_name, worktree_path) for each worktree
     pub fn ensure_dashboard_session(
         &self,
         project_name: &str,
-        worktree_sessions: &[(String, String)],
+        worktree_windows: &[(String, String)],
     ) -> Result<()> {
         let dashboard_session = Self::dashboard_session_name(project_name);
 
@@ -937,7 +939,7 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
 
         // Create fresh dashboard with all worktree panes
-        self.create_dashboard_session(project_name, worktree_sessions)?;
+        self.create_dashboard_session(project_name, worktree_windows)?;
         Ok(())
     }
 
@@ -1696,7 +1698,7 @@ mod tests {
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let added = orchestrator
-            .add_pane_to_dashboard("my-project", "my-project__feature")
+            .add_pane_to_dashboard("my-project", "feature")
             .unwrap();
         assert!(!added);
     }
@@ -1722,7 +1724,7 @@ mod tests {
                     && args[1] == "-v"
                     && args[2] == "-t"
                     && args[3] == "my-project__dashboard"
-                    && args[4].contains("tmux attach -t my-project__feature")
+                    && args[4].contains("tmux attach -t my-project:feature")
             })
             .times(1)
             .in_sequence(&mut seq)
@@ -1739,7 +1741,7 @@ mod tests {
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let added = orchestrator
-            .add_pane_to_dashboard("my-project", "my-project__feature")
+            .add_pane_to_dashboard("my-project", "feature")
             .unwrap();
         assert!(added);
     }
@@ -1757,7 +1759,7 @@ mod tests {
         let synced = orchestrator
             .sync_dashboard(
                 "my-project",
-                &[("my-project__main".to_string(), "/path/main".to_string())],
+                &[("main".to_string(), "/path/main".to_string())],
             )
             .unwrap();
         assert!(!synced);
@@ -1772,6 +1774,10 @@ mod tests {
         assert_eq!(
             TmuxOrchestrator::<RealTmuxExecutor>::dashboard_session_name("project-with-dashes"),
             "project-with-dashes__dashboard"
+        );
+        assert_eq!(
+            TmuxOrchestrator::<RealTmuxExecutor>::dashboard_session_name("user/repo"),
+            "user/repo__dashboard"
         );
     }
 
@@ -1817,14 +1823,14 @@ mod tests {
                     && args[1] == "-v"
                     && args[2] == "-t"
                     && args[3] == "my-project__dashboard"
-                    && args[4].contains("tmux attach -t my-project__feature")
+                    && args[4].contains("tmux attach -t my-project:feature")
             })
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(mock_failure("no space for new pane")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
-        let result = orchestrator.add_pane_to_dashboard("my-project", "my-project__feature");
+        let result = orchestrator.add_pane_to_dashboard("my-project", "feature");
         assert!(result.is_err());
     }
 
@@ -1897,7 +1903,7 @@ mod tests {
         let synced = orchestrator
             .sync_dashboard(
                 "my-project",
-                &[("my-project__main".to_string(), "/path/main".to_string())],
+                &[("main".to_string(), "/path/main".to_string())],
             )
             .unwrap();
         assert!(synced);
@@ -1927,7 +1933,7 @@ mod tests {
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let result = orchestrator.sync_dashboard(
             "my-project",
-            &[("my-project__main".to_string(), "/path/main".to_string())],
+            &[("main".to_string(), "/path/main".to_string())],
         );
         assert!(result.is_err());
     }
@@ -1945,7 +1951,7 @@ mod tests {
         let created = orchestrator
             .create_dashboard_session(
                 "my-project",
-                &[("my-project__main".to_string(), "/path/main".to_string())],
+                &[("main".to_string(), "/path/main".to_string())],
             )
             .unwrap();
         assert!(!created);
@@ -2012,11 +2018,8 @@ mod tests {
             .create_dashboard_session(
                 "my-project",
                 &[
-                    ("my-project__main".to_string(), "/path/main".to_string()),
-                    (
-                        "my-project__feature".to_string(),
-                        "/path/feature".to_string(),
-                    ),
+                    ("main".to_string(), "/path/main".to_string()),
+                    ("feature".to_string(), "/path/feature".to_string()),
                 ],
             )
             .unwrap();
@@ -2141,7 +2144,7 @@ mod tests {
         orchestrator
             .ensure_dashboard_session(
                 "my-project",
-                &[("my-project__main".to_string(), "/path/main".to_string())],
+                &[("main".to_string(), "/path/main".to_string())],
             )
             .unwrap();
     }
@@ -2222,11 +2225,8 @@ mod tests {
             .ensure_dashboard_session(
                 "my-project",
                 &[
-                    ("my-project__main".to_string(), "/path/main".to_string()),
-                    (
-                        "my-project__feature".to_string(),
-                        "/path/feature".to_string(),
-                    ),
+                    ("main".to_string(), "/path/main".to_string()),
+                    ("feature".to_string(), "/path/feature".to_string()),
                 ],
             )
             .unwrap();
@@ -2308,11 +2308,8 @@ mod tests {
             .ensure_dashboard_session(
                 "my-project",
                 &[
-                    ("my-project__main".to_string(), "/path/main".to_string()),
-                    (
-                        "my-project__feature".to_string(),
-                        "/path/feature".to_string(),
-                    ),
+                    ("main".to_string(), "/path/main".to_string()),
+                    ("feature".to_string(), "/path/feature".to_string()),
                 ],
             )
             .unwrap();

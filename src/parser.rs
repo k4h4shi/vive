@@ -963,7 +963,7 @@ mod tests {
     #[test]
     fn test_issue65_real_case_issue140_working() {
         let content = r#"
-⏺ Bash(git push -u origin feature/issue-140 2>&1) timeout: 1m 0s
+⏺ Bash(git push -u origin issue-140 2>&1) timeout: 1m 0s
   ⎿  Running…
 
 ✽ Forging… (esc to interrupt · thinking)
@@ -986,7 +986,7 @@ mod tests {
     fn test_issue65_real_case_issue140_completed() {
         let content = r#"
 ⏺ Bash(git add -A && git commit -m "feat(schema): update Customer and Vehicle models per meeting notes…)
-  ⎿  [feature/issue-140 f4f4d70] feat(schema): update Customer and Vehicle models per meeting notes
+  ⎿  [issue-140 f4f4d70] feat(schema): update Customer and Vehicle models per meeting notes
       31 files changed, 868 insertions(+), 381 deletions(-)
       create mode 100644 web/prisma/migrations/20260121010000_update_customer_vehicle_schema/migration.sql
 

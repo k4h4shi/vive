@@ -12,14 +12,15 @@ Viveは以下の5つの要素を扱います。
 ### 1. プロジェクト (Project)
 Gitリポジトリそのものです。
 Viveは指定されたルートディレクトリ（例: `~/src`）からGitリポジトリを自動検出し、プロジェクトとして一覧表示します。
+可能であれば表示名は `username/repository` 形式になります。
 
 ### 2. タスク (Task)
 **Viveにおける管理の最小単位**です。
 1つのタスクは、以下の3つの技術的要素がセットになったものです。
 
 *   **Git Worktree**: メインのディレクトリとは独立した作業ディレクトリ（ブランチ）。
-*   **Tmux Session**: そのタスク専用のターミナルセッション。
-*   **AI Agent**: そのセッション内で動作するClaude Codeなどのエージェントプロセス。
+*   **Tmux Window**: プロジェクトセッション内のタスク専用ウィンドウ。
+*   **AI Agent**: そのウィンドウ内で動作するClaude Codeなどのエージェントプロセス。
 
 Viveを使うことで、「タスクを作成する」という1つのアクションで、これら全てを一括でセットアップできます。
 
@@ -43,8 +44,8 @@ n = "code {path}"
 ```
 
 **利用可能なプレースホルダー:**
-- `{session_id}`: TmuxセッションID（例: `project__feature-issue-123`）
-- `{path}`: ワークツリーのパス（例: `/home/user/src/project/.worktrees/feature/issue-123`）
+- `{session_id}`: Tmuxターゲット（例: `project:issue-123`）
+- `{path}`: ワークツリーのパス（例: `/home/user/src/project/.worktrees/issue-123`）
 
 これにより、「VSCodeで開く」「Ghosttyの新しいタブで開く」「tmuxの別ウィンドウで開く」など、キーごとに異なる振る舞いを自由にカスタマイズできます。
 
@@ -62,7 +63,7 @@ n = "code {path}"
 「新しい機能を作りたい」と思った時、Viveからタスクを作成するだけで、以下の手順が自動で完了します。
 1.  Git Worktree の作成（新しいディレクトリの確保）
 2.  新規ブランチの作成
-3.  専用Tmuxセッションの立ち上げ
+3.  プロジェクトTmuxセッション内にタスク用ウィンドウを作成
 4.  **Auto-Kickstart**: 設定されたコマンドの自動実行（デフォルト有効、Tabキーでトグル可能）
     - Manual入力モード: `manual_command` で設定されたコマンドを実行（例: `claude`）
     - Issue Pickerモード: `issue_command` で設定されたワンライナーを実行（例: `claude "/fix {issue_number}"`）
@@ -76,7 +77,7 @@ Issue Pickerでは複数のIssueを選択して、一括でタスクを作成で
 - Auto-Kickstartが有効な場合、全タスクに対して自動実行
 
 ### 3. コンテキストの切り替え (Switching)
-タスクを選択して Enter を押すだけで、そのタスクのTmuxセッションに接続（Attach）します。
+タスクを選択して Enter を押すだけで、そのタスクのTmuxウィンドウに接続（Attach）します。
 作業が終われば Detach してViveに戻り、別のタスクに移る。この切り替えが瞬時に行えます。
 
 キーバインディング設定により、ターミナルアプリ（Ghosttyなど）のタブやウィンドウで開いたり、VSCodeで開いたりと、キーごとに異なる動作をカスタマイズできます。

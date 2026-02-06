@@ -176,8 +176,8 @@ fn build_sidebar_items(state: &AppState) -> Vec<ListItem<'static>> {
 
                 // Get status for this worktree
                 let status = worktree
-                    .session_id(&project.name)
-                    .map(|sid| state.get_status(&sid))
+                    .tmux_target(&project.name)
+                    .map(|target| state.get_status(&target))
                     .unwrap_or_default();
 
                 // Status icon with color based on type
@@ -280,7 +280,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &mut AppState) {
     }
 
     let (text, line_count) = if state.pane_preview.is_empty() {
-        let msg = "No active session. Press Enter to attach.\n\nSelect a worktree and press Enter/o to switch to that tmux session.";
+        let msg = "No active target. Press Enter to attach.\n\nSelect a worktree and press Enter/o to switch to that tmux window.";
         (Text::raw(msg), msg.lines().count())
     } else {
         // Clone pane_preview to avoid borrow conflicts

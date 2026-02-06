@@ -412,11 +412,11 @@ impl AppState {
             .and_then(|idx| project.worktrees.get(idx))
     }
 
-    /// Get the session ID for the currently selected worktree.
-    pub fn selected_session_id(&self) -> Option<String> {
+    /// Get the tmux target (session:window) for the currently selected worktree.
+    pub fn selected_tmux_target(&self) -> Option<String> {
         let project = self.selected_project()?;
         let worktree = self.selected_worktree()?;
-        worktree.session_id(&project.name)
+        worktree.tmux_target(&project.name)
     }
 
     /// Navigate to the next item in the sidebar (following sorted order).
@@ -1224,16 +1224,16 @@ mod tests {
 
     fn create_test_projects() -> Vec<Project> {
         vec![
-            Project::new("project-a", "/path/to/project-a").with_worktrees(vec![
-                Worktree::new("/path/to/project-a", "abc123", Some("main".to_string())),
+            Project::new("user/project-a", "/path/to/user/project-a").with_worktrees(vec![
+                Worktree::new("/path/to/user/project-a", "abc123", Some("main".to_string())),
                 Worktree::new(
-                    "/path/to/project-a/.worktrees/feature-1",
+                    "/path/to/user/project-a/.worktrees/feature-1",
                     "def456",
                     Some("feature-1".to_string()),
                 ),
             ]),
-            Project::new("project-b", "/path/to/project-b").with_worktrees(vec![Worktree::new(
-                "/path/to/project-b",
+            Project::new("user/project-b", "/path/to/user/project-b").with_worktrees(vec![Worktree::new(
+                "/path/to/user/project-b",
                 "ghi789",
                 Some("main".to_string()),
             )]),
@@ -1265,7 +1265,7 @@ mod tests {
         // Now selects project header (no worktree)
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), None); // Project header selected
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
     }
 
     #[test]
@@ -1273,14 +1273,14 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a to allow worktree navigation
-        state.toggle_expanded("project-a");
+        // Expand user/project-a to allow worktree navigation
+        state.toggle_expanded("user/project-a");
 
-        // Starts at project-a header (worktree_idx = None)
+        // Starts at user/project-a header (worktree_idx = None)
         assert_eq!(state.selected_worktree_idx(), None);
 
         state.select_next();
-        // Now at project-a, worktree 0 (main)
+        // Now at user/project-a, worktree 0 (main)
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), Some(0));
     }
@@ -1290,11 +1290,11 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a to allow worktree navigation
-        state.toggle_expanded("project-a");
+        // Expand user/project-a to allow worktree navigation
+        state.toggle_expanded("user/project-a");
 
-        state.select_next(); // project-a, worktree 0
-        state.select_next(); // project-a, worktree 1
+        state.select_next(); // user/project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 1
 
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), Some(1));
@@ -1305,17 +1305,17 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a to allow worktree navigation
-        state.toggle_expanded("project-a");
+        // Expand user/project-a to allow worktree navigation
+        state.toggle_expanded("user/project-a");
 
-        // Navigate: project-a header -> worktree 0 -> worktree 1 -> project-b header
-        state.select_next(); // project-a, worktree 0
-        state.select_next(); // project-a, worktree 1
-        state.select_next(); // project-b header
+        // Navigate: user/project-a header -> worktree 0 -> worktree 1 -> user/project-b header
+        state.select_next(); // user/project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 1
+        state.select_next(); // user/project-b header
 
         assert_eq!(state.selected_project_idx(), Some(1));
         assert_eq!(state.selected_worktree_idx(), None); // Project header
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
     }
 
     #[test]
@@ -1323,13 +1323,13 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a to allow worktree navigation
-        state.toggle_expanded("project-a");
+        // Expand user/project-a to allow worktree navigation
+        state.toggle_expanded("user/project-a");
 
-        state.select_next(); // project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 0
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        state.select_prev(); // Back to project-a header
+        state.select_prev(); // Back to user/project-a header
         assert_eq!(state.selected_worktree_idx(), None);
     }
 
@@ -1338,11 +1338,11 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a to allow worktree navigation
-        state.toggle_expanded("project-a");
+        // Expand user/project-a to allow worktree navigation
+        state.toggle_expanded("user/project-a");
 
-        state.select_next(); // project-a, worktree 0
-        state.select_next(); // project-a, worktree 1
+        state.select_next(); // user/project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 1
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
         state.select_prev(); // Back to worktree 0
@@ -1355,43 +1355,43 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Expand both projects to allow worktree navigation
-        state.toggle_expanded("project-a");
-        state.toggle_expanded("project-b");
+        state.toggle_expanded("user/project-a");
+        state.toggle_expanded("user/project-b");
 
-        // Navigate to project-b header
-        state.select_next(); // project-a, worktree 0
-        state.select_next(); // project-a, worktree 1
-        state.select_next(); // project-b header
-        state.select_next(); // project-b, worktree 0
+        // Navigate to user/project-b header
+        state.select_next(); // user/project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 1
+        state.select_next(); // user/project-b header
+        state.select_next(); // user/project-b, worktree 0
 
-        state.select_prev(); // project-b header
-        state.select_prev(); // project-a, worktree 1 (last worktree of prev project)
+        state.select_prev(); // user/project-b header
+        state.select_prev(); // user/project-a, worktree 1 (last worktree of prev project)
 
         assert_eq!(state.selected_project_idx(), Some(0));
         assert_eq!(state.selected_worktree_idx(), Some(1));
     }
 
     #[test]
-    fn test_selected_session_id_none_on_project_header() {
+    fn test_selected_tmux_target_none_on_project_header() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // On project header, no session id
-        assert_eq!(state.selected_session_id(), None);
+        // On project header, no tmux target
+        assert_eq!(state.selected_tmux_target(), None);
 
-        // Expand project-a to allow worktree navigation
-        state.toggle_expanded("project-a");
+        // Expand user/project-a to allow worktree navigation
+        state.toggle_expanded("user/project-a");
 
         state.select_next(); // Move to first worktree
         assert_eq!(
-            state.selected_session_id(),
-            Some("project-a__main".to_string())
+            state.selected_tmux_target(),
+            Some("user/project-a:main".to_string())
         );
 
         state.select_next();
         assert_eq!(
-            state.selected_session_id(),
-            Some("project-a__feature-1".to_string())
+            state.selected_tmux_target(),
+            Some("user/project-a:feature-1".to_string())
         );
     }
 
@@ -1625,15 +1625,15 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Expand both projects to allow worktree navigation
-        state.toggle_expanded("project-a");
-        state.toggle_expanded("project-b");
+        state.toggle_expanded("user/project-a");
+        state.toggle_expanded("user/project-b");
 
-        // Initial state: project-a header selected
+        // Initial state: user/project-a header selected
         // Structure (both expanded):
-        // 0: project-a (project header) <- selected
+        // 0: user/project-a (project header) <- selected
         // 1:   main (worktree 0)
         // 2:   feature-1 (worktree 1)
-        // 3: project-b (project header)
+        // 3: user/project-b (project header)
         // 4:   main (worktree 0)
         assert_eq!(state.flat_sidebar_index(), Some(0)); // project header
 
@@ -1643,10 +1643,10 @@ mod tests {
         state.select_next(); // worktree 1 (feature-1)
         assert_eq!(state.flat_sidebar_index(), Some(2));
 
-        state.select_next(); // project-b header
+        state.select_next(); // user/project-b header
         assert_eq!(state.flat_sidebar_index(), Some(3));
 
-        state.select_next(); // project-b, worktree 0
+        state.select_next(); // user/project-b, worktree 0
         assert_eq!(state.flat_sidebar_index(), Some(4));
     }
 
@@ -1656,11 +1656,11 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Expand both projects to allow worktree navigation
-        state.toggle_expanded("project-a");
-        state.toggle_expanded("project-b");
+        state.toggle_expanded("user/project-a");
+        state.toggle_expanded("user/project-b");
 
         // ListState should sync with flat index
-        // Starts at project-a header
+        // Starts at user/project-a header
         assert_eq!(state.sidebar_list_state().selected(), Some(0));
 
         state.select_next(); // worktree 0
@@ -1669,7 +1669,7 @@ mod tests {
         state.select_next(); // worktree 1
         assert_eq!(state.sidebar_list_state().selected(), Some(2));
 
-        state.select_next(); // project-b header
+        state.select_next(); // user/project-b header
         assert_eq!(state.sidebar_list_state().selected(), Some(3));
 
         state.select_prev(); // back to worktree 1
@@ -1682,17 +1682,17 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Initially no favorites
-        assert!(!state.is_favorite("project-a"));
-        assert!(!state.is_favorite("project-b"));
+        assert!(!state.is_favorite("user/project-a"));
+        assert!(!state.is_favorite("user/project-b"));
 
         // Toggle favorite on
-        state.toggle_favorite("project-a");
-        assert!(state.is_favorite("project-a"));
-        assert!(!state.is_favorite("project-b"));
+        state.toggle_favorite("user/project-a");
+        assert!(state.is_favorite("user/project-a"));
+        assert!(!state.is_favorite("user/project-b"));
 
         // Toggle favorite off
-        state.toggle_favorite("project-a");
-        assert!(!state.is_favorite("project-a"));
+        state.toggle_favorite("user/project-a");
+        assert!(!state.is_favorite("user/project-a"));
     }
 
     #[test]
@@ -1700,21 +1700,21 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Select first project (starts at project-a header)
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        // Select first project (starts at user/project-a header)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
 
         // Toggle favorite on selected project
         state.toggle_favorite_selected();
-        assert!(state.is_favorite("project-a"));
+        assert!(state.is_favorite("user/project-a"));
 
-        // After toggling, project-a becomes favorite, so sorted order stays the same
-        // Move to second project header: worktree 0 -> worktree 1 -> project-b header
-        state.select_next(); // project-a, worktree 0
-        state.select_next(); // project-a, worktree 1
-        state.select_next(); // project-b header
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // After toggling, user/project-a becomes favorite, so sorted order stays the same
+        // Move to second project header: worktree 0 -> worktree 1 -> user/project-b header
+        state.select_next(); // user/project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 1
+        state.select_next(); // user/project-b header
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         state.toggle_favorite_selected();
-        assert!(state.is_favorite("project-b"));
+        assert!(state.is_favorite("user/project-b"));
     }
 
     #[test]
@@ -1722,17 +1722,17 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Initially project-a is first
-        assert_eq!(state.projects[0].name, "project-a");
-        assert_eq!(state.projects[1].name, "project-b");
+        // Initially user/project-a is first
+        assert_eq!(state.projects[0].name, "user/project-a");
+        assert_eq!(state.projects[1].name, "user/project-b");
 
-        // Mark project-b as favorite
-        state.toggle_favorite("project-b");
+        // Mark user/project-b as favorite
+        state.toggle_favorite("user/project-b");
 
         // Get sorted projects - favorites should be first
         let sorted = state.sorted_projects();
-        assert_eq!(sorted[0].name, "project-b"); // favorite first
-        assert_eq!(sorted[1].name, "project-a"); // non-favorite second
+        assert_eq!(sorted[0].name, "user/project-b"); // favorite first
+        assert_eq!(sorted[1].name, "user/project-a"); // non-favorite second
     }
 
     #[test]
@@ -1778,11 +1778,11 @@ mod tests {
         assert!(!state.has_favorites());
 
         // Add a favorite
-        state.toggle_favorite("project-a");
+        state.toggle_favorite("user/project-a");
         assert!(state.has_favorites());
 
         // Remove the favorite
-        state.toggle_favorite("project-a");
+        state.toggle_favorite("user/project-a");
         assert!(!state.has_favorites());
     }
 
@@ -1793,47 +1793,47 @@ mod tests {
 
         // Verify initial state - first project header is selected
         assert!(state.selected_project().is_some());
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // Mark project-b as favorite (this also expands it)
-        state.toggle_favorite("project-b");
-        // Also expand project-a for this test
-        state.toggle_expanded("project-a");
+        // Mark user/project-b as favorite (this also expands it)
+        state.toggle_favorite("user/project-b");
+        // Also expand user/project-a for this test
+        state.toggle_expanded("user/project-a");
 
-        // After toggle, selection moves to first in sorted order (project-b header)
+        // After toggle, selection moves to first in sorted order (user/project-b header)
         assert!(state.has_favorites());
         assert!(state.selected_project().is_some());
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None);
 
         // Sorted order with separator (both expanded):
-        // 0: project-b (favorite, project header) <- selected
+        // 0: user/project-b (favorite, project header) <- selected
         // 1:   main (worktree)
         // 2: ──────── (separator)
-        // 3: project-a (non-favorite, project header)
+        // 3: user/project-a (non-favorite, project header)
         // 4:   main (worktree 0)
         // 5:   feature-1 (worktree 1)
 
-        // flat_sidebar_index should return 0 for project-b header
+        // flat_sidebar_index should return 0 for user/project-b header
         assert_eq!(state.flat_sidebar_index(), Some(0));
 
         // Navigate through the list to verify indices
-        state.select_next(); // project-b, worktree 0 (main)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        state.select_next(); // user/project-b, worktree 0 (main)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(state.flat_sidebar_index(), Some(1));
 
-        state.select_next(); // project-a header (after separator at index 2)
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        state.select_next(); // user/project-a header (after separator at index 2)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
         assert_eq!(state.flat_sidebar_index(), Some(3));
 
-        state.select_next(); // project-a, worktree 0
+        state.select_next(); // user/project-a, worktree 0
         assert_eq!(state.selected_worktree_idx(), Some(0));
         assert_eq!(state.flat_sidebar_index(), Some(4));
 
-        state.select_next(); // project-a, worktree 1
+        state.select_next(); // user/project-a, worktree 1
         assert_eq!(state.selected_worktree_idx(), Some(1));
         assert_eq!(state.flat_sidebar_index(), Some(5));
     }
@@ -1843,53 +1843,53 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Mark project-b as favorite (this also expands it)
-        // Sorted order: project-b (favorite, expanded), project-a (non-favorite, collapsed)
-        state.toggle_favorite("project-b");
+        // Mark user/project-b as favorite (this also expands it)
+        // Sorted order: user/project-b (favorite, expanded), user/project-a (non-favorite, collapsed)
+        state.toggle_favorite("user/project-b");
 
-        // Initial selection should be first in sorted order (project-b header)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // Initial selection should be first in sorted order (user/project-b header)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None); // Project header
-        assert!(state.is_expanded("project-b")); // Favorite is expanded
-        assert!(!state.is_expanded("project-a")); // Non-favorite is collapsed
+        assert!(state.is_expanded("user/project-b")); // Favorite is expanded
+        assert!(!state.is_expanded("user/project-a")); // Non-favorite is collapsed
 
-        // Navigate: project-b header -> worktree 0 -> project-a header
-        state.select_next(); // project-b, worktree 0 (expanded, so goes to worktree)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // Navigate: user/project-b header -> worktree 0 -> user/project-a header
+        state.select_next(); // user/project-b, worktree 0 (expanded, so goes to worktree)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        state.select_next(); // project-a header (project-b has only 1 worktree)
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        state.select_next(); // user/project-a header (user/project-b has only 1 worktree)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // project-a is collapsed, so select_next stays at project-a header (last item)
+        // user/project-a is collapsed, so select_next stays at user/project-a header (last item)
         state.select_next();
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None); // Still on header
 
-        // Now expand project-a to navigate into worktrees
-        state.toggle_expanded("project-a");
-        assert!(state.is_expanded("project-a"));
+        // Now expand user/project-a to navigate into worktrees
+        state.toggle_expanded("user/project-a");
+        assert!(state.is_expanded("user/project-a"));
 
-        state.select_next(); // Now goes to project-a, worktree 0
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        state.select_next(); // Now goes to user/project-a, worktree 0
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        state.select_next(); // project-a, worktree 1
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        state.select_next(); // user/project-a, worktree 1
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
         // Navigate back
-        state.select_prev(); // project-a, worktree 0
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        state.select_prev(); // user/project-a, worktree 0
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        state.select_prev(); // project-a header
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        state.select_prev(); // user/project-a header
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        state.select_prev(); // project-b, last worktree (worktree 0, since project-b is expanded)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        state.select_prev(); // user/project-b, last worktree (worktree 0, since user/project-b is expanded)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), Some(0));
     }
 
@@ -1898,14 +1898,14 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Initially selected: project-a header
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        // Initially selected: user/project-a header
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
 
-        // Toggle project-b as favorite
-        state.toggle_favorite("project-b");
+        // Toggle user/project-b as favorite
+        state.toggle_favorite("user/project-b");
 
-        // Selection should move to first in sorted order (project-b header)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // Selection should move to first in sorted order (user/project-b header)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None); // Project header
     }
 
@@ -1915,14 +1915,14 @@ mod tests {
 
         // Set favorites BEFORE setting projects (simulating app startup)
         let mut favorites = HashSet::new();
-        favorites.insert("project-b".to_string());
+        favorites.insert("user/project-b".to_string());
         state.set_favorites(favorites);
 
         // Now set projects
         state.set_projects(create_test_projects());
 
-        // Selection should be first in sorted order (project-b header)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // Selection should be first in sorted order (user/project-b header)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None); // Project header
     }
 
@@ -2318,8 +2318,8 @@ mod tests {
         assert!(state.favorites_load_failed());
 
         // User adds a favorite (this would normally trigger save)
-        state.toggle_favorite("project-a");
-        assert!(state.is_favorite("project-a"));
+        state.toggle_favorite("user/project-a");
+        assert!(state.is_favorite("user/project-a"));
 
         // The flag should still be set, but favorites_modified should also be true
         assert!(state.favorites_load_failed());
@@ -2337,7 +2337,7 @@ mod tests {
         let mut state = AppState::new();
         assert!(!state.favorites_modified());
 
-        state.toggle_favorite("project-a");
+        state.toggle_favorite("user/project-a");
         assert!(state.favorites_modified());
     }
 
@@ -2358,7 +2358,7 @@ mod tests {
         // This protects potentially valid data on disk
 
         // User explicitly modifies favorites
-        state.toggle_favorite("project-a");
+        state.toggle_favorite("user/project-a");
         assert!(state.favorites_modified());
 
         // Now save should be allowed (user intent is clear)
@@ -2598,10 +2598,10 @@ mod tests {
     fn test_is_expanded_default_for_favorite() {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
-        state.toggle_favorite("project-a");
+        state.toggle_favorite("user/project-a");
 
         // Favorite projects should be expanded by default
-        assert!(state.is_expanded("project-a"));
+        assert!(state.is_expanded("user/project-a"));
     }
 
     #[test]
@@ -2610,8 +2610,8 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Non-favorite projects should be collapsed by default
-        assert!(!state.is_expanded("project-a"));
-        assert!(!state.is_expanded("project-b"));
+        assert!(!state.is_expanded("user/project-a"));
+        assert!(!state.is_expanded("user/project-b"));
     }
 
     #[test]
@@ -2620,15 +2620,15 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Start collapsed (non-favorite)
-        assert!(!state.is_expanded("project-a"));
+        assert!(!state.is_expanded("user/project-a"));
 
         // Toggle to expand
-        state.toggle_expanded("project-a");
-        assert!(state.is_expanded("project-a"));
+        state.toggle_expanded("user/project-a");
+        assert!(state.is_expanded("user/project-a"));
 
         // Toggle to collapse
-        state.toggle_expanded("project-a");
-        assert!(!state.is_expanded("project-a"));
+        state.toggle_expanded("user/project-a");
+        assert!(!state.is_expanded("user/project-a"));
     }
 
     #[test]
@@ -2636,15 +2636,15 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Select project-a header
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        // Select user/project-a header
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
 
         // Should be collapsed initially (non-favorite)
-        assert!(!state.is_expanded("project-a"));
+        assert!(!state.is_expanded("user/project-a"));
 
         // Toggle expanded for selected project
         state.toggle_expanded_selected();
-        assert!(state.is_expanded("project-a"));
+        assert!(state.is_expanded("user/project-a"));
     }
 
     #[test]
@@ -2653,15 +2653,15 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Initially collapsed (non-favorite)
-        assert!(!state.is_expanded("project-a"));
+        assert!(!state.is_expanded("user/project-a"));
 
         // Toggle to favorite - should expand
-        state.toggle_favorite("project-a");
-        assert!(state.is_expanded("project-a"));
+        state.toggle_favorite("user/project-a");
+        assert!(state.is_expanded("user/project-a"));
 
         // Toggle off favorite - should collapse
-        state.toggle_favorite("project-a");
-        assert!(!state.is_expanded("project-a"));
+        state.toggle_favorite("user/project-a");
+        assert!(!state.is_expanded("user/project-a"));
     }
 
     #[test]
@@ -2670,13 +2670,13 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Manually expand a non-favorite
-        state.toggle_expanded("project-a");
-        assert!(state.is_expanded("project-a"));
+        state.toggle_expanded("user/project-a");
+        assert!(state.is_expanded("user/project-a"));
 
         // Toggle favorite on
-        state.toggle_favorite("project-a");
+        state.toggle_favorite("user/project-a");
         // Should still be expanded (favorite default is expanded anyway)
-        assert!(state.is_expanded("project-a"));
+        assert!(state.is_expanded("user/project-a"));
 
         // Toggle favorite off - but user manually expanded, so stay expanded
         // Actually, per requirements: "non-favorite default collapsed"
@@ -2690,18 +2690,18 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Initially neither project is expanded (no favorites)
-        assert!(!state.is_expanded("project-a"));
-        assert!(!state.is_expanded("project-b"));
+        assert!(!state.is_expanded("user/project-a"));
+        assert!(!state.is_expanded("user/project-b"));
 
         // Simulate loading favorites from disk (like at app startup)
         let mut favorites = HashSet::new();
-        favorites.insert("project-a".to_string());
+        favorites.insert("user/project-a".to_string());
         state.set_favorites(favorites);
 
-        // project-a should now be expanded (loaded as favorite)
-        assert!(state.is_expanded("project-a"));
-        // project-b should still be collapsed
-        assert!(!state.is_expanded("project-b"));
+        // user/project-a should now be expanded (loaded as favorite)
+        assert!(state.is_expanded("user/project-a"));
+        // user/project-b should still be collapsed
+        assert!(!state.is_expanded("user/project-b"));
     }
 
     #[test]
@@ -2709,21 +2709,21 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a
-        state.toggle_expanded("project-a");
-        assert!(state.is_expanded("project-a"));
+        // Expand user/project-a
+        state.toggle_expanded("user/project-a");
+        assert!(state.is_expanded("user/project-a"));
 
-        // Navigate to project-a's worktree 0
+        // Navigate to user/project-a's worktree 0
         assert_eq!(state.selected_worktree_idx(), None); // Start at header
         state.select_next(); // Move to worktree 0
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
-        // Collapse project-a while on its worktree
-        state.toggle_expanded("project-a");
+        // Collapse user/project-a while on its worktree
+        state.toggle_expanded("user/project-a");
 
         // Selection should be cleared (back to project header)
         assert_eq!(state.selected_worktree_idx(), None);
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
     }
 
     #[test]
@@ -2733,13 +2733,13 @@ mod tests {
 
         // Initially both projects are collapsed (non-favorite)
         // Structure when all collapsed:
-        // 0: ▶ project-a (collapsed) <- selected
-        // 1: ▶ project-b (collapsed)
+        // 0: ▶ user/project-a (collapsed) <- selected
+        // 1: ▶ user/project-b (collapsed)
         assert_eq!(state.flat_sidebar_index(), Some(0));
 
-        // Navigate to project-b header
-        state.select_next(); // Should go to project-b header (skipping worktrees)
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // Navigate to user/project-b header
+        state.select_next(); // Should go to user/project-b header (skipping worktrees)
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.flat_sidebar_index(), Some(1));
     }
 
@@ -2748,14 +2748,14 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a
-        state.toggle_expanded("project-a");
+        // Expand user/project-a
+        state.toggle_expanded("user/project-a");
 
-        // Structure with project-a expanded:
-        // 0: ▼ project-a (expanded) <- selected
+        // Structure with user/project-a expanded:
+        // 0: ▼ user/project-a (expanded) <- selected
         // 1:   main
         // 2:   feature-1
-        // 3: ▶ project-b (collapsed)
+        // 3: ▶ user/project-b (collapsed)
         assert_eq!(state.flat_sidebar_index(), Some(0));
 
         // Navigate to first worktree
@@ -2768,9 +2768,9 @@ mod tests {
         assert_eq!(state.selected_worktree_idx(), Some(1));
         assert_eq!(state.flat_sidebar_index(), Some(2));
 
-        // Navigate to project-b header
+        // Navigate to user/project-b header
         state.select_next();
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None);
         assert_eq!(state.flat_sidebar_index(), Some(3));
     }
@@ -2781,18 +2781,18 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Both projects collapsed
-        // Starts at project-a header
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        // Starts at user/project-a header
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // select_next should skip to project-b header (not project-a worktrees)
+        // select_next should skip to user/project-b header (not user/project-a worktrees)
         state.select_next();
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None);
 
-        // select_prev should go back to project-a header (not project-b worktrees)
+        // select_prev should go back to user/project-a header (not user/project-b worktrees)
         state.select_prev();
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
     }
 
@@ -2801,24 +2801,24 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a
-        state.toggle_expanded("project-a");
+        // Expand user/project-a
+        state.toggle_expanded("user/project-a");
 
-        // Start at project-a header
+        // Start at user/project-a header
         assert_eq!(state.selected_worktree_idx(), None);
 
         // select_next goes to first worktree (project is expanded)
         state.select_next();
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), Some(0));
 
         // select_next goes to second worktree
         state.select_next();
         assert_eq!(state.selected_worktree_idx(), Some(1));
 
-        // select_next goes to project-b header (project-b is collapsed)
+        // select_next goes to user/project-b header (user/project-b is collapsed)
         state.select_next();
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
         assert_eq!(state.selected_worktree_idx(), None);
     }
 
@@ -2827,18 +2827,18 @@ mod tests {
         let mut state = AppState::new();
         state.set_projects(create_test_projects());
 
-        // Expand project-a only
-        state.toggle_expanded("project-a");
+        // Expand user/project-a only
+        state.toggle_expanded("user/project-a");
 
-        // Navigate to project-b header
-        state.select_next(); // project-a worktree 0
-        state.select_next(); // project-a worktree 1
-        state.select_next(); // project-b header
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        // Navigate to user/project-b header
+        state.select_next(); // user/project-a worktree 0
+        state.select_next(); // user/project-a worktree 1
+        state.select_next(); // user/project-b header
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
 
-        // select_prev should go to project-a last worktree (project-a is expanded)
+        // select_prev should go to user/project-a last worktree (user/project-a is expanded)
         state.select_prev();
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), Some(1)); // last worktree
     }
 
@@ -2848,13 +2848,13 @@ mod tests {
         state.set_projects(create_test_projects());
 
         // Both collapsed
-        // Navigate to project-b
+        // Navigate to user/project-b
         state.select_next();
-        assert_eq!(state.selected_project().unwrap().name, "project-b");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-b");
 
-        // select_prev should go to project-a header (not worktrees)
+        // select_prev should go to user/project-a header (not worktrees)
         state.select_prev();
-        assert_eq!(state.selected_project().unwrap().name, "project-a");
+        assert_eq!(state.selected_project().unwrap().name, "user/project-a");
         assert_eq!(state.selected_worktree_idx(), None);
     }
 
@@ -2977,13 +2977,13 @@ mod tests {
     fn test_batch_creation_result_record_success() {
         let mut result = BatchCreationResult::new(3);
 
-        result.record_success(42, "feature/issue-42".to_string());
+        result.record_success(42, "issue-42".to_string());
 
         assert_eq!(result.completed, 1);
         assert_eq!(result.successes.len(), 1);
         assert_eq!(
             result.successes.get(&42),
-            Some(&"feature/issue-42".to_string())
+            Some(&"issue-42".to_string())
         );
         assert!(result.failures.is_empty());
     }
@@ -3009,7 +3009,7 @@ mod tests {
 
         assert!(!result.is_complete());
 
-        result.record_success(1, "feature/issue-1".to_string());
+        result.record_success(1, "issue-1".to_string());
         assert!(!result.is_complete());
 
         result.record_failure(2, "Error".to_string());
@@ -3020,8 +3020,8 @@ mod tests {
     fn test_batch_creation_result_is_complete_returns_false_when_incomplete() {
         let mut result = BatchCreationResult::new(5);
 
-        result.record_success(1, "feature/issue-1".to_string());
-        result.record_success(2, "feature/issue-2".to_string());
+        result.record_success(1, "issue-1".to_string());
+        result.record_success(2, "issue-2".to_string());
 
         assert!(!result.is_complete());
         assert_eq!(result.completed, 2);
@@ -3031,9 +3031,9 @@ mod tests {
     fn test_batch_creation_result_summary_all_success() {
         let mut result = BatchCreationResult::new(3);
 
-        result.record_success(1, "feature/issue-1".to_string());
-        result.record_success(2, "feature/issue-2".to_string());
-        result.record_success(3, "feature/issue-3".to_string());
+        result.record_success(1, "issue-1".to_string());
+        result.record_success(2, "issue-2".to_string());
+        result.record_success(3, "issue-3".to_string());
 
         let summary = result.summary();
         assert!(summary.contains("3 of 3"));
@@ -3058,8 +3058,8 @@ mod tests {
     fn test_batch_creation_result_summary_partial_success_failure() {
         let mut result = BatchCreationResult::new(4);
 
-        result.record_success(1, "feature/issue-1".to_string());
-        result.record_success(2, "feature/issue-2".to_string());
+        result.record_success(1, "issue-1".to_string());
+        result.record_success(2, "issue-2".to_string());
         result.record_failure(3, "Error".to_string());
         result.record_failure(4, "Another error".to_string());
 

@@ -2,7 +2,7 @@
 
 ## 1. 概要 (Concept)
 
-Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェント（Claude Code）を一元管理するための**「AI開発オーケストレーター」**です。
+Viveは、複数のGit Worktree、Tmuxウィンドウ（プロジェクトセッション内）、およびAIエージェント（Claude Code）を一元管理するための**「AI開発オーケストレーター」**です。
 
 ### ターゲットユーザー
 - ソロ開発者（ドッグフーディング）
@@ -18,7 +18,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
 - [ ] **Auto-Discovery**: `git worktree list` を解析し、既存のワークツリーを「タスク」として自動検出する。
 - [x] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
     - **Manual**: ブランチ名を手動入力する。
-    - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`feature/issue-{番号}` 形式でブランチを自動生成する。
+    - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`issue-{番号}` 形式でブランチを自動生成する。
         - **Batch Creation**: Spaceキーで複数Issueを選択し、Enterキーで一括作成が可能。
         - 選択されたIssueは `[x]` チェックボックスで表示され、選択件数がモーダル上部に表示される。
         - 一部のタスク作成に失敗しても処理は継続し、完了後にサマリー（成功/失敗件数）を表示する。
@@ -27,7 +27,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
         - Issue Picker: `issue_command` で設定されたワンライナーコマンドを実行（例: `claude "/fix {issue_number}"`）。
         - Batch Creation時は、作成された全タスクに対してAuto-Kickstartを実行する。
         - 利用可能なプレースホルダー: `{issue_number}`, `{session_id}`, `{branch_name}`, `{project_name}`, `{worktree_path}`
-- [x] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Session）をVive上から安全に削除する。
+- [x] **Cleanup Task**: 不要になったタスク（Worktree + Branch + Tmux Window）をVive上から安全に削除する。
     - Worktreeが存在しない場合でも、SessionやBranchのみが残っている場合は削除可能（Issue #90）。
     - Worktree削除に失敗しても、BranchとSessionの削除を試行する。
 - [x] **Safety**: `main`, `master` などのデフォルトブランチの誤削除を防止する.
@@ -40,7 +40,7 @@ Viveは、複数のGit Worktree、Tmuxセッション、およびAIエージェ�
     - ? **Wait (Other)**: その他のユーザー入力待ち。マゼンタ色で表示。
     - ✓ **Success**: 正常完了。緑色で表示。
     - ✖ **Error**: プロセス異常終了。赤色で表示。
-    - • **Idle**: セッションはあるがコマンド未実行。グレーで表示。
+    - • **Idle**: ウィンドウはあるがコマンド未実行。グレーで表示。
 - [ ] **Hysteresis**: ステータスのちらつき（Working ↔ Idle）を防ぐため、短時間のアイドルは無視する。
 
 ### 2.4 オーケストレーション (Actions & Hooks)
