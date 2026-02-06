@@ -754,7 +754,6 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         }
     }
 
-
     /// List panes in a target (session:window).
     pub fn list_panes(&self, target: &str) -> Result<Vec<TmuxPane>> {
         let result = self.executor.execute(args![
@@ -1809,5 +1808,4 @@ mod tests {
         let result = orchestrator.respawn_pane("invalid-pane", "echo hello");
         assert!(result.is_err());
     }
-
 }
