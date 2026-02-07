@@ -241,9 +241,10 @@ where
             self.handle_action(action)?;
         }
 
-        // Periodic preview update
+        // Periodic preview and status update
         if self.last_preview_update.elapsed() >= self.preview_update_interval {
             self.update_pane_preview();
+            self.update_all_statuses();
             self.last_preview_update = Instant::now();
         }
 

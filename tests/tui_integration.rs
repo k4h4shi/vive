@@ -5,7 +5,7 @@
 
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -2577,4 +2577,48 @@ fn test_list_only_navigation_works() {
     app.render().unwrap();
     let buffer = app.terminal().backend().buffer();
     assert_buffer_contains(buffer, "user/project-alpha");
+}
+
+// ============================================================================
+// Issue #101: tick() should call update_all_statuses()
+// ============================================================================
+
+/// Test: tick() updates all statuses when preview interval elapses.
+///
+/// Issue #101: In list-only mode, status updates were not happening because
+/// tick() only called update_pane_preview() but not update_all_statuses().
+/// This test verifies that tick() calls update_all_statuses() so that
+/// status indicators update even in list-only mode.
+#[test]
+fn test_tick_updates_all_statuses() {
+    let projects = create_test_projects();
+    // Set up tmux sessions with content that will be parsed as Working status.
+    // The content contains a spinner character (⠋) that the parser detects as working.
+    let mut app = create_test_app_with_tmux(
+        projects,
+        vec![], // No events - tick() will skip event handling and go to preview update
+        vec![("user/project-alpha:main", "⠋ Working on task...")],
+    );
+
+    app.init().unwrap();
+    expand_all_projects(&mut app);
+
+    // Verify no status is set initially
+    let status = app.state().get_status("user/project-alpha:main");
+    assert_eq!(status, AgentStatus::Idle);
+
+    // Force the preview update interval to have elapsed
+    app.last_preview_update = Instant::now() - Duration::from_secs(10);
+
+    // Run a tick - this should trigger both update_pane_preview() and update_all_statuses()
+    let should_continue = app.tick(Duration::from_millis(0)).unwrap();
+    assert!(should_continue);
+
+    // After tick, the status for the session should be updated (not Idle anymore)
+    let status = app.state().get_status("user/project-alpha:main");
+    assert_ne!(
+        status,
+        AgentStatus::Idle,
+        "tick() should have called update_all_statuses() to update the status"
+    );
 }
