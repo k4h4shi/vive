@@ -234,10 +234,7 @@ impl GitHubIssue {
             .collect();
 
         // Normalize whitespace and trim
-        let sanitized = sanitized
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let sanitized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
 
         let combined = format!("{branch}_{sanitized}");
 

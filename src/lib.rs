@@ -576,9 +576,8 @@ where
                 if let Some(project) = self.state.selected_project().cloned() {
                     // Kill tmux window if it exists (supports branch_title window names)
                     let session_name = project.name.clone();
-                    if let Ok(Some(actual_window_name)) = self
-                        .tmux
-                        .find_window_by_branch(&session_name, &branch_name)
+                    if let Ok(Some(actual_window_name)) =
+                        self.tmux.find_window_by_branch(&session_name, &branch_name)
                     {
                         let _ = self.tmux.kill_window(&session_name, &actual_window_name);
                     }
@@ -703,9 +702,8 @@ where
             self.state.selected_project(),
             self.state.selected_worktree(),
         ) && let Some(branch_name) = worktree.window_name()
-            && let Ok(Some(actual_window_name)) = self
-                .tmux
-                .find_window_by_branch(&project.name, &branch_name)
+            && let Ok(Some(actual_window_name)) =
+                self.tmux.find_window_by_branch(&project.name, &branch_name)
             && let target = format!("{}:{}", project.name, actual_window_name)
             && let Ok(content) = self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
         {

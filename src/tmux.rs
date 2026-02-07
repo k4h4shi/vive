@@ -1254,11 +1254,8 @@ mod tests {
     #[test]
     fn test_find_window_by_branch_prefix_match() {
         let mut mock = MockTmuxExecutor::new();
-        mock.expect_execute().returning(|_| {
-            Ok(mock_success(
-                "0:main:1\n1:issue-123_Fix login bug:0\n",
-            ))
-        });
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("0:main:1\n1:issue-123_Fix login bug:0\n")));
 
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         let result = orchestrator
