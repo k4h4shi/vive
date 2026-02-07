@@ -208,6 +208,45 @@ impl GitHubIssue {
     pub fn branch_name(&self) -> String {
         format!("issue-{}", self.number)
     }
+
+    /// Generate a tmux window name from this issue.
+    ///
+    /// Format: `branch_name_sanitized_title`
+    /// - Characters invalid in tmux window names (`.`, `:`) are removed or replaced.
+    /// - The total length is capped at 100 characters (truncated with `...`).
+    /// - If the title is empty, returns just the branch name.
+    pub fn window_name(&self) -> String {
+        let branch = self.branch_name();
+        let title = self.title.trim();
+        if title.is_empty() {
+            return branch;
+        }
+
+        // Sanitize: remove characters problematic for tmux window names
+        let sanitized: String = title
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r')
+            .map(|c| match c {
+                '.' => '_',
+                ':' => ' ',
+                _ => c,
+            })
+            .collect();
+
+        // Normalize whitespace and trim
+        let sanitized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        let combined = format!("{branch}_{sanitized}");
+
+        // Truncate if too long
+        let max_len = 100;
+        if combined.chars().count() > max_len {
+            let truncated: String = combined.chars().take(max_len - 3).collect();
+            format!("{truncated}...")
+        } else {
+            combined
+        }
+    }
 }
 
 /// Result of fetching the Issue list.
@@ -422,6 +461,47 @@ mod tests {
         // Second call should use cache
         let result2 = get_or_fetch_issue_title(&cache, &fetcher, "/repo", 1);
         assert_eq!(result2, IssueTitleResult::Found("Cached Title".to_string()));
+    }
+
+    #[test]
+    fn test_github_issue_window_name_basic() {
+        let issue = GitHubIssue::new(123, "ログイン時のエラーハンドリングを改善");
+        assert_eq!(
+            issue.window_name(),
+            "issue-123_ログイン時のエラーハンドリングを改善"
+        );
+    }
+
+    #[test]
+    fn test_github_issue_window_name_sanitizes_dot() {
+        let issue = GitHubIssue::new(1, "fix v2.0.1 bug");
+        let name = issue.window_name();
+        assert!(!name.contains('.'));
+        assert_eq!(name, "issue-1_fix v2_0_1 bug");
+    }
+
+    #[test]
+    fn test_github_issue_window_name_sanitizes_colon() {
+        let issue = GitHubIssue::new(2, "feat: add feature");
+        let name = issue.window_name();
+        assert!(!name.contains(':'));
+        assert_eq!(name, "issue-2_feat add feature");
+    }
+
+    #[test]
+    fn test_github_issue_window_name_truncates_long_title() {
+        let long_title = "a".repeat(200);
+        let issue = GitHubIssue::new(42, long_title);
+        let name = issue.window_name();
+        // Total window name should not exceed 100 characters
+        assert!(name.chars().count() <= 100);
+        assert!(name.ends_with("..."));
+    }
+
+    #[test]
+    fn test_github_issue_window_name_empty_title() {
+        let issue = GitHubIssue::new(99, "");
+        assert_eq!(issue.window_name(), "issue-99");
     }
 
     #[test]

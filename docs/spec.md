@@ -18,7 +18,7 @@ Viveは、複数のGit Worktree、Tmuxウィンドウ（プロジェクトセッ
 - [ ] **Auto-Discovery**: `git worktree list` を解析し、既存のワークツリーを「タスク」として自動検出する。
 - [x] **Create Task**: Vive上から直接 `git worktree add` を実行し、新しいタスク（ブランチ）を作成する。
     - **Manual**: ブランチ名を手動入力する。
-    - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`issue-{番号}` 形式でブランチを自動生成する。
+    - **Pick from Issue**: GitHub Issueリストからタスクを選択し、`issue-{番号}` 形式でブランチを自動生成する。Tmux window名は `issue-{番号}_{Issueタイトル}` 形式になる（タイトルはサニタイズ・100文字制限付き）。
         - **Batch Creation**: Spaceキーで複数Issueを選択し、Enterキーで一括作成が可能。
         - 選択されたIssueは `[x]` チェックボックスで表示され、選択件数がモーダル上部に表示される。
         - 一部のタスク作成に失敗しても処理は継続し、完了後にサマリー（成功/失敗件数）を表示する。
