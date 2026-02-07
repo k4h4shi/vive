@@ -787,8 +787,11 @@ where
             })
             .collect();
 
-        // Resolve actual tmux targets using find_window_by_branch
-        let mut targets_to_check: Vec<String> = Vec::new();
+        // Resolve actual tmux targets using find_window_by_branch.
+        // We store (capture_target, status_key) pairs: capture_target uses the
+        // actual window name for tmux commands, while status_key uses
+        // session:branch so the UI can look up status via worktree.tmux_target().
+        let mut targets_to_check: Vec<(String, String)> = Vec::new();
         for (session_name, branches) in &project_branches {
             // Fetch window list once per session for efficiency
             let windows = match self.tmux.list_windows(session_name) {
@@ -806,28 +809,31 @@ where
                     })
                     .map(|w| w.name.clone());
                 if let Some(window_name) = actual_name {
-                    targets_to_check.push(format!("{session_name}:{window_name}"));
+                    let capture_target = format!("{session_name}:{window_name}");
+                    // Status key always uses session:branch for UI consistency
+                    let status_key = format!("{session_name}:{branch}");
+                    targets_to_check.push((capture_target, status_key));
                 }
             }
         }
 
-        for target in targets_to_check {
+        for (capture_target, status_key) in targets_to_check {
             // Capture a small amount of content for status detection (faster)
-            if let Ok(content) = self.tmux.capture_pane(&target, 30) {
+            if let Ok(content) = self.tmux.capture_pane(&capture_target, 30) {
                 let parsed = parser::parse_status(&content);
                 let raw_status = state::AgentStatus::from_parsed(&parsed);
 
                 // Get pane title and combine with parsed status
-                let pane_title = self.tmux.get_pane_title(&target).ok().flatten();
+                let pane_title = self.tmux.get_pane_title(&capture_target).ok().flatten();
                 let title_combined =
                     monitor::combine_status_with_title(raw_status, pane_title.as_deref());
 
-                // Apply hysteresis to smooth out transitions
+                // Apply hysteresis using status_key for consistent tracking
                 let final_status = self
                     .status_monitor
-                    .apply_hysteresis(&target, title_combined);
+                    .apply_hysteresis(&status_key, title_combined);
 
-                self.state.set_status(target, final_status);
+                self.state.set_status(status_key, final_status);
             }
         }
     }

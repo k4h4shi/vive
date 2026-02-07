@@ -197,16 +197,26 @@ fn handle_worktree_attach<W: Write>(
         });
 
     let session_name = project_name.to_string();
-    if let Some((window_name, worktree_path)) = window_info {
+    if let Some((branch_name, worktree_path)) = window_info {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
+
+        // Resolve actual window name: issue-created windows may have a title
+        // suffix (e.g., "issue-123_Fix bug") while branch_name is just "issue-123".
+        let actual_window_name = app
+            .tmux
+            .find_window_by_branch(&session_name, &branch_name)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| branch_name.clone());
+
         let _ = app.tmux.ensure_session_with_window(
             &session_name,
-            &window_name,
+            &actual_window_name,
             Some(&worktree_path_str),
             None,
         );
 
-        let target = format!("{session_name}:{window_name}");
+        let target = format!("{session_name}:{actual_window_name}");
         execute_launch(app, config, &target, Some(&worktree_path_str), key)?;
     } else {
         let project_path = project.path.to_string_lossy().to_string();
