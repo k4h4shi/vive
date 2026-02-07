@@ -396,6 +396,7 @@ where
 
             Action::CreateTaskFromIssue(issue, auto_kickstart) => {
                 let branch_name = issue.branch_name();
+                let window_name = issue.window_name();
                 // Reuse the CreateTask logic
                 if let Some(project) = self.state.selected_project().cloned() {
                     let worktree_path = project.path.join(".worktrees").join(&branch_name);
@@ -431,7 +432,6 @@ where
 
                             // Ensure project session and window exist
                             let session_name = project.name.clone();
-                            let window_name = branch_name.clone();
                             let worktree_path_str = worktree_path.to_string_lossy();
                             let _ = self.tmux.create_project_window(
                                 &session_name,
@@ -493,6 +493,7 @@ where
 
                     for issue in &issues {
                         let branch_name = issue.branch_name();
+                        let window_name = issue.window_name();
                         let worktree_path = project.path.join(".worktrees").join(&branch_name);
 
                         let output = std::process::Command::new("git")
@@ -510,7 +511,6 @@ where
                             Ok(output) if output.status.success() => {
                                 // Ensure project session and window exist
                                 let session_name = project.name.clone();
-                                let window_name = branch_name.clone();
                                 let worktree_path_str = worktree_path.to_string_lossy();
                                 let _ = self.tmux.create_project_window(
                                     &session_name,
@@ -574,14 +574,13 @@ where
 
             Action::DeleteTask(branch_name) => {
                 if let Some(project) = self.state.selected_project().cloned() {
-                    // Kill tmux session if it exists
+                    // Kill tmux window if it exists (supports branch_title window names)
                     let session_name = project.name.clone();
-                    if self
+                    if let Ok(Some(actual_window_name)) = self
                         .tmux
-                        .has_window(&session_name, &branch_name)
-                        .unwrap_or(false)
+                        .find_window_by_branch(&session_name, &branch_name)
                     {
-                        let _ = self.tmux.kill_window(&session_name, &branch_name);
+                        let _ = self.tmux.kill_window(&session_name, &actual_window_name);
                     }
 
                     // Try to remove worktree (may fail if worktree doesn't exist)
@@ -703,12 +702,11 @@ where
         if let (Some(project), Some(worktree)) = (
             self.state.selected_project(),
             self.state.selected_worktree(),
-        ) && let Some(window_name) = worktree.window_name()
-            && self
+        ) && let Some(branch_name) = worktree.window_name()
+            && let Ok(Some(actual_window_name)) = self
                 .tmux
-                .has_window(&project.name, &window_name)
-                .unwrap_or(false)
-            && let Some(target) = worktree.tmux_target(&project.name)
+                .find_window_by_branch(&project.name, &branch_name)
+            && let target = format!("{}:{}", project.name, actual_window_name)
             && let Ok(content) = self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
         {
             // Parse the content to detect agent status
@@ -746,20 +744,18 @@ where
                 let Some(branch) = &worktree.branch else {
                     continue;
                 };
-                if let Some(target) = worktree.tmux_target(&project.name) {
-                    // Check if the worktree window exists before capturing
-                    #[allow(clippy::collapsible_if)]
-                    if self.tmux.has_window(&project.name, branch).unwrap_or(false) {
-                        if let Ok(content) = self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES)
-                        {
-                            pane_contents.push((branch.clone(), content.clone()));
-                            if !combined_preview.is_empty() {
-                                combined_preview.push_str("\n--- ");
-                                combined_preview.push_str(branch);
-                                combined_preview.push_str(" ---\n");
-                            }
-                            combined_preview.push_str(&content);
+                if let Ok(Some(actual_window_name)) =
+                    self.tmux.find_window_by_branch(&project.name, branch)
+                {
+                    let target = format!("{}:{}", project.name, actual_window_name);
+                    if let Ok(content) = self.tmux.capture_pane(&target, DEFAULT_PREVIEW_LINES) {
+                        pane_contents.push((branch.clone(), content.clone()));
+                        if !combined_preview.is_empty() {
+                            combined_preview.push_str("\n--- ");
+                            combined_preview.push_str(branch);
+                            combined_preview.push_str(" ---\n");
                         }
+                        combined_preview.push_str(&content);
                     }
                 }
             }
@@ -778,25 +774,46 @@ where
     /// Update status for all sessions that have tmux sessions.
     /// This allows status indicators to update even for non-selected items.
     pub fn update_all_statuses(&mut self) {
-        // Collect session info to avoid borrow conflicts
-        let targets_to_check: Vec<String> = self
+        // Collect (session, branch) pairs to resolve actual window names
+        let project_branches: Vec<(String, Vec<String>)> = self
             .state
             .projects
             .iter()
-            .flat_map(|project| {
-                project
+            .map(|project| {
+                let branches: Vec<String> = project
                     .worktrees
                     .iter()
-                    .filter_map(|worktree| worktree.tmux_target(&project.name))
+                    .filter_map(|wt| wt.branch.clone())
+                    .collect();
+                (project.name.clone(), branches)
             })
             .collect();
 
-        for target in targets_to_check {
-            // Skip if target doesn't exist
-            if self.tmux.capture_pane(&target, 1).is_err() {
-                continue;
+        // Resolve actual tmux targets using find_window_by_branch
+        let mut targets_to_check: Vec<String> = Vec::new();
+        for (session_name, branches) in &project_branches {
+            // Fetch window list once per session for efficiency
+            let windows = match self.tmux.list_windows(session_name) {
+                Ok(w) => w,
+                Err(_) => continue,
+            };
+            for branch in branches {
+                // Find matching window: exact match or prefix match
+                let actual_name = windows
+                    .iter()
+                    .find(|w| w.name == *branch)
+                    .or_else(|| {
+                        let prefix = format!("{branch}_");
+                        windows.iter().find(|w| w.name.starts_with(&prefix))
+                    })
+                    .map(|w| w.name.clone());
+                if let Some(window_name) = actual_name {
+                    targets_to_check.push(format!("{session_name}:{window_name}"));
+                }
             }
+        }
 
+        for target in targets_to_check {
             // Capture a small amount of content for status detection (faster)
             if let Ok(content) = self.tmux.capture_pane(&target, 30) {
                 let parsed = parser::parse_status(&content);

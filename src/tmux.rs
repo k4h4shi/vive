@@ -434,6 +434,28 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
         Ok(windows.iter().any(|w| w.name == window_name))
     }
 
+    /// Find a window whose name matches or starts with the given branch name.
+    ///
+    /// This supports the `branch_name_issue_title` window naming convention:
+    /// a branch `issue-123` will match a window named `issue-123_Fix login bug`.
+    /// Returns the full window name if found.
+    pub fn find_window_by_branch(
+        &self,
+        session_name: &str,
+        branch_name: &str,
+    ) -> Result<Option<String>> {
+        let windows = self.list_windows(session_name)?;
+        // Prefer exact match, then prefix match with underscore separator
+        if let Some(w) = windows.iter().find(|w| w.name == branch_name) {
+            return Ok(Some(w.name.clone()));
+        }
+        let prefix = format!("{branch_name}_");
+        Ok(windows
+            .iter()
+            .find(|w| w.name.starts_with(&prefix))
+            .map(|w| w.name.clone()))
+    }
+
     /// Kill a window in a session.
     pub fn kill_window(&self, session_name: &str, window_name: &str) -> Result<()> {
         let target = format!("{session_name}:{window_name}");
@@ -1214,6 +1236,48 @@ mod tests {
         let orchestrator = TmuxOrchestrator::with_executor(mock);
         assert!(orchestrator.has_window("my-session", "issue-123").unwrap());
         assert!(!orchestrator.has_window("my-session", "issue-999").unwrap());
+    }
+
+    #[test]
+    fn test_find_window_by_branch_exact_match() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("0:main:1\n1:issue-123:0\n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator
+            .find_window_by_branch("my-session", "issue-123")
+            .unwrap();
+        assert_eq!(result, Some("issue-123".to_string()));
+    }
+
+    #[test]
+    fn test_find_window_by_branch_prefix_match() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute().returning(|_| {
+            Ok(mock_success(
+                "0:main:1\n1:issue-123_Fix login bug:0\n",
+            ))
+        });
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator
+            .find_window_by_branch("my-session", "issue-123")
+            .unwrap();
+        assert_eq!(result, Some("issue-123_Fix login bug".to_string()));
+    }
+
+    #[test]
+    fn test_find_window_by_branch_not_found() {
+        let mut mock = MockTmuxExecutor::new();
+        mock.expect_execute()
+            .returning(|_| Ok(mock_success("0:main:1\n1:issue-456:0\n")));
+
+        let orchestrator = TmuxOrchestrator::with_executor(mock);
+        let result = orchestrator
+            .find_window_by_branch("my-session", "issue-123")
+            .unwrap();
+        assert_eq!(result, None);
     }
 
     #[test]
