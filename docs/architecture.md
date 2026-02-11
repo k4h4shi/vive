@@ -43,7 +43,7 @@ Viveは大きく分けて「情報の収集(Input)」「表示(View)」「操作
 | 作成方法 | Window名の形式 | 例 |
 | :--- | :--- | :--- |
 | **Manual** | `ブランチ名` | `feature/my-branch` |
-| **Pick from Issue** | `ブランチ名_Issueタイトル` | `issue-123_ログイン時のエラーハンドリングを改善` |
+| **Pick from Issue** | `ブランチ名` | `issue-123` |
 
 #### サニタイズルール
 
@@ -61,7 +61,7 @@ Issueタイトルはtmux window名として安全に使えるよう以下の変�
 #### Window検索
 
 Window名にIssueタイトルが含まれるため、ブランチ名による検索には**プレフィックスマッチ**を使用します。
-例えば、ブランチ名 `issue-123` は `issue-123_Fix login bug` にマッチします。
+後方互換のため、過去に作成された window が `issue-123_Fix login bug` のようにブランチ名にサフィックスを持つ場合でも、ブランチ名 `issue-123` から prefix match で解決できます。
 
 ### 3. 操作 (Orchestrator)
 ユーザーの操作を具体的なシステムコマンドに変換して実行します。

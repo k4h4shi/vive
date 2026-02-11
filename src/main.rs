@@ -200,7 +200,7 @@ fn handle_worktree_attach<W: Write>(
     if let Some((branch_name, worktree_path)) = window_info {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
 
-        // Resolve actual window name: issue-created windows may have a title
+        // Resolve actual window name: legacy issue-created windows may have a title
         // suffix (e.g., "issue-123_Fix bug") while branch_name is just "issue-123".
         let actual_window_name = app
             .tmux
