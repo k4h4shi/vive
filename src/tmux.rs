@@ -436,8 +436,9 @@ impl<E: TmuxExecutor> TmuxOrchestrator<E> {
 
     /// Find a window whose name matches or starts with the given branch name.
     ///
-    /// This supports legacy `branch_name_issue_title` window naming convention:
-    /// a branch `issue-123` may match a window named `issue-123_Fix login bug`.
+    /// Exact match is the primary lookup (`branch_name`).
+    /// Prefix match with `branch_name_` is kept for backward compatibility with
+    /// legacy window names (e.g., `issue-123_Fix login bug`).
     /// Returns the full window name if found.
     pub fn find_window_by_branch(
         &self,

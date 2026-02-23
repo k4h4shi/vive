@@ -215,7 +215,8 @@ impl GitHubIssue {
     ///
     /// Note: Older versions used `branch_name_sanitized_title` (e.g. `issue-123_Fix bug`).
     /// We keep compatibility for those existing windows when attaching/killing by
-    /// resolving the actual window name via prefix match in `TmuxOrchestrator::find_window_by_branch`.
+    /// resolving the actual window name via prefix match in
+    /// `TmuxOrchestrator::find_window_by_branch`.
     pub fn window_name(&self) -> String {
         self.branch_name()
     }
@@ -439,6 +440,12 @@ mod tests {
     fn test_github_issue_window_name_basic() {
         let issue = GitHubIssue::new(123, "ログイン時のエラーハンドリングを改善");
         assert_eq!(issue.window_name(), "issue-123");
+    }
+
+    #[test]
+    fn test_github_issue_window_name_ignores_title() {
+        let issue = GitHubIssue::new(42, "feat: add v2.0.1 support\nand docs");
+        assert_eq!(issue.window_name(), "issue-42");
     }
 
     #[test]
